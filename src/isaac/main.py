@@ -4,7 +4,6 @@ import logging
 import os
 import uuid
 from pathlib import Path
-from typing import Any
 
 from acp import (
     Agent,
@@ -28,7 +27,7 @@ from acp import (
     update_agent_message,
     PROTOCOL_VERSION,
 )
-from acp.schema import AgentCapabilities, AgentMessageChunk, Implementation
+from acp.schema import AgentCapabilities, Implementation
 
 from pydantic_ai import Agent as PydanticAgent
 from pydantic_ai.result import StreamedRunResult
@@ -40,14 +39,21 @@ BASE_URL = "https://api.cerebras.ai/v1"
 MODEL_NAME = "qwen-3-235b-a22b-instruct-2507"
 
 
-async def run_simple_agent(agent: PydanticAgent):
+model = OpenAIChatModel(
+    MODEL_NAME,
+    provider=OpenAIProvider(base_url=BASE_URL, api_key=CEREBRAS_API_KEY),
+)
+pydantic_agent = PydanticAgent(model)
+
+
+async def run_simple_agent():
     """A minimal interactive mode using basic stdin/stdout."""
     while True:
         try:
             prompt = input(">>> ")
             if prompt.lower() in ["exit", "quit"]:
                 break
-            response: StreamedRunResult = await agent.run(prompt)
+            response: StreamedRunResult = await pydantic_agent.run(prompt)
             if response and response.output:
                 print(response.output)
         except (EOFError, KeyboardInterrupt):
@@ -68,8 +74,8 @@ def setup_acp_logging():
 
     logging.basicConfig(
         level=logging.DEBUG,
-        format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-        handlers=[logging.FileHandler(log_file)]
+        format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+        handlers=[logging.FileHandler(log_file)],
     )
 
     logger = logging.getLogger("acp_server")
@@ -80,9 +86,8 @@ logger = logging.getLogger("acp_server")
 
 
 class ACPAgent(Agent):
-    def __init__(self, conn: AgentSideConnection, agent: PydanticAgent) -> None:
+    def __init__(self, conn: AgentSideConnection) -> None:
         self._conn = conn
-        self.agent = agent
         self._sessions: set[str] = set()
 
     async def initialize(self, params: InitializeRequest) -> InitializeResponse:
@@ -90,14 +95,10 @@ class ACPAgent(Agent):
         return InitializeResponse(
             protocolVersion=PROTOCOL_VERSION,
             agentCapabilities=AgentCapabilities(),
-            agentInfo=Implementation(
-                name="example-agent", title="Example Agent", version="0.1.0"
-            ),
+            agentInfo=Implementation(name="example-agent", title="Example Agent", version="0.1.0"),
         )
 
-    async def authenticate(
-        self, params: AuthenticateRequest
-    ) -> AuthenticateResponse | None:
+    async def authenticate(self, params: AuthenticateRequest) -> AuthenticateResponse | None:
         logger.info("Received authenticate request %s", params.methodId)
         return AuthenticateResponse()
 
@@ -107,16 +108,12 @@ class ACPAgent(Agent):
         self._sessions.add(session_id)
         return NewSessionResponse(sessionId=session_id, modes=None)
 
-    async def loadSession(
-        self, params: LoadSessionRequest
-    ) -> LoadSessionResponse | None:
+    async def loadSession(self, params: LoadSessionRequest) -> LoadSessionResponse | None:
         logger.info("Received load session request %s", params.sessionId)
         self._sessions.add(params.sessionId)
         return LoadSessionResponse()
 
-    async def setSessionMode(
-        self, params: SetSessionModeRequest
-    ) -> SetSessionModeResponse | None:
+    async def setSessionMode(self, params: SetSessionModeRequest) -> SetSessionModeResponse | None:
         logger.info(
             "Received set session mode request %s -> %s",
             params.sessionId,
@@ -139,7 +136,7 @@ class ACPAgent(Agent):
 
         try:
             logger.info(f"Running agent with prompt: '{prompt_text}'")
-            response: StreamedRunResult = await self.agent.run(prompt_text)
+            response: StreamedRunResult = await pydantic_agent.run(prompt_text)
             logger.info(f"Agent finished running. Response: '{response.output}'")
             if response and response.output:
                 await self._conn.sessionUpdate(
@@ -157,13 +154,13 @@ class ACPAgent(Agent):
         logger.info("Received cancel notification for session %s", params.sessionId)
 
 
-async def run_acp_agent(agent: PydanticAgent):
+async def run_acp_agent():
     """Run the ACP server."""
     setup_acp_logging()
     logger.info("Starting ACP server on stdio")
 
     reader, writer = await stdio_streams()
-    AgentSideConnection(lambda conn: ACPAgent(conn, agent), writer, reader)
+    AgentSideConnection(lambda conn: ACPAgent(conn), writer, reader)
     await asyncio.Event().wait()
 
 
@@ -172,16 +169,10 @@ async def main():
     parser.add_argument("--acp", action="store_true", help="Run in ACP mode")
     args = parser.parse_args()
 
-    model = OpenAIChatModel(
-        MODEL_NAME,
-        provider=OpenAIProvider(base_url=BASE_URL, api_key=CEREBRAS_API_KEY),
-    )
-    agent = PydanticAgent(model)
-
     if args.acp:
-        await run_acp_agent(agent)
+        await run_acp_agent()
     else:
-        await run_simple_agent(agent)
+        await run_simple_agent()
 
 
 def main_entry():
