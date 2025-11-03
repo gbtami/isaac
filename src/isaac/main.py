@@ -200,8 +200,8 @@ async def run_acp_agent(agent: PydanticAgent):
     logger.info("Starting ACP server on stdio")
 
     reader, writer = await stdio_streams()
-    AgentSideConnection(lambda conn: ACPAgent(conn, agent), writer, reader)
-    await asyncio.Event().wait()
+    conn = AgentSideConnection(lambda conn: ACPAgent(conn, agent), writer, reader)
+    await conn.wait()
 
 
 async def main():
