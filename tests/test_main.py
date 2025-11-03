@@ -1,4 +1,3 @@
-import asyncio
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -11,31 +10,22 @@ from acp import (
     PROTOCOL_VERSION,
 )
 
-from isaac.main import ACPAgent, PydanticAgent, OpenAIChatModel, OpenAIProvider
+from isaac.main import ACPAgent
+
 
 # Mock PydanticAgent and its dependencies
 @pytest.fixture
 def mock_pydantic_agent():
-    with patch("isaac.main.PydanticAgent", autospec=True) as mock_agent:
+    with patch("isaac.main.pydantic_agent", autospec=True) as mock_agent:
         yield mock_agent
 
-@pytest.fixture
-def mock_openai_provider():
-    with patch("isaac.main.OpenAIProvider", autospec=True) as mock_provider:
-        yield mock_provider
-
-@pytest.fixture
-def mock_openai_chat_model():
-    with patch("isaac.main.OpenAIChatModel", autospec=True) as mock_model:
-        yield mock_model
 
 # Test ACPAgent methods
 @pytest.mark.asyncio
 async def test_acp_agent_initialize():
     """Test the initialize method of ACPAgent."""
     conn = AsyncMock(spec=AgentSideConnection)
-    pydantic_agent = MagicMock(spec=PydanticAgent)
-    agent = ACPAgent(conn, pydantic_agent)
+    agent = ACPAgent(conn)
 
     request = InitializeRequest(protocolVersion=PROTOCOL_VERSION)
     response = await agent.initialize(request)
@@ -43,12 +33,12 @@ async def test_acp_agent_initialize():
     assert response.protocolVersion == PROTOCOL_VERSION
     assert response.agentInfo.name == "example-agent"
 
+
 @pytest.mark.asyncio
 async def test_acp_agent_new_session():
     """Test the newSession method of ACPAgent."""
     conn = AsyncMock(spec=AgentSideConnection)
-    pydantic_agent = MagicMock(spec=PydanticAgent)
-    agent = ACPAgent(conn, pydantic_agent)
+    agent = ACPAgent(conn)
 
     request = NewSessionRequest(cwd="/", mcpServers=[])
     response = await agent.newSession(request)
@@ -56,29 +46,30 @@ async def test_acp_agent_new_session():
     assert response.sessionId is not None
     assert response.sessionId in agent._sessions
 
+
 @pytest.mark.asyncio
-async def test_acp_agent_prompt():
+async def test_acp_agent_prompt(mock_pydantic_agent: MagicMock):
     """Test the prompt method of ACPAgent."""
     conn = AsyncMock(spec=AgentSideConnection)
-    pydantic_agent = MagicMock(spec=PydanticAgent)
 
     # Mock the run method of the PydanticAgent
     mock_response = MagicMock()
     mock_response.output = "Test response"
-    pydantic_agent.run = AsyncMock(return_value=mock_response)
+    mock_pydantic_agent.run = AsyncMock(return_value=mock_response)
 
-    agent = ACPAgent(conn, pydantic_agent)
+    agent = ACPAgent(conn)
     session_id = "test-session"
     agent._sessions.add(session_id)
 
     request = PromptRequest(
-        sessionId=session_id, prompt=[text_block("Hello")],
+        sessionId=session_id,
+        prompt=[text_block("Hello")],
     )
 
     response = await agent.prompt(request)
 
     # Verify that the agent's run method was called with the correct prompt
-    pydantic_agent.run.assert_called_once_with("Hello")
+    mock_pydantic_agent.run.assert_called_once_with("Hello")
 
     # Verify that the sessionUpdate method was called with the correct response
     conn.sessionUpdate.assert_called_once()
@@ -86,11 +77,11 @@ async def test_acp_agent_prompt():
     # Verify the prompt response
     assert response.stopReason == "end_turn"
 
+
 @pytest.mark.asyncio
-async def test_acp_agent_consecutive_prompts():
+async def test_acp_agent_consecutive_prompts(mock_pydantic_agent: MagicMock):
     """Test that the agent can handle two consecutive prompts."""
     conn = AsyncMock(spec=AgentSideConnection)
-    pydantic_agent = MagicMock(spec=PydanticAgent)
 
     # Mock the run method to return different outputs for different inputs
     async def mock_run(prompt_text):
@@ -103,28 +94,30 @@ async def test_acp_agent_consecutive_prompts():
             mock_response.output = "Default response"
         return mock_response
 
-    pydantic_agent.run = AsyncMock(side_effect=mock_run)
+    mock_pydantic_agent.run = AsyncMock(side_effect=mock_run)
 
-    agent = ACPAgent(conn, pydantic_agent)
+    agent = ACPAgent(conn)
     session_id = "test-session-consecutive"
     agent._sessions.add(session_id)
 
     # First prompt
     request1 = PromptRequest(
-        sessionId=session_id, prompt=[text_block("First prompt")],
+        sessionId=session_id,
+        prompt=[text_block("First prompt")],
     )
     response1 = await agent.prompt(request1)
 
     # Second prompt
     request2 = PromptRequest(
-        sessionId=session_id, prompt=[text_block("Second prompt")],
+        sessionId=session_id,
+        prompt=[text_block("Second prompt")],
     )
     response2 = await agent.prompt(request2)
 
     # Verify run method calls
-    assert pydantic_agent.run.call_count == 2
-    pydantic_agent.run.assert_any_call("First prompt")
-    pydantic_agent.run.assert_any_call("Second prompt")
+    assert mock_pydantic_agent.run.call_count == 2
+    mock_pydantic_agent.run.assert_any_call("First prompt")
+    mock_pydantic_agent.run.assert_any_call("Second prompt")
 
     # Verify sessionUpdate calls
     assert conn.sessionUpdate.call_count == 2
