@@ -40,14 +40,14 @@ BASE_URL = "https://api.cerebras.ai/v1"
 MODEL_NAME = "qwen-3-235b-a22b-instruct-2507"
 
 
-def run_simple_agent(agent: PydanticAgent):
+async def run_simple_agent(agent: PydanticAgent):
     """A minimal interactive mode using basic stdin/stdout."""
     while True:
         try:
             prompt = input(">>> ")
             if prompt.lower() in ["exit", "quit"]:
                 break
-            response: StreamedRunResult = agent.run_sync(prompt)
+            response: StreamedRunResult = await agent.run(prompt)
             if response and response.output:
                 print(response.output)
         except (EOFError, KeyboardInterrupt):
@@ -181,7 +181,7 @@ async def main():
     if args.acp:
         await run_acp_agent(agent)
     else:
-        run_simple_agent(agent)
+        await run_simple_agent(agent)
 
 
 def main_entry():
