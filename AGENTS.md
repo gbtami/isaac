@@ -1,6 +1,10 @@
 # AGENTS.md
 
-This document provides instructions for agents working on the `isaac` codebase.
+## Project Overview
+isaac is an AI coding agent implementing the Agent Client Protocol and can be used with an ACP Client.
+It is built with:
+- **logic**: pydantic-ai
+- **communication**: agent-client-protocol-python
 
 ## Project Setup
 
