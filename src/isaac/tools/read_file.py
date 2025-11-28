@@ -19,22 +19,14 @@ async def read_file(
     """
     path = Path(file_path)
     if not path.exists():
-        return {
-            "content": None,
-            "num_tokens": 0,
-            "error": f"File '{file_path}' does not exist."
-        }
+        return {"content": None, "num_tokens": 0, "error": f"File '{file_path}' does not exist."}
 
     if not path.is_file():
-        return {
-            "content": None,
-            "num_tokens": 0,
-            "error": f"'{file_path}' is not a file."
-        }
+        return {"content": None, "num_tokens": 0, "error": f"'{file_path}' is not a file."}
 
     try:
         # Read full file
-        with open(path, 'r', encoding='utf-8') as f:
+        with open(path, "r", encoding="utf-8") as f:
             lines = f.readlines()
 
         # Handle line range
@@ -49,19 +41,11 @@ async def read_file(
         else:
             selected_lines = lines
 
-        content = ''.join(selected_lines)
+        content = "".join(selected_lines)
 
         # Estimate tokens (roughly 4 chars = 1 token)
         num_tokens = max(1, len(content) // 4)
 
-        return {
-            "content": content,
-            "num_tokens": num_tokens,
-            "error": None
-        }
+        return {"content": content, "num_tokens": num_tokens, "error": None}
     except Exception as e:
-        return {
-            "content": None,
-            "num_tokens": 0,
-            "error": f"Error reading file: {str(e)}"
-        }
+        return {"content": None, "num_tokens": 0, "error": f"Error reading file: {str(e)}"}

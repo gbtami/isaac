@@ -1,8 +1,4 @@
-from typing import List, Optional
 from pathlib import Path
-import os
-
-from pydantic_ai import Result
 
 
 async def list_files(
@@ -20,34 +16,24 @@ async def list_files(
     """
     path = Path(directory)
     if not path.exists():
-        return {
-            "content": None,
-            "error": f"Directory '{directory}' does not exist."
-        }
+        return {"content": None, "error": f"Directory '{directory}' does not exist."}
 
     if not path.is_dir():
-        return {
-            "content": None,
-            "error": f"'{directory}' is not a directory."
-        }
+        return {"content": None, "error": f"'{directory}' is not a directory."}
 
     try:
         if recursive:
             items = []
-            for item in path.rglob('*'):
-                item_type = 'dir' if item.is_dir() else 'file'
+            for item in path.rglob("*"):
+                item_type = "dir" if item.is_dir() else "file"
                 items.append(f"{item.relative_to(path)} [{item_type}]")
             result = "\n".join(sorted(items))
         else:
-            items = [f"{item.name} [{'dir' if item.is_dir() else 'file'}]" for item in path.iterdir()]
+            items = [
+                f"{item.name} [{'dir' if item.is_dir() else 'file'}]" for item in path.iterdir()
+            ]
             result = "\n".join(sorted(items))
 
-        return {
-            "content": result,
-            "error": None
-        }
+        return {"content": result, "error": None}
     except Exception as e:
-        return {
-            "content": None,
-            "error": f"Error listing directory: {str(e)}"
-        }
+        return {"content": None, "error": f"Error listing directory: {str(e)}"}

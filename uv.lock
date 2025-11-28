@@ -968,10 +968,11 @@ wheels = [
 
 [[package]]
 name = "isaac"
-version = "0.0.1"
+version = "0.1.0"
 source = { editable = "." }
 dependencies = [
     { name = "agent-client-protocol" },
+    { name = "prompt-toolkit" },
     { name = "pydantic-ai" },
 ]
 
@@ -985,6 +986,7 @@ test = [
 [package.metadata]
 requires-dist = [
     { name = "agent-client-protocol", specifier = "==0.6.3" },
+    { name = "prompt-toolkit", specifier = "==3.0.52" },
     { name = "pydantic-ai", specifier = "==1.24.0" },
     { name = "pytest", marker = "extra == 'test'" },
     { name = "pytest-asyncio", marker = "extra == 'test'" },
