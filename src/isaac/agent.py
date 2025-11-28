@@ -21,18 +21,25 @@ from acp import (
     PromptResponse,
     SetSessionModeRequest,
     SetSessionModeResponse,
+    ToolCall,
     session_notification,
     stdio_streams,
     text_block,
+    tool_result,
     update_agent_message,
     PROTOCOL_VERSION,
 )
-from acp.schema import AgentCapabilities, Implementation
+from acp.schema import AgentCapabilities, Implementation, Tool, ToolParameter, ToolCall
 
 from pydantic_ai import Agent as PydanticAgent
 from pydantic_ai.result import StreamedRunResult
 from pydantic_ai.models.openai import OpenAIChatModel
 from pydantic_ai.providers.openai import OpenAIProvider
+
+# Import tools
+from .tools.list_directory import list_files
+from .tools.read_file import read_file
+from .tools import get_tools
 
 CEREBRAS_API_KEY = os.getenv("CEREBRAS_API_KEY")
 BASE_URL = "https://api.cerebras.ai/v1"
@@ -45,6 +52,16 @@ model = OpenAIChatModel(
 )
 pydantic_agent = PydanticAgent(model)
 
+# Register tools with the agent
+@pydantic_agent.tool()
+def tool_list_files(directory: str = ".", recursive: bool = True):
+    """List files in a directory."""
+    return list_files(directory, recursive)
+
+@pydantic_agent.tool()
+def tool_read_file(file_path: str, start_line: int = None, num_lines: int = None):
+    """Read a file with optional line range."""
+    return read_file(file_path, start_line, num_lines)
 
 async def run_simple_agent():
     """A minimal interactive mode using basic stdin/stdout."""
@@ -94,8 +111,8 @@ class ACPAgent(Agent):
         logger.info("Received initialize request")
         return InitializeResponse(
             protocolVersion=PROTOCOL_VERSION,
-            agentCapabilities=AgentCapabilities(),
-            agentInfo=Implementation(name="example-agent", title="Example Agent", version="0.1.0"),
+            agentCapabilities=AgentCapabilities(tools=get_tools()),
+            agentInfo=Implementation(name="isaac", title="Isaac ACP Agent", version="0.1.0"),
         )
 
     async def authenticate(self, params: AuthenticateRequest) -> AuthenticateResponse | None:
@@ -124,6 +141,44 @@ class ACPAgent(Agent):
     async def prompt(self, params: PromptRequest) -> PromptResponse:
         """Handles a new prompt from the client."""
         logger.info(f"Received prompt request for session: {params.sessionId}")
+        
+        # First, check if there are any tool calls in the prompt history
+        for block in params.prompt:
+            if hasattr(block, 'toolCall') and block.toolCall:
+                tool_call = block.toolCall
+                function_name = tool_call.function
+                arguments = tool_call.arguments or {}
+                
+                logger.info(f"Handling tool call: {function_name} with args: {arguments}")
+                
+                # Dispatch to appropriate tool
+                if function_name == "tool_list_files":
+                    result = await list_files(
+                        directory=arguments.get("directory", "."),
+                        recursive=arguments.get("recursive", True)
+                    )
+                elif function_name == "tool_read_file":
+                    result = await read_file(
+                        file_path=arguments.get("file_path"),
+                        start_line=arguments.get("start_line"),
+                        num_lines=arguments.get("num_lines")
+                    )
+                else:
+                    error_msg = f"Unknown tool function: {function_name}"
+                    logger.error(error_msg)
+                    result = {"error": error_msg, "content": None}
+                
+                # Send tool result back to client
+                await self._conn.sessionUpdate(
+                    session_notification(
+                        params.sessionId,
+                        tool_result(tool_call_id=tool_call.toolCallId, content=result)
+                    )
+                )
+                
+                return PromptResponse(stopReason="tool_calls")
+        
+        # If no tool calls, process as normal text prompt
         prompt_text = "".join(
             block.text
             for block in params.prompt
