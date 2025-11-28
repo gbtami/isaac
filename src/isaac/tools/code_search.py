@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import asyncio
+import fnmatch
+import re
 from pathlib import Path
 from typing import Optional
 
@@ -12,7 +14,7 @@ async def code_search(
     case_sensitive: bool = True,
     timeout: Optional[float] = None,
 ) -> dict:
-    """Search for a pattern in code using ripgrep."""
+    """Search for a pattern in code using ripgrep with a Python fallback."""
     path = Path(directory or ".")
     if not path.exists():
         return {
@@ -36,19 +38,31 @@ async def code_search(
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
         )
-    except FileNotFoundError:
-        return {"content": None, "error": "rg (ripgrep) is not installed", "returncode": -1}
-    except Exception as exc:  # pragma: no cover - unexpected spawn errors
-        return {"content": None, "error": str(exc), "returncode": -1}
-
-    try:
         stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=timeout)
+        stdout_text = stdout.decode() if stdout else ""
+        stderr_text = stderr.decode() if stderr else ""
+        error_text = stderr_text or None
+        return {"content": stdout_text, "error": error_text, "returncode": proc.returncode}
+    except FileNotFoundError:
+        matches = []
+        flags = 0 if case_sensitive else re.IGNORECASE
+        regex = re.compile(pattern, flags)
+        for file in path.rglob("*"):
+            if not file.is_file():
+                continue
+            if glob and not fnmatch.fnmatch(file.name, glob):
+                continue
+            try:
+                for idx, line in enumerate(file.read_text(encoding="utf-8", errors="ignore").splitlines(), start=1):
+                    if regex.search(line):
+                        rel = file.relative_to(path)
+                        matches.append(f"{rel}:{idx}:{line}")
+            except Exception:
+                continue
+        return {"content": "\n".join(matches), "error": None, "returncode": 0}
     except asyncio.TimeoutError:
         proc.kill()
         await proc.communicate()
         return {"content": None, "error": f"Search timed out after {timeout}s", "returncode": -1}
-
-    stdout_text = stdout.decode() if stdout else ""
-    stderr_text = stderr.decode() if stderr else ""
-    error_text = stderr_text or None
-    return {"content": stdout_text, "error": error_text, "returncode": proc.returncode}
+    except Exception as exc:  # pragma: no cover - unexpected spawn errors
+        return {"content": None, "error": str(exc), "returncode": -1}
