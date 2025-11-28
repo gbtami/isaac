@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from typing import Any, Dict
 
+from prompt_toolkit import PromptSession  # type: ignore
+from prompt_toolkit.key_binding import KeyBindings  # type: ignore
 from prompt_toolkit.shortcuts import radiolist_dialog  # type: ignore
 
 from isaac import models as model_registry
@@ -36,10 +38,21 @@ async def run_cli():
     current_mode = "ask"
     mode_ids = {m["id"] for m in available_modes()}
     approved_commands: set[str] = set()
+    kb = KeyBindings()
+    CANCEL_TOKEN = "__CANCEL__"
+
+    @kb.add("escape")
+    def _(event):  # type: ignore
+        event.app.exit(result=CANCEL_TOKEN)
+
+    session = PromptSession("> ", key_bindings=kb)
 
     while True:
         try:
-            prompt = input(">>> ")
+            prompt = await session.prompt_async()
+            if prompt == CANCEL_TOKEN:
+                print("[cancelled]")
+                continue
             if prompt.lower() in ["exit", "quit"]:
                 break
             if prompt.strip() == "/test":

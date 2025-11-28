@@ -117,6 +117,7 @@ class ACPAgent(Agent):
         self._session_cwds: dict[str, Path] = {}
         self._terminals: Dict[str, TerminalState] = {}
         self._session_modes: Dict[str, str] = {}
+        self._cancel_events: Dict[str, asyncio.Event] = {}
         self._agent_name = agent_name
         self._agent_title = agent_title
         self._agent_version = agent_version
@@ -155,6 +156,7 @@ class ACPAgent(Agent):
         self._sessions.add(session_id)
         cwd = Path(params.cwd or Path.cwd())
         self._session_cwds[session_id] = cwd
+        self._cancel_events[session_id] = asyncio.Event()
         mode_state = build_mode_state(self._session_modes, session_id, current_mode="ask")
         return NewSessionResponse(sessionId=session_id, modes=mode_state)
 
@@ -162,6 +164,7 @@ class ACPAgent(Agent):
         logger.info("Received load session request %s", params.sessionId)
         self._sessions.add(params.sessionId)
         self._session_cwds[params.sessionId] = Path.cwd()
+        self._cancel_events.setdefault(params.sessionId, asyncio.Event())
         return LoadSessionResponse()
 
     async def setSessionMode(self, params: SetSessionModeRequest) -> SetSessionModeResponse | None:
@@ -175,6 +178,8 @@ class ACPAgent(Agent):
 
     async def prompt(self, params: PromptRequest) -> PromptResponse:
         logger.info("Received prompt request for session: %s", params.sessionId)
+        cancel_event = self._cancel_events.setdefault(params.sessionId, asyncio.Event())
+        cancel_event.clear()
 
         for block in params.prompt:
             tool_call = getattr(block, "toolCall", None)
@@ -221,7 +226,15 @@ class ACPAgent(Agent):
             await self._handle_tool_call(params.sessionId, tool_call)
             return PromptResponse(stopReason="end_turn")
 
-        response_text = await self._run_ai(prompt_text)
+        if cancel_event.is_set():
+            return PromptResponse(stopReason="cancelled")
+
+        response_text = await _await_with_cancel(
+            run_with_runner(self._ai_runner, prompt_text),
+            cancel_event,
+        )
+        if response_text is None:
+            return PromptResponse(stopReason="cancelled")
         await self._conn.sessionUpdate(
             session_notification(
                 params.sessionId,
@@ -232,6 +245,9 @@ class ACPAgent(Agent):
 
     async def cancel(self, params: CancelNotification) -> None:
         logger.info("Received cancel notification for session %s", params.sessionId)
+        event = self._cancel_events.get(params.sessionId)
+        if event:
+            event.set()
 
     async def _handle_tool_call(self, session_id: str, tool_call: Any) -> None:
         function_name = getattr(tool_call, "function", "")
@@ -263,7 +279,20 @@ class ACPAgent(Agent):
         )
         await self._conn.sessionUpdate(session_notification(session_id, start))
 
-        result: dict[str, Any] = await run_tool(tool_name, **(arguments or {}))
+        cancel_event = self._cancel_events.setdefault(session_id, asyncio.Event())
+        result: dict[str, Any] | None = await _await_with_cancel(
+            run_tool(tool_name, **(arguments or {})),
+            cancel_event,
+        )
+        if result is None:
+            progress = tracker.progress(
+                external_id=tool_call_id,
+                status="failed",
+                raw_output={"content": None, "error": "cancelled"},
+                content=[tool_content(text_block("Cancelled"))],
+            )
+            await self._conn.sessionUpdate(session_notification(session_id, progress))
+            return
 
         status = "completed" if not result.get("error") else "failed"
         summary = result.get("content") or result.get("error") or ""
@@ -370,6 +399,19 @@ def main_entry():
         asyncio.run(main())
     except KeyboardInterrupt:
         return 0
+
+
+async def _await_with_cancel(coro: Any, cancel_event: asyncio.Event) -> Any | None:
+    wait_task = asyncio.create_task(cancel_event.wait())
+    main_task = asyncio.create_task(coro)
+    done, pending = await asyncio.wait(
+        {main_task, wait_task},
+        return_when=asyncio.FIRST_COMPLETED,
+    )
+    if wait_task in done and cancel_event.is_set():
+        main_task.cancel()
+        return None
+    return main_task.result() if main_task in done else None
 
 
 def _extract_prompt_text(blocks: list[Any]) -> str:
