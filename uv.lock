@@ -974,6 +974,7 @@ dependencies = [
     { name = "agent-client-protocol" },
     { name = "prompt-toolkit" },
     { name = "pydantic-ai" },
+    { name = "python-dotenv" },
 ]
 
 [package.optional-dependencies]
@@ -990,6 +991,7 @@ requires-dist = [
     { name = "pydantic-ai", specifier = "==1.24.0" },
     { name = "pytest", marker = "extra == 'test'" },
     { name = "pytest-asyncio", marker = "extra == 'test'" },
+    { name = "python-dotenv" },
     { name = "ruff", marker = "extra == 'test'" },
 ]
 provides-extras = ["test"]

@@ -7,6 +7,7 @@ dependencies = [
     "agent-client-protocol==0.6.3",
     "pydantic-ai==1.24.0",
     "prompt-toolkit==3.0.52",
+    "python-dotenv",
 ]
 
 [project.scripts]

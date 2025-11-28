@@ -12,12 +12,11 @@ from __future__ import annotations
 import argparse
 import asyncio
 import logging
-import os
 import uuid
-from types import SimpleNamespace
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Callable, Dict
+from types import SimpleNamespace
+from typing import Any, Dict
 
 from acp import (
     Agent,
@@ -63,9 +62,9 @@ from acp.helpers import (
 from acp.schema import AgentCapabilities, Implementation
 from acp.schema import AllowedOutcome
 
-from .tools import get_tools, run_tool, parse_tool_request, TOOL_HANDLERS
-from .fs import read_text_file, write_text_file
-from .terminal import (
+from isaac.tools import get_tools, parse_tool_request, run_tool
+from isaac.fs import read_text_file, write_text_file
+from isaac.terminal import (
     TerminalState,
     create_terminal,
     terminal_output,
@@ -73,14 +72,15 @@ from .terminal import (
     kill_terminal,
     release_terminal,
 )
-from .planner import parse_plan_request, build_plan_notification
-from .session_modes import available_modes, build_mode_state
-from .slash import _run_pytest, handle_slash_command
+from isaac.planner import parse_plan_request, build_plan_notification
+from isaac.session_modes import build_mode_state
+from isaac.slash import handle_slash_command
+from isaac import models as model_registry
+from isaac.cli import run_cli
+from isaac.runner import register_tools, run_with_runner
 from acp.contrib.tool_calls import ToolCallTracker
 
 logger = logging.getLogger("acp_server")
-
-GOOGLE_API_KEY = "AIzaSyDapebATW5RB3RAL4TuN0i4PyughpUubUs"
 
 @dataclass
 class SimpleRunResult:
@@ -92,41 +92,14 @@ class SimpleAIRunner:
         return SimpleRunResult(output=f"Echo: {prompt}")
 
 
-def _build_pydantic_runner() -> Any | None:
-    try:
-        from pydantic_ai import Agent as PydanticAgent  # type: ignore
-        from pydantic_ai.models.openai import OpenAIChatModel  # type: ignore
-        from pydantic_ai.providers.openai import OpenAIProvider  # type: ignore
-    except Exception as exc:  # pragma: no cover
-        logger.warning("pydantic-ai unavailable, falling back to echo runner: %s", exc)
-        return None
-
-    api_key = os.getenv("CEREBRAS_API_KEY") or os.getenv("OPENAI_API_KEY")
-    if api_key:
-        base_url = os.getenv("OPENAI_BASE_URL") or "https://api.cerebras.ai/v1"
-        model_name = os.getenv("MODEL_NAME") or "qwen-3-235b-a22b-instruct-2507"
-        provider = OpenAIProvider(base_url=base_url, api_key=api_key)
-        model = OpenAIChatModel(model_name, provider=provider)
-        agent = PydanticAgent(model)
-    else:
-        agent = PydanticAgent("test")
-    print("ITT", agent)
-    for name in TOOL_HANDLERS.keys():
-
-        def _make_tool(fn_name: str):
-            @agent.tool_plain(name=fn_name)  # type: ignore[misc]
-            async def _wrapper(**kwargs: Any):
-                return await run_tool(fn_name, **kwargs)
-
-            return _wrapper
-
-        _make_tool(name)
-
-    return agent
-
-
 def create_default_runner() -> Any:
-    return _build_pydantic_runner() or SimpleAIRunner()
+    try:
+        config = model_registry.load_models_config()
+        current = config.get("current", "test")
+        return model_registry.build_agent(current, register_tools)
+    except Exception as exc:  # pragma: no cover - fallback when model creation fails
+        logger.warning("Falling back to simple runner: %s", exc)
+        return SimpleAIRunner()
 
 
 class ACPAgent(Agent):
@@ -232,6 +205,12 @@ class ACPAgent(Agent):
             await self._conn.sessionUpdate(build_plan_notification(params.sessionId, plan_request))
             return PromptResponse(stopReason="end_turn")
 
+        if prompt_text.startswith("/model"):
+            note = self._handle_model_command(params.sessionId, prompt_text)
+            if note:
+                await self._conn.sessionUpdate(note)
+            return PromptResponse(stopReason="end_turn")
+
         tool_request = parse_tool_request(prompt_text)
         if tool_request:
             tool_call = SimpleNamespace(
@@ -297,7 +276,31 @@ class ACPAgent(Agent):
         await self._conn.sessionUpdate(session_notification(session_id, progress))
 
     async def _run_ai(self, prompt_text: str) -> str:
-        return await _run_with_runner(self._ai_runner, prompt_text)
+        return await run_with_runner(self._ai_runner, prompt_text)
+
+    def _handle_model_command(self, session_id: str, prompt_text: str):
+        parts = prompt_text.split()
+        if len(parts) == 1:
+            models = model_registry.list_models()
+            current = model_registry.load_models_config().get("current", "test")
+            lines = [f"Current model: {current}", "Available:"]
+            for mid, meta in models.items():
+                desc = meta.get("description") or ""
+                lines.append(f"- {mid}: {desc}")
+            return session_notification(
+                session_id,
+                update_agent_message(text_block("\n".join(lines))),
+            )
+
+        model_id = parts[1]
+        try:
+            model_registry.set_current_model(model_id)
+            self._ai_runner = model_registry.build_agent(model_id, register_tools)
+            msg = f"Switched to model '{model_id}'."
+        except Exception as exc:
+            msg = f"Failed to switch model '{model_id}': {exc}"
+
+        return session_notification(session_id, update_agent_message(text_block(msg)))
 
     async def readTextFile(self, params: ReadTextFileRequest) -> ReadTextFileResponse:
         return await read_text_file(self._session_cwds, params)
@@ -359,65 +362,7 @@ async def main():
     if args.acp:
         await run_acp_agent()
     else:
-        runner = create_default_runner()
-        current_mode = "ask"
-        mode_ids = {m["id"] for m in available_modes()}
-        approved_commands: set[str] = set()
-
-        while True:
-            try:
-                prompt = input(">>> ")
-                if prompt.lower() in ["exit", "quit"]:
-                    break
-                if prompt.strip() == "/test":
-                    print(_run_pytest())
-                    continue
-
-                if prompt.startswith("/mode "):
-                    requested = prompt[len("/mode ") :].strip()
-                    if requested in mode_ids:
-                        current_mode = requested
-                        print(f"[mode set to {current_mode}]")
-                    else:
-                        print(
-                            f"[unknown mode: {requested}; available: {', '.join(sorted(mode_ids))}]"
-                        )
-                    continue
-
-                if current_mode == "reject":
-                    print("[request rejected in current mode]")
-                    continue
-                if current_mode == "request_permission":
-                    if prompt not in approved_commands:
-                        try:
-                            from prompt_toolkit.shortcuts import radiolist_dialog
-
-                            result = radiolist_dialog(
-                                title="Permission required",
-                                text=f"Command: {prompt}",
-                                values=[
-                                    ("y", "Yes, proceed"),
-                                    ("a", "Yes, and don't ask again for this command"),
-                                    ("esc", "No, and tell me what to do differently"),
-                                ],
-                            ).run()
-                        except Exception:
-                            resp = input(
-                                "Permission required. [y]es / [a]lways for this command / [esc] cancel: "
-                            ).strip()
-                            result = resp.lower()
-
-                        if result == "a":
-                            approved_commands.add(prompt)
-                        elif result not in {"y", "yes"}:
-                            print("[request cancelled] If you want me to proceed, allow the action.")
-                            continue
-
-                response_text = await _run_with_runner(runner, prompt)
-                print(response_text)
-            except (EOFError, KeyboardInterrupt):
-                break
-        print("\nExiting simple interactive agent.")
+        await run_cli()
 
 
 def main_entry():
@@ -425,27 +370,6 @@ def main_entry():
         asyncio.run(main())
     except KeyboardInterrupt:
         return 0
-
-
-async def _run_with_runner(runner: Any, prompt_text: str) -> str:
-    run_method: Callable[[str], Any] | None = getattr(runner, "run", None)
-    if not callable(run_method):
-        return "Hello, world!"
-
-    try:
-        result = run_method(prompt_text)
-        if asyncio.iscoroutine(result):
-            result = await result
-
-        output = getattr(result, "output", None)
-        if isinstance(output, str):
-            return output
-        if isinstance(result, str):
-            return result
-    except Exception as exc:  # pragma: no cover
-        logger.debug("AI runner failed, falling back to echo: %s", exc)
-
-    return "Hello, world!"
 
 
 if __name__ == "__main__":
