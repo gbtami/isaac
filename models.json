@@ -1,0 +1,39 @@
+{
+  "current": "google-gemini-2.5-pro",
+  "models": {
+    "test": {
+      "model": "test",
+      "description": "Deterministic local model for offline/testing"
+    },
+    "function-model": {
+      "model": "function:model",
+      "description": "In-process function model for deterministic testing"
+    },
+    "openai-gpt4o-mini": {
+      "provider": "openai",
+      "model": "gpt-4o-mini",
+      "description": "OpenAI GPT-4o mini"
+    },
+    "anthropic-claude-3-5-sonnet": {
+      "provider": "anthropic",
+      "model": "claude-3-5-sonnet-20240620",
+      "description": "Anthropic Claude 3.5 Sonnet"
+    },
+    "google-gemini-1.5-flash": {
+      "provider": "google",
+      "model": "gemini-1.5-flash",
+      "description": "Google Gemini 1.5 Flash"
+    },
+    "openrouter-gpt4o-mini": {
+      "provider": "openrouter",
+      "model": "openai/gpt-4o-mini",
+      "description": "OpenRouter proxy for GPT-4o mini"
+    },
+    "google-gemini-2.5-pro": {
+      "provider": "google",
+      "model": "gemini-2.5-pro",
+      "base_url": "https://generativelanguage.googleapis.com",
+      "description": "Google Gemini 2.5 Pro"
+    }
+  }
+}
