@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import asyncio
 from typing import Any, Dict
 
 from prompt_toolkit.shortcuts import radiolist_dialog  # type: ignore
@@ -11,7 +10,9 @@ from isaac.session_modes import available_modes
 from isaac.slash import _run_pytest
 
 
-def _select_model_cli(models: Dict[str, Any], current: str, selection_fallback: str | None = None) -> str | None:
+async def _select_model_cli(
+    models: Dict[str, Any], current: str, selection_fallback: str | None = None
+) -> str | None:
     if selection_fallback is not None:
         return selection_fallback
 
@@ -23,14 +24,8 @@ def _select_model_cli(models: Dict[str, Any], current: str, selection_fallback: 
     try:
         return dialog.run()
     except RuntimeError:
-        loop = asyncio.get_event_loop()
-        if loop.is_running():
-            tmp_loop = asyncio.new_event_loop()
-            try:
-                return tmp_loop.run_until_complete(dialog.run_async())
-            finally:
-                tmp_loop.close()
-        return loop.run_until_complete(dialog.run_async())
+        # In running event loop, await async dialog.
+        return await dialog.run_async()
 
 
 async def run_cli():
@@ -55,7 +50,7 @@ async def run_cli():
                 if len(parts) == 1:
                     models = model_registry.list_models()
                     current = model_registry.load_models_config().get("current", "test")
-                    selection = _select_model_cli(models, current)
+                    selection = await _select_model_cli(models, current)
 
                     if selection:
                         try:

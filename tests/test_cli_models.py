@@ -27,7 +27,7 @@ async def test_select_model_cli_uses_async_dialog_when_loop_running(monkeypatch)
         return await fake_run_async()
 
     with patch("prompt_toolkit.shortcuts.radiolist_dialog", return_value=FakeDialog()):
-        selection = _select_model_cli(models, current, selection_fallback="function-model")
+        selection = await _select_model_cli(models, current, selection_fallback="function-model")
         assert selection == "function-model"
 
 

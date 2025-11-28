@@ -12,6 +12,16 @@ from pathlib import Path
 from typing import Any, Callable, Dict
 
 from dotenv import load_dotenv
+from pydantic_ai import Agent as PydanticAgent  # type: ignore
+from pydantic_ai.models.anthropic import AnthropicModel  # type: ignore
+from pydantic_ai.models.function import FunctionModel  # type: ignore
+from pydantic_ai.models.google import GoogleModel  # type: ignore
+from pydantic_ai.models.openai import OpenAIChatModel  # type: ignore
+from pydantic_ai.models.openrouter import OpenRouterModel  # type: ignore
+from pydantic_ai.providers.anthropic import AnthropicProvider  # type: ignore
+from pydantic_ai.providers.google import GoogleProvider  # type: ignore
+from pydantic_ai.providers.openai import OpenAIProvider  # type: ignore
+from pydantic_ai.providers.openrouter import OpenRouterProvider  # type: ignore
 
 DEFAULT_CONFIG = {
     "current": "test",
@@ -27,21 +37,25 @@ DEFAULT_CONFIG = {
         "openai-gpt4o-mini": {
             "provider": "openai",
             "model": "gpt-4o-mini",
+            "base_url": "https://api.openai.com/v1",
             "description": "OpenAI GPT-4o mini",
         },
         "anthropic-claude-3-5-sonnet": {
             "provider": "anthropic",
             "model": "claude-3-5-sonnet-20240620",
+            "base_url": "https://api.anthropic.com",
             "description": "Anthropic Claude 3.5 Sonnet",
         },
-        "google-gemini-1.5-flash": {
+        "google-gemini-2.5-pro": {
             "provider": "google",
-            "model": "gemini-1.5-flash",
-            "description": "Google Gemini 1.5 Flash",
+            "model": "gemini-2.5-pro",
+            "base_url": "https://generativelanguage.googleapis.com",
+            "description": "Google Gemini 2.5 Pro",
         },
         "openrouter-gpt4o-mini": {
             "provider": "openrouter",
             "model": "openai/gpt-4o-mini",
+            "base_url": "https://openrouter.ai/api/v1",
             "description": "OpenRouter proxy for GPT-4o mini",
         },
     },
@@ -91,9 +105,6 @@ def _build_provider_model(model_entry: Dict[str, Any]) -> Any:
     api_key = model_entry.get("api_key")
 
     if provider == "openai" or str(model_spec).startswith("openai:"):
-        from pydantic_ai.models.openai import OpenAIChatModel  # type: ignore
-        from pydantic_ai.providers.openai import OpenAIProvider  # type: ignore
-
         key = api_key or os.getenv("OPENAI_API_KEY") or os.getenv("CEREBRAS_API_KEY")
         url = base_url or os.getenv("OPENAI_BASE_URL") or "https://api.openai.com/v1"
         model_name = str(model_spec).split(":", 1)[-1]
@@ -101,29 +112,20 @@ def _build_provider_model(model_entry: Dict[str, Any]) -> Any:
         return OpenAIChatModel(model_name, provider=provider_obj)
 
     if provider == "anthropic" or str(model_spec).startswith("anthropic:"):
-        from pydantic_ai.models.anthropic import AnthropicModel  # type: ignore
-        from pydantic_ai.providers.anthropic import AnthropicProvider  # type: ignore
-
         key = api_key or os.getenv("ANTHROPIC_API_KEY")
-        url = base_url or os.getenv("ANTHROPIC_BASE_URL")
+        url = base_url or os.getenv("ANTHROPIC_BASE_URL") or "https://api.anthropic.com"
         model_name = str(model_spec).split(":", 1)[-1]
         provider_obj = AnthropicProvider(api_key=key, base_url=url) if url else AnthropicProvider(api_key=key)
         return AnthropicModel(model_name, provider=provider_obj)
 
     if provider == "google" or str(model_spec).startswith("google:"):
-        from pydantic_ai.models.google import GoogleAIModel  # type: ignore
-        from pydantic_ai.providers.google import GoogleAIProvider  # type: ignore
-
         key = api_key or os.getenv("GOOGLE_API_KEY")
-        url = base_url or os.getenv("GOOGLE_API_BASE_URL")
+        url = base_url or os.getenv("GOOGLE_API_BASE_URL") or "https://generativelanguage.googleapis.com"
         model_name = str(model_spec).split(":", 1)[-1]
-        provider_obj = GoogleAIProvider(api_key=key, base_url=url) if url else GoogleAIProvider(api_key=key)
-        return GoogleAIModel(model_name, provider=provider_obj)
+        provider_obj = GoogleProvider(api_key=key, base_url=url) if url else GoogleProvider(api_key=key)
+        return GoogleModel(model_name, provider=provider_obj)
 
     if provider == "openrouter" or str(model_spec).startswith("openrouter:"):
-        from pydantic_ai.models.openrouter import OpenRouterModel  # type: ignore
-        from pydantic_ai.providers.openrouter import OpenRouterProvider  # type: ignore
-
         key = api_key or os.getenv("OPENROUTER_API_KEY")
         url = base_url or os.getenv("OPENROUTER_BASE_URL") or "https://openrouter.ai/api/v1"
         model_name = str(model_spec).split(":", 1)[-1]
@@ -131,8 +133,6 @@ def _build_provider_model(model_entry: Dict[str, Any]) -> Any:
         return OpenRouterModel(model_name, provider=provider_obj)
 
     if provider == "function" or str(model_spec).startswith("function:"):
-        from pydantic_ai.models.function import FunctionModel  # type: ignore
-
         return FunctionModel(lambda prompt: "function-model-response")
 
     # default to test or direct spec
@@ -142,11 +142,6 @@ def _build_provider_model(model_entry: Dict[str, Any]) -> Any:
 def build_agent(model_id: str, register_tools: Callable[[Any], None]) -> Any:
     """Build a pydantic-ai Agent for the given model id."""
     load_dotenv()
-    try:
-        from pydantic_ai import Agent as PydanticAgent  # type: ignore
-    except Exception as exc:  # pragma: no cover - dependency issues
-        raise RuntimeError(f"pydantic-ai unavailable: {exc}") from exc
-
     config = load_models_config()
     model_entry = config.get("models", {}).get(model_id) or DEFAULT_CONFIG["models"]["test"]
 
