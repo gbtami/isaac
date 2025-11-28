@@ -182,7 +182,7 @@ class ACPAgent(Agent):
                 await self._handle_tool_call(params.sessionId, tool_call)
                 return PromptResponse(stopReason="end_turn")
 
-        prompt_text = "".join(block.text for block in params.prompt if getattr(block, "text", None))
+        prompt_text = _extract_prompt_text(params.prompt)
 
         slash = handle_slash_command(params.sessionId, prompt_text)
         if slash:
@@ -370,6 +370,23 @@ def main_entry():
         asyncio.run(main())
     except KeyboardInterrupt:
         return 0
+
+
+def _extract_prompt_text(blocks: list[Any]) -> str:
+    parts: list[str] = []
+    for block in blocks:
+        text_val = getattr(block, "text", None)
+        if text_val:
+            parts.append(text_val)
+            continue
+        resource = getattr(block, "resource", None)
+        if resource and hasattr(resource, "text") and getattr(resource, "text", None):
+            parts.append(str(resource.text))
+            continue
+        uri = getattr(block, "uri", None)
+        if uri:
+            parts.append(f"[resource:{uri}]")
+    return "".join(parts)
 
 
 if __name__ == "__main__":
