@@ -3,8 +3,8 @@
 ## Project Overview
 isaac is an AI coding agent implementing the Agent Client Protocol and can be used with an ACP Client.
 It is built with:
-- **logic**: pydantic-ai
-- **communication**: agent-client-protocol-python
+- **logic**: pydantic-ai https://github.com/pydantic/pydantic-ai
+- **communication**: agent client protocol https://agentclientprotocol.com/overview/introduction via https://github.com/agentclientprotocol/python-sdk
 
 ## Project Setup
 
