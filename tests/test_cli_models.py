@@ -4,7 +4,7 @@ from unittest.mock import patch
 
 import pytest
 
-from isaac.cli import _select_model_cli
+from isaac.cli import _select_model_cli, _handle_mode_cli
 from isaac import models as model_registry
 
 
@@ -38,3 +38,23 @@ async def test_build_agent_function_model(monkeypatch):
     # ensure no exception when building function model
     agent_instance = model_registry.build_agent("function-model", lambda a: None)
     assert agent_instance is not None
+
+
+def test_handle_mode_cli_status_and_switch():
+    current = "ask"
+    mode_ids = {"ask", "code", "reject"}
+
+    handled, new_mode, message = _handle_mode_cli(current, mode_ids, "/mode")
+    assert handled is True
+    assert new_mode == current
+    assert "Current mode" in message
+
+    handled, new_mode, message = _handle_mode_cli(current, mode_ids, "/mode code")
+    assert handled is True
+    assert new_mode == "code"
+    assert "mode set" in message
+
+    handled, new_mode, message = _handle_mode_cli(current, mode_ids, "/mode unknown")
+    assert handled is True
+    assert new_mode == current
+    assert "unknown mode" in message

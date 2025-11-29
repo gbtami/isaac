@@ -30,11 +30,29 @@ async def _select_model_cli(
         return await dialog.run_async()
 
 
+def _handle_mode_cli(current_mode: str, mode_ids: set[str], prompt: str) -> tuple[bool, str, str]:
+    if prompt.strip() == "/mode":
+        available = ", ".join(sorted(mode_ids))
+        return True, current_mode, f"Current mode: {current_mode}. Available: {available}"
+
+    if prompt.startswith("/mode "):
+        requested = prompt[len("/mode ") :].strip()
+        if requested in mode_ids:
+            return True, requested, f"[mode set to {requested}]"
+        return True, current_mode, f"[unknown mode: {requested}; available: {', '.join(sorted(mode_ids))}]"
+
+    return False, current_mode, ""
+
+
 async def run_cli():
-    runner = model_registry.build_agent(
-        model_registry.load_models_config().get("current", "test"),
-        register_tools,
-    )
+    try:
+        runner = model_registry.build_agent(
+            model_registry.load_models_config().get("current", "function-model"),
+            register_tools,
+        )
+    except Exception:
+        runner = None
+
     current_mode = "ask"
     mode_ids = {m["id"] for m in available_modes()}
     approved_commands: set[str] = set()
@@ -62,8 +80,12 @@ async def run_cli():
                 parts = prompt.split()
                 if len(parts) == 1:
                     models = model_registry.list_models()
-                    current = model_registry.load_models_config().get("current", "test")
-                    selection = await _select_model_cli(models, current)
+                    current = model_registry.load_models_config().get("current", "function-model")
+                    try:
+                        selection = await _select_model_cli(models, current)
+                    except Exception as exc:  # pragma: no cover - dialog failures
+                        print(f"[failed to open model selector: {exc}]")
+                        selection = None
 
                     if selection:
                         try:
@@ -82,21 +104,19 @@ async def run_cli():
                         print(f"[failed to switch model: {exc}]")
                 continue
 
-            if prompt.startswith("/mode "):
-                requested = prompt[len("/mode ") :].strip()
-                if requested in mode_ids:
-                    current_mode = requested
-                    print(f"[mode set to {current_mode}]")
-                else:
-                    print(f"[unknown mode: {requested}; available: {', '.join(sorted(mode_ids))}]")
-                continue
+            if prompt.strip().startswith("/mode"):
+                handled, current_mode, message = _handle_mode_cli(current_mode, mode_ids, prompt)
+                if message:
+                    print(message)
+                if handled:
+                    continue
 
             if current_mode == "reject":
                 print("[request rejected in current mode]")
                 continue
             if current_mode == "request_permission":
                 if prompt not in approved_commands:
-                    result = radiolist_dialog(
+                    result = await radiolist_dialog(
                         title="Permission required",
                         text=f"Command: {prompt}",
                         values=[
@@ -104,7 +124,7 @@ async def run_cli():
                             ("a", "Yes, and don't ask again for this command"),
                             ("esc", "No, and tell me what to do differently"),
                         ],
-                    ).run()
+                    ).run_async()
 
                     if result == "a":
                         approved_commands.add(prompt)

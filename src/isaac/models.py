@@ -24,7 +24,7 @@ from pydantic_ai.providers.openai import OpenAIProvider  # type: ignore
 from pydantic_ai.providers.openrouter import OpenRouterProvider  # type: ignore
 
 DEFAULT_CONFIG = {
-    "current": "test",
+    "current": "function-model",
     "models": {
         "test": {
             "model": "test",
@@ -106,6 +106,8 @@ def _build_provider_model(model_entry: Dict[str, Any]) -> Any:
 
     if provider == "openai" or str(model_spec).startswith("openai:"):
         key = api_key or os.getenv("OPENAI_API_KEY") or os.getenv("CEREBRAS_API_KEY")
+        if not key:
+            raise RuntimeError("OPENAI_API_KEY (or CEREBRAS_API_KEY) is required for openai models")
         url = base_url or os.getenv("OPENAI_BASE_URL") or "https://api.openai.com/v1"
         model_name = str(model_spec).split(":", 1)[-1]
         provider_obj = OpenAIProvider(base_url=url, api_key=key)
@@ -113,6 +115,8 @@ def _build_provider_model(model_entry: Dict[str, Any]) -> Any:
 
     if provider == "anthropic" or str(model_spec).startswith("anthropic:"):
         key = api_key or os.getenv("ANTHROPIC_API_KEY")
+        if not key:
+            raise RuntimeError("ANTHROPIC_API_KEY is required for anthropic models")
         url = base_url or os.getenv("ANTHROPIC_BASE_URL") or "https://api.anthropic.com"
         model_name = str(model_spec).split(":", 1)[-1]
         provider_obj = AnthropicProvider(api_key=key, base_url=url) if url else AnthropicProvider(api_key=key)
@@ -120,6 +124,8 @@ def _build_provider_model(model_entry: Dict[str, Any]) -> Any:
 
     if provider == "google" or str(model_spec).startswith("google:"):
         key = api_key or os.getenv("GOOGLE_API_KEY")
+        if not key:
+            raise RuntimeError("GOOGLE_API_KEY is required for google models")
         url = base_url or os.getenv("GOOGLE_API_BASE_URL") or "https://generativelanguage.googleapis.com"
         model_name = str(model_spec).split(":", 1)[-1]
         provider_obj = GoogleProvider(api_key=key, base_url=url) if url else GoogleProvider(api_key=key)
@@ -127,6 +133,8 @@ def _build_provider_model(model_entry: Dict[str, Any]) -> Any:
 
     if provider == "openrouter" or str(model_spec).startswith("openrouter:"):
         key = api_key or os.getenv("OPENROUTER_API_KEY")
+        if not key:
+            raise RuntimeError("OPENROUTER_API_KEY is required for openrouter models")
         url = base_url or os.getenv("OPENROUTER_BASE_URL") or "https://openrouter.ai/api/v1"
         model_name = str(model_spec).split(":", 1)[-1]
         provider_obj = OpenRouterProvider(api_key=key, base_url=url)

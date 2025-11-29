@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 from typing import Any, Callable
 
-from isaac.tools import run_tool, TOOL_HANDLERS
+from isaac.tools import TOOL_HANDLERS, run_tool
 
 
 def register_tools(agent: Any) -> None:
@@ -24,7 +24,7 @@ def register_tools(agent: Any) -> None:
 async def run_with_runner(runner: Any, prompt_text: str) -> str:
     run_method: Callable[[str], Any] | None = getattr(runner, "run", None)
     if not callable(run_method):
-        return "Hello, world!"
+        return f"Echo: {prompt_text}"
 
     try:
         result = run_method(prompt_text)
@@ -36,7 +36,7 @@ async def run_with_runner(runner: Any, prompt_text: str) -> str:
             return output
         if isinstance(result, str):
             return result
-    except Exception:  # pragma: no cover
-        return "Hello, world!"
+    except Exception as exc:  # pragma: no cover
+        return f"Error: {exc}"
 
-    return "Hello, world!"
+    return f"Echo: {prompt_text}"
