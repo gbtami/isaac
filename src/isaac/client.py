@@ -148,9 +148,7 @@ async def main(argv: list[str]) -> int:
         InitializeRequest(
             protocolVersion=PROTOCOL_VERSION,
             clientCapabilities=ClientCapabilities(),
-            clientInfo=Implementation(
-                name="example-client", title="Example Client", version="0.1.0"
-            ),
+            clientInfo=Implementation(name="example-client", title="Example Client", version="0.1.0"),
         )
     )
     session = await conn.newSession(NewSessionRequest(mcpServers=[], cwd=os.getcwd()))
