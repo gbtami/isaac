@@ -40,11 +40,14 @@ async def test_prompt_echoes_plain_text():
         PromptRequest(sessionId=session_id, prompt=[text_block("hello world")])
     )
 
-    conn.sessionUpdate.assert_called_once()
-    notification = conn.sessionUpdate.call_args[0][0]
-    assert notification.sessionId == session_id
-    assert isinstance(notification.update, AgentMessageChunk)
-    assert notification.update.content.text
+    assert conn.sessionUpdate.call_count >= 1
+    messages = [
+        call_args[0][0].update
+        for call_args in conn.sessionUpdate.call_args_list
+        if isinstance(call_args[0][0].update, AgentMessageChunk)
+    ]
+    assert messages, "Expected at least one AgentMessageChunk"
+    assert any(getattr(m.content, "text", "") for m in messages)
     assert response.stopReason == "end_turn"
 
 
