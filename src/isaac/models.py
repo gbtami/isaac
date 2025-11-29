@@ -7,6 +7,7 @@ Supports switching models/providers at runtime (used by the `/model` command).
 from __future__ import annotations
 
 import json
+import logging
 import os
 from pathlib import Path
 from typing import Any, Callable, Dict
@@ -20,8 +21,11 @@ from pydantic_ai.models.openrouter import OpenRouterModel  # type: ignore
 from pydantic_ai.models.test import TestModel  # type: ignore
 from pydantic_ai.providers.anthropic import AnthropicProvider  # type: ignore
 from pydantic_ai.providers.google import GoogleProvider  # type: ignore
+from pydantic_ai.providers.ollama import OllamaProvider  # type: ignore
 from pydantic_ai.providers.openai import OpenAIProvider  # type: ignore
 from pydantic_ai.providers.openrouter import OpenRouterProvider  # type: ignore
+
+logger = logging.getLogger("acp_server")
 
 HIDDEN_MODELS = {"test", "function-model"}
 DEFAULT_CONFIG = {
@@ -60,6 +64,12 @@ DEFAULT_CONFIG = {
             "base_url": "https://openrouter.ai/api/v1",
             "description": "OpenRouter proxy for GPT-4o mini",
         },
+        "ollama-qwen2.5-coder-3b": {
+            "provider": "ollama",
+            "model": "hhao/qwen2.5-coder-tools:3b",
+            "base_url": "http://localhost:11434/v1",
+            "description": "Ollama qwen2.5-coder-tools:3b (local)",
+        },
     },
 }
 
@@ -91,6 +101,7 @@ def load_models_config() -> Dict[str, Any]:
         dirty = True
     fn_model.setdefault("description", DEFAULT_CONFIG["models"]["function-model"]["description"])
     config["models"]["function-model"] = fn_model
+
     config.setdefault("current", DEFAULT_CONFIG["current"])
     if dirty:
         save_models_config(config)
@@ -120,49 +131,52 @@ def set_current_model(model_id: str) -> str:
     return model_id
 
 
-def _build_provider_model(model_entry: Dict[str, Any]) -> Any:
+def _build_provider_model(model_id: str, model_entry: Dict[str, Any]) -> Any:
     provider = (model_entry.get("provider") or "").lower()
     model_spec = model_entry.get("model") or "test"
-    base_url = model_entry.get("base_url")
+    base_url = model_entry.get("base_url") or DEFAULT_CONFIG["models"].get(model_id, {}).get(
+        "base_url"
+    )
     api_key = model_entry.get("api_key")
 
-    if provider == "openai" or str(model_spec).startswith("openai:"):
-        key = api_key or os.getenv("OPENAI_API_KEY") or os.getenv("CEREBRAS_API_KEY")
+    if provider == "openai":
+        key = api_key or os.getenv("OPENAI_API_KEY")
         if not key:
-            raise RuntimeError("OPENAI_API_KEY (or CEREBRAS_API_KEY) is required for openai models")
-        url = base_url or os.getenv("OPENAI_BASE_URL") or "https://api.openai.com/v1"
-        model_name = str(model_spec).split(":", 1)[-1]
+            raise RuntimeError("OPENAI_API_KEY is required for openai models")
+        url = os.getenv("OPENAI_BASE_URL") or base_url
         provider_obj = OpenAIProvider(base_url=url, api_key=key)
-        return OpenAIChatModel(model_name, provider=provider_obj)
+        return OpenAIChatModel(model_spec, provider=provider_obj)
 
-    if provider == "anthropic" or str(model_spec).startswith("anthropic:"):
+    if provider == "anthropic":
         key = api_key or os.getenv("ANTHROPIC_API_KEY")
         if not key:
             raise RuntimeError("ANTHROPIC_API_KEY is required for anthropic models")
-        url = base_url or os.getenv("ANTHROPIC_BASE_URL") or "https://api.anthropic.com"
-        model_name = str(model_spec).split(":", 1)[-1]
+        url = os.getenv("ANTHROPIC_BASE_URL") or base_url
         provider_obj = AnthropicProvider(api_key=key, base_url=url) if url else AnthropicProvider(api_key=key)
-        return AnthropicModel(model_name, provider=provider_obj)
+        return AnthropicModel(model_spec, provider=provider_obj)
 
-    if provider == "google" or str(model_spec).startswith("google:"):
+    if provider == "google":
         key = api_key or os.getenv("GOOGLE_API_KEY")
         if not key:
             raise RuntimeError("GOOGLE_API_KEY is required for google models")
-        url = base_url or os.getenv("GOOGLE_API_BASE_URL") or "https://generativelanguage.googleapis.com"
-        model_name = str(model_spec).split(":", 1)[-1]
+        url = os.getenv("GOOGLE_API_BASE_URL") or base_url
         provider_obj = GoogleProvider(api_key=key, base_url=url) if url else GoogleProvider(api_key=key)
-        return GoogleModel(model_name, provider=provider_obj)
+        return GoogleModel(model_spec, provider=provider_obj)
 
-    if provider == "openrouter" or str(model_spec).startswith("openrouter:"):
+    if provider == "openrouter":
         key = api_key or os.getenv("OPENROUTER_API_KEY")
         if not key:
             raise RuntimeError("OPENROUTER_API_KEY is required for openrouter models")
-        url = base_url or os.getenv("OPENROUTER_BASE_URL") or "https://openrouter.ai/api/v1"
-        model_name = str(model_spec).split(":", 1)[-1]
+        url = os.getenv("OPENROUTER_BASE_URL") or base_url
         provider_obj = OpenRouterProvider(api_key=key, base_url=url)
-        return OpenRouterModel(model_name, provider=provider_obj)
+        return OpenRouterModel(model_spec, provider=provider_obj)
 
-    if provider == "function" or str(model_spec).startswith("function:"):
+    if provider == "ollama":
+        url = os.getenv("OLLAMA_BASE_URL") or base_url
+        provider_obj = OllamaProvider(base_url=url)
+        return OpenAIChatModel(model_spec, provider=provider_obj)
+
+    if provider == "function":
         return TestModel(call_tools=[])
 
     # default to test or direct spec
@@ -175,7 +189,9 @@ def build_agent(model_id: str, register_tools: Callable[[Any], None]) -> Any:
     config = load_models_config()
     model_entry = config.get("models", {}).get(model_id) or DEFAULT_CONFIG["models"]["test"]
 
-    model_obj = _build_provider_model(model_entry)
+    model_obj = _build_provider_model(model_id, model_entry)
+    logger.info("MODEL: %s", model_obj.model_name)
+
     agent = PydanticAgent(model_obj)
     register_tools(agent)
     return agent

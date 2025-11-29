@@ -8,6 +8,7 @@ dependencies = [
     "pydantic-ai==1.25.1",
     "prompt-toolkit==3.0.52",
     "python-dotenv",
+    "ollama",
 ]
 
 [project.scripts]

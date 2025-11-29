@@ -34,6 +34,8 @@ from acp.schema import (
     Implementation,
     ResourceContentBlock,
     TextContentBlock,
+    ToolCallProgress,
+    ToolCallStart,
 )
 
 from isaac import models as model_registry
@@ -85,6 +87,7 @@ class ExampleClient(Client):
 
         content = update.content
         text: str
+        prefix = ""
         if isinstance(content, TextContentBlock):
             text = content.text
         elif isinstance(content, ImageContentBlock):
@@ -98,7 +101,10 @@ class ExampleClient(Client):
         else:
             text = "<content>"
 
-        print(f"| Agent: {text}")
+        if isinstance(update, (ToolCallStart, ToolCallProgress)):
+            prefix = "[tool]"
+
+        print(f"| Agent: {prefix} {text}")
 
     async def extMethod(self, method: str, params: dict) -> dict:  # noqa: ARG002
         raise RequestError.method_not_found(method)

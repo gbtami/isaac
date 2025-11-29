@@ -77,7 +77,7 @@ from isaac.planner import parse_plan_request, build_plan_notification
 from isaac.session_modes import build_mode_state
 from isaac.slash import handle_slash_command
 from isaac import models as model_registry
-from isaac.runner import register_tools, run_with_runner
+from isaac.runner import register_tools, run_with_runner, stream_with_runner
 from acp.contrib.tool_calls import ToolCallTracker
 
 logger = logging.getLogger("acp_server")
@@ -234,18 +234,21 @@ class ACPAgent(Agent):
             return PromptResponse(stopReason="cancelled")
 
         runner = self._session_models.get(params.sessionId, self._ai_runner)
-        response_text = await _await_with_cancel(
-            run_with_runner(runner, prompt_text),
-            cancel_event,
-        )
+
+        async def _push_chunk(chunk: str) -> None:
+            await self._conn.sessionUpdate(
+                session_notification(
+                    params.sessionId,
+                    update_agent_message(text_block(chunk)),
+                )
+            )
+
+        response_text = await stream_with_runner(runner, prompt_text, _push_chunk, cancel_event)
         if response_text is None:
             return PromptResponse(stopReason="cancelled")
-        await self._conn.sessionUpdate(
-            session_notification(
-                params.sessionId,
-                update_agent_message(text_block(response_text)),
-            )
-        )
+        # If nothing was streamed (e.g., fallback runner), ensure the response is sent once.
+        if not response_text:
+            await _push_chunk(response_text)
         return PromptResponse(stopReason="end_turn")
 
     async def cancel(self, params: CancelNotification) -> None:

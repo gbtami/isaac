@@ -5,6 +5,8 @@ from __future__ import annotations
 import asyncio
 from typing import Any, Callable
 
+from pydantic_ai.messages import PartDeltaEvent, PartEndEvent  # type: ignore
+from pydantic_ai.run import AgentRunResultEvent  # type: ignore
 from isaac.tools import TOOL_HANDLERS, run_tool
 
 
@@ -40,3 +42,40 @@ async def run_with_runner(runner: Any, prompt_text: str) -> str:
         return f"Error: {exc}"
 
     return f"Echo: {prompt_text}"
+
+
+async def stream_with_runner(
+    runner: Any,
+    prompt_text: str,
+    on_text: Callable[[str], asyncio.Future | Any],
+    cancel_event: asyncio.Event | None = None,
+) -> str | None:
+    """Stream responses if the runner supports it, otherwise fall back."""
+    cancel_event = cancel_event or asyncio.Event()
+    stream_method: Callable[[str], Any] | None = getattr(runner, "run_stream_events", None)
+    if not callable(stream_method):
+        text = await run_with_runner(runner, prompt_text)
+        await on_text(text)
+        return text
+
+    output_parts: list[str] = []
+    async for event in stream_method(prompt_text):
+        if cancel_event.is_set():
+            return None
+        if isinstance(event, PartDeltaEvent):
+            delta = getattr(event.delta, "content_delta", "")
+            if delta:
+                output_parts.append(delta)
+                await on_text(delta)
+        elif isinstance(event, PartEndEvent):
+            part = getattr(event.part, "content", "")
+            if part and not output_parts:
+                output_parts.append(part)
+                await on_text(part)
+        elif isinstance(event, AgentRunResultEvent):
+            result = getattr(event, "result", None)
+            if result is not None and getattr(result, "output", None):
+                full = getattr(result, "output")
+                return str(full)
+
+    return "".join(output_parts) or None
