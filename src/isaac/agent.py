@@ -9,7 +9,6 @@ Relevant ACP sections:
 
 from __future__ import annotations
 
-import argparse
 import asyncio
 import logging
 import uuid
@@ -78,7 +77,6 @@ from isaac.planner import parse_plan_request, build_plan_notification
 from isaac.session_modes import build_mode_state
 from isaac.slash import handle_slash_command
 from isaac import models as model_registry
-from isaac.cli import run_cli
 from isaac.runner import register_tools, run_with_runner
 from acp.contrib.tool_calls import ToolCallTracker
 
@@ -212,16 +210,6 @@ class ACPAgent(Agent):
             return PromptResponse(stopReason="end_turn")
 
         mode = self._session_modes.get(params.sessionId, "ask")
-        if mode == "reject":
-            return PromptResponse(stopReason="refusal")
-        if mode == "request_permission":
-            await self._conn.sessionUpdate(
-                session_notification(
-                    params.sessionId,
-                    update_agent_message(text_block("Permission required; please confirm action.")),
-                )
-            )
-            return PromptResponse(stopReason="end_turn")
         plan_request = parse_plan_request(prompt_text)
         if plan_request:
             await self._conn.sessionUpdate(build_plan_notification(params.sessionId, plan_request))
@@ -328,7 +316,7 @@ class ACPAgent(Agent):
     def _handle_model_command(self, session_id: str, prompt_text: str):
         parts = prompt_text.split()
         if len(parts) == 1:
-            models = model_registry.list_models()
+            models = model_registry.list_user_models()
             current = model_registry.load_models_config().get("current", "test")
             lines = [f"Current model: {current}", "Available:"]
             for mid, meta in models.items():
@@ -401,20 +389,14 @@ def _setup_acp_logging():
     )
 
 
-async def main():
-    parser = argparse.ArgumentParser(description="Simple ACP agent")
-    parser.add_argument("--acp", action="store_true", help="Run in ACP mode")
-    args = parser.parse_args()
-
-    if args.acp:
-        await run_acp_agent()
-    else:
-        await run_cli()
+async def main(argv: list[str] | None = None):
+    """Default entrypoint launches the ACP server on stdio."""
+    return await run_acp_agent()
 
 
 def main_entry():
     try:
-        asyncio.run(main())
+        return asyncio.run(main())
     except KeyboardInterrupt:
         return 0
 

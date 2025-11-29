@@ -6,8 +6,9 @@
       "description": "Deterministic local model for offline/testing"
     },
     "function-model": {
-      "model": "function:model",
-      "description": "In-process function model for deterministic testing"
+      "model": "function",
+      "description": "In-process function model for deterministic testing",
+      "provider": "function"
     },
     "openai-gpt4o-mini": {
       "provider": "openai",

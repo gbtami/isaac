@@ -11,13 +11,7 @@ from typing import Any, Dict
 def available_modes() -> list[dict[str, str]]:
     return [
         {"id": "ask", "name": "Ask", "description": "Normal assistant responses"},
-        {"id": "code", "name": "Code", "description": "Favor code/tool use"},
-        {"id": "reject", "name": "Reject", "description": "Decline requests"},
-        {
-            "id": "request_permission",
-            "name": "Request Permission",
-            "description": "Ask for permission before acting",
-        },
+        {"id": "yolo", "name": "Yolo", "description": "Act without extra permission prompts"},
     ]
 
 

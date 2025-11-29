@@ -17,11 +17,13 @@ from pydantic_ai.models.anthropic import AnthropicModel  # type: ignore
 from pydantic_ai.models.google import GoogleModel  # type: ignore
 from pydantic_ai.models.openai import OpenAIChatModel  # type: ignore
 from pydantic_ai.models.openrouter import OpenRouterModel  # type: ignore
+from pydantic_ai.models.test import TestModel  # type: ignore
 from pydantic_ai.providers.anthropic import AnthropicProvider  # type: ignore
 from pydantic_ai.providers.google import GoogleProvider  # type: ignore
 from pydantic_ai.providers.openai import OpenAIProvider  # type: ignore
 from pydantic_ai.providers.openrouter import OpenRouterProvider  # type: ignore
 
+HIDDEN_MODELS = {"test", "function-model"}
 DEFAULT_CONFIG = {
     "current": "function-model",
     "models": {
@@ -30,8 +32,9 @@ DEFAULT_CONFIG = {
             "description": "Deterministic local model for offline/testing",
         },
         "function-model": {
-            "model": "test",
-            "description": "Deterministic local model for offline/testing",
+            "provider": "function",
+            "model": "function",
+            "description": "In-process function model for deterministic testing",
         },
         "openai-gpt4o-mini": {
             "provider": "openai",
@@ -71,11 +74,26 @@ def load_models_config() -> Dict[str, Any]:
         config = json.loads(MODELS_FILE.read_text(encoding="utf-8"))
     except Exception:
         config = DEFAULT_CONFIG.copy()
+    dirty = False
     # Backfill missing defaults
     for key, value in DEFAULT_CONFIG["models"].items():
         config.setdefault("models", {})
-        config["models"].setdefault(key, value)
+        if key not in config["models"]:
+            config["models"][key] = value
+            dirty = True
+    # Ensure function-model stays safe for testing (no auto tool calls)
+    fn_model = config["models"].get("function-model", {})
+    if fn_model.get("provider") != "function":
+        fn_model["provider"] = "function"
+        dirty = True
+    if fn_model.get("model") != "function":
+        fn_model["model"] = "function"
+        dirty = True
+    fn_model.setdefault("description", DEFAULT_CONFIG["models"]["function-model"]["description"])
+    config["models"]["function-model"] = fn_model
     config.setdefault("current", DEFAULT_CONFIG["current"])
+    if dirty:
+        save_models_config(config)
     return config
 
 
@@ -85,6 +103,11 @@ def save_models_config(config: Dict[str, Any]) -> None:
 
 def list_models() -> Dict[str, Any]:
     return load_models_config().get("models", {})
+
+
+def list_user_models() -> Dict[str, Any]:
+    """Return models suitable for end users (hides internal/testing models)."""
+    return {mid: meta for mid, meta in list_models().items() if mid not in HIDDEN_MODELS}
 
 
 def set_current_model(model_id: str) -> str:
@@ -140,7 +163,7 @@ def _build_provider_model(model_entry: Dict[str, Any]) -> Any:
         return OpenRouterModel(model_name, provider=provider_obj)
 
     if provider == "function" or str(model_spec).startswith("function:"):
-        return "test"
+        return TestModel(call_tools=[])
 
     # default to test or direct spec
     return model_spec
