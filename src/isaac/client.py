@@ -9,8 +9,6 @@ from typing import Iterable
 
 from prompt_toolkit import PromptSession  # type: ignore
 from prompt_toolkit.key_binding import KeyBindings  # type: ignore
-from prompt_toolkit.shortcuts import radiolist_dialog  # type: ignore
-
 from acp import (
     CancelNotification,
     Client,
@@ -47,11 +45,14 @@ class ExampleClient(Client):
 
     async def requestPermission(self, params):  # type: ignore[override]
         try:
-            selection = await radiolist_dialog(
-                title="Permission required",
-                text="Select an option",
-                values=[(opt.optionId, getattr(opt, "label", opt.optionId)) for opt in params.options],
-            ).run_async()
+            for idx, opt in enumerate(params.options, start=1):
+                label = getattr(opt, "label", opt.optionId)
+                print(f"{idx}) {label}")
+            choice = input("Permission choice (number): ").strip()
+            if choice.isdigit() and 1 <= int(choice) <= len(params.options):
+                selection = params.options[int(choice) - 1].optionId
+            else:
+                selection = params.options[0].optionId if params.options else "default"
         except Exception:
             selection = params.options[0].optionId if params.options else "default"
         return RequestPermissionResponse(outcome=AllowedOutcome(optionId=selection))
@@ -114,15 +115,26 @@ async def read_console(prompt: str) -> str:
 async def _select_model_interactive() -> str | None:
     models = model_registry.list_user_models()
     current = model_registry.load_models_config().get("current", "function-model")
+    if not models:
+        return None
+
+    print(f"Current model: {current}")
+    ordered = list(models.items())
+    for idx, (mid, meta) in enumerate(ordered, start=1):
+        desc = meta.get("description", "")
+        print(f"{idx}) {mid}: {desc}")
+
+    loop = asyncio.get_running_loop()
     try:
-        selection = await radiolist_dialog(
-            title="Select model",
-            text=f"Current: {current}",
-            values=[(mid, f"{mid} ({meta.get('description', '')})") for mid, meta in models.items()],
-        ).run_async()
+        choice = await loop.run_in_executor(None, lambda: input("Select model (number): ").strip())
     except Exception:
         return None
-    return selection
+    if not choice.isdigit():
+        return None
+    num = int(choice)
+    if 1 <= num <= len(ordered):
+        return ordered[num - 1][0]
+    return None
 
 
 async def _run_tests() -> int:
@@ -148,13 +160,14 @@ async def interactive_loop(conn: ClientSideConnection, session_id: str) -> None:
     def _(event):  # type: ignore
         event.app.exit(result=CANCEL_TOKEN)
 
-    session = PromptSession("> ", key_bindings=kb)
+    session = PromptSession(key_bindings=kb)
     current_mode = "ask"
+    current_model = model_registry.load_models_config().get("current", "function-model")
     permission_always = False
 
     while True:
         try:
-            line = await session.prompt_async()
+            line = await session.prompt_async(f"{current_mode}|{current_model}> ")
             if line == CANCEL_TOKEN:
                 await conn.cancel(CancelNotification(sessionId=session_id))
                 print("[cancelled]")
@@ -189,6 +202,7 @@ async def interactive_loop(conn: ClientSideConnection, session_id: str) -> None:
             except ValueError as exc:
                 print(f"[{exc}]")
                 continue
+            current_model = selection
             await conn.setSessionModel(
                 SetSessionModelRequest(sessionId=session_id, modelId=selection)
             )
@@ -218,18 +232,16 @@ async def interactive_loop(conn: ClientSideConnection, session_id: str) -> None:
             if permission_always:
                 pass  # proceed without prompting again
             else:
+                print("Permission required. Choose:")
+                print("1) Yes, proceed (once)")
+                print("2) Yes, don't ask again for this session")
+                print("3) No, revise the request")
+                loop = asyncio.get_running_loop()
                 try:
-                    choice = await radiolist_dialog(
-                        title="Permission required",
-                        text="Allow this action?",
-                        values=[
-                            ("once", "Yes, proceed (once)"),
-                            ("always", "Yes, don't ask again for this session"),
-                            ("deny", "No, revise the request"),
-                        ],
-                    ).run_async()
+                    raw = await loop.run_in_executor(None, lambda: input("Choice [1-3]: ").strip())
                 except Exception:
-                    choice = "deny"
+                    raw = "3"
+                choice = {"1": "once", "2": "always", "3": "deny"}.get(raw, "deny")
                 if choice == "deny":
                     print("[prompt cancelled; please rephrase]")
                     continue

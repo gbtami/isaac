@@ -209,7 +209,6 @@ class ACPAgent(Agent):
             await self._conn.sessionUpdate(slash)
             return PromptResponse(stopReason="end_turn")
 
-        mode = self._session_modes.get(params.sessionId, "ask")
         plan_request = parse_plan_request(prompt_text)
         if plan_request:
             await self._conn.sessionUpdate(build_plan_notification(params.sessionId, plan_request))
