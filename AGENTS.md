@@ -11,8 +11,7 @@ It is built with:
 This project uses `uv` for environment and project management.
 
 - To install dependencies: `uv pip install -e .`
-- To run the agent in ACP mode: `uv run isaac --acp`
-- To run the agent in simple interactive mode: `uv run isaac`
+- To run the client with the agent: `uv run python -m isaac.client uv run isaac`
 
 ## Linting and Formatting
 

@@ -1,3 +1,5 @@
 # isaac
 
-Isaac is an AI coding agent implementing the Agent Client Protocol and can be used with an ACP Client.
+Isaac is an AI coding client and agent implementing the [Agent Client Protocol (ACL)](https://agentclientprotocol.com/).
+
+To run the client with the agent: `uv run python -m isaac.client uv run isaac`
