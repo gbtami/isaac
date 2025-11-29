@@ -6,6 +6,7 @@ from unittest.mock import AsyncMock
 import pytest
 from acp import AgentSideConnection, InitializeRequest, PromptRequest, PROTOCOL_VERSION, text_block
 from acp.schema import AgentMessageChunk, ToolCallProgress, ToolCallStart
+from acp import SetSessionModelRequest
 from acp.helpers import embedded_text_resource, resource_block
 
 from isaac.agent import ACPAgent, SimpleAIRunner
@@ -220,6 +221,28 @@ async def test_content_blocks_use_embedded_resources():
     notification = conn.sessionUpdate.call_args[0][0]
     assert isinstance(notification.update, AgentMessageChunk)
     assert "embedded text" in notification.update.content.text
+    assert response.stopReason == "end_turn"
+
+
+@pytest.mark.asyncio
+async def test_set_session_model_changes_runner():
+    conn = AsyncMock(spec=AgentSideConnection)
+    agent = ACPAgent(conn)
+    session = await agent.newSession(NewSessionRequest(cwd="/", mcpServers=[]))
+
+    await agent.setSessionModel(
+        SetSessionModelRequest(sessionId=session.sessionId, modelId="function-model")
+    )
+
+    response = await agent.prompt(
+        PromptRequest(sessionId=session.sessionId, prompt=[text_block("hello")])
+    )
+
+    conn.sessionUpdate.assert_called()
+    notification = conn.sessionUpdate.call_args[0][0]
+    assert isinstance(notification.update, AgentMessageChunk)
+    assert notification.update.content.text
+    assert "Error" not in notification.update.content.text
     assert response.stopReason == "end_turn"
 
 

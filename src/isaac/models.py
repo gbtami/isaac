@@ -14,7 +14,6 @@ from typing import Any, Callable, Dict
 from dotenv import load_dotenv
 from pydantic_ai import Agent as PydanticAgent  # type: ignore
 from pydantic_ai.models.anthropic import AnthropicModel  # type: ignore
-from pydantic_ai.models.function import FunctionModel  # type: ignore
 from pydantic_ai.models.google import GoogleModel  # type: ignore
 from pydantic_ai.models.openai import OpenAIChatModel  # type: ignore
 from pydantic_ai.models.openrouter import OpenRouterModel  # type: ignore
@@ -31,8 +30,8 @@ DEFAULT_CONFIG = {
             "description": "Deterministic local model for offline/testing",
         },
         "function-model": {
-            "model": "function:model",
-            "description": "In-process function model for deterministic testing",
+            "model": "test",
+            "description": "Deterministic local model for offline/testing",
         },
         "openai-gpt4o-mini": {
             "provider": "openai",
@@ -141,7 +140,7 @@ def _build_provider_model(model_entry: Dict[str, Any]) -> Any:
         return OpenRouterModel(model_name, provider=provider_obj)
 
     if provider == "function" or str(model_spec).startswith("function:"):
-        return FunctionModel(lambda prompt: "function-model-response")
+        return "test"
 
     # default to test or direct spec
     return model_spec

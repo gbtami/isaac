@@ -40,6 +40,8 @@ from acp import (
     WriteTextFileResponse,
     RequestPermissionRequest,
     RequestPermissionResponse,
+    SetSessionModelRequest,
+    SetSessionModelResponse,
     CreateTerminalRequest,
     CreateTerminalResponse,
     TerminalOutputRequest,
@@ -118,6 +120,7 @@ class ACPAgent(Agent):
         self._terminals: Dict[str, TerminalState] = {}
         self._session_modes: Dict[str, str] = {}
         self._cancel_events: Dict[str, asyncio.Event] = {}
+        self._session_models: Dict[str, Any] = {}
         self._agent_name = agent_name
         self._agent_title = agent_title
         self._agent_version = agent_version
@@ -157,6 +160,7 @@ class ACPAgent(Agent):
         cwd = Path(params.cwd or Path.cwd())
         self._session_cwds[session_id] = cwd
         self._cancel_events[session_id] = asyncio.Event()
+        self._session_models[session_id] = create_default_runner()
         mode_state = build_mode_state(self._session_modes, session_id, current_mode="ask")
         return NewSessionResponse(sessionId=session_id, modes=mode_state)
 
@@ -165,6 +169,7 @@ class ACPAgent(Agent):
         self._sessions.add(params.sessionId)
         self._session_cwds[params.sessionId] = Path.cwd()
         self._cancel_events.setdefault(params.sessionId, asyncio.Event())
+        self._session_models.setdefault(params.sessionId, create_default_runner())
         return LoadSessionResponse()
 
     async def setSessionMode(self, params: SetSessionModeRequest) -> SetSessionModeResponse | None:
@@ -175,6 +180,18 @@ class ACPAgent(Agent):
         )
         self._session_modes[params.sessionId] = params.modeId
         return SetSessionModeResponse()
+
+    async def setSessionModel(self, params: SetSessionModelRequest) -> SetSessionModelResponse | None:
+        logger.info("Received set session model request %s -> %s", params.sessionId, params.modelId)
+        try:
+            self._session_models[params.sessionId] = model_registry.build_agent(
+                params.modelId,
+                register_tools,
+            )
+        except Exception as exc:  # pragma: no cover - model build errors
+            logger.error("Failed to set session model: %s", exc)
+            return SetSessionModelResponse()
+        return SetSessionModelResponse()
 
     async def prompt(self, params: PromptRequest) -> PromptResponse:
         logger.info("Received prompt request for session: %s", params.sessionId)
@@ -229,8 +246,9 @@ class ACPAgent(Agent):
         if cancel_event.is_set():
             return PromptResponse(stopReason="cancelled")
 
+        runner = self._session_models.get(params.sessionId, self._ai_runner)
         response_text = await _await_with_cancel(
-            run_with_runner(self._ai_runner, prompt_text),
+            run_with_runner(runner, prompt_text),
             cancel_event,
         )
         if response_text is None:
