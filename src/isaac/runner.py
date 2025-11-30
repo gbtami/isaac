@@ -50,18 +50,18 @@ async def stream_with_runner(
     on_text: Callable[[str], asyncio.Future | Any],
     cancel_event: asyncio.Event | None = None,
 ) -> str | None:
-    """Stream responses if the runner supports it, otherwise fall back."""
+    """Stream responses using the runner's streaming API."""
     cancel_event = cancel_event or asyncio.Event()
-    stream_method: Callable[[str], Any] | None = getattr(runner, "run_stream_events", None)
-    if not callable(stream_method):
-        text = await run_with_runner(runner, prompt_text)
-        await on_text(text)
-        return text
+    stream_method: Callable[[str], Any] = getattr(runner, "run_stream_events")
 
     output_parts: list[str] = []
     async for event in stream_method(prompt_text):
         if cancel_event.is_set():
             return None
+        if isinstance(event, str):
+            output_parts.append(event)
+            await on_text(event)
+            continue
         if isinstance(event, PartDeltaEvent):
             delta = getattr(event.delta, "content_delta", "")
             if delta:

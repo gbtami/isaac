@@ -90,6 +90,9 @@ class SimpleAIRunner:
     async def run(self, prompt: str) -> SimpleRunResult:
         return SimpleRunResult(output=f"Echo: {prompt}")
 
+    async def run_stream_events(self, prompt: str):
+        yield f"Echo: {prompt}"
+
 
 def create_default_runner() -> Any:
     try:
