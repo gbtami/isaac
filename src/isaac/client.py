@@ -1,11 +1,18 @@
+"""Interactive ACP client with REPL, tool calls, and terminal support.
+
+ACP overview: https://agentclientprotocol.com/overview/introduction
+Terminals: https://agentclientprotocol.com/protocol/terminals
+"""
+
 import asyncio
-import asyncio.subprocess as aio_subprocess
 import contextlib
 import logging
 import os
 import sys
 from pathlib import Path
 from typing import Iterable
+
+import asyncio.subprocess as aio_subprocess
 
 from prompt_toolkit import PromptSession  # type: ignore
 from prompt_toolkit.key_binding import KeyBindings  # type: ignore
@@ -23,6 +30,16 @@ from acp import (
     SetSessionModeRequest,
     SetSessionModelRequest,
     text_block,
+    CreateTerminalRequest,
+    CreateTerminalResponse,
+    TerminalOutputRequest,
+    TerminalOutputResponse,
+    WaitForTerminalExitRequest,
+    WaitForTerminalExitResponse,
+    KillTerminalCommandRequest,
+    KillTerminalCommandResponse,
+    ReleaseTerminalRequest,
+    ReleaseTerminalResponse,
 )
 from acp.schema import (
     AgentMessageChunk,
@@ -39,11 +56,13 @@ from acp.schema import (
 )
 
 from isaac import models as model_registry
+from isaac.client_terminal import ClientTerminalManager
 
 
 class ExampleClient(Client):
     def __init__(self) -> None:
         self._last_prompt = ""
+        self._terminal_manager = ClientTerminalManager()
 
     async def requestPermission(self, params):  # type: ignore[override]
         try:
@@ -65,20 +84,30 @@ class ExampleClient(Client):
     async def readTextFile(self, params):  # type: ignore[override]
         raise RequestError.method_not_found("fs/read_text_file")
 
-    async def createTerminal(self, params):  # type: ignore[override]
-        raise RequestError.method_not_found("terminal/create")
+    async def createTerminal(
+        self, params: CreateTerminalRequest
+    ) -> CreateTerminalResponse:  # type: ignore[override]
+        return await self._terminal_manager.create_terminal(params)
 
-    async def terminalOutput(self, params):  # type: ignore[override]
-        raise RequestError.method_not_found("terminal/output")
+    async def terminalOutput(
+        self, params: TerminalOutputRequest
+    ) -> TerminalOutputResponse:  # type: ignore[override]
+        return await self._terminal_manager.terminal_output(params)
 
-    async def releaseTerminal(self, params):  # type: ignore[override]
-        raise RequestError.method_not_found("terminal/release")
+    async def releaseTerminal(
+        self, params: ReleaseTerminalRequest
+    ) -> ReleaseTerminalResponse:  # type: ignore[override]
+        return await self._terminal_manager.release_terminal(params)
 
-    async def waitForTerminalExit(self, params):  # type: ignore[override]
-        raise RequestError.method_not_found("terminal/wait_for_exit")
+    async def waitForTerminalExit(
+        self, params: WaitForTerminalExitRequest
+    ) -> WaitForTerminalExitResponse:  # type: ignore[override]
+        return await self._terminal_manager.wait_for_terminal_exit(params)
 
-    async def killTerminal(self, params):  # type: ignore[override]
-        raise RequestError.method_not_found("terminal/kill")
+    async def killTerminalCommand(
+        self, params: KillTerminalCommandRequest
+    ) -> KillTerminalCommandResponse:  # type: ignore[override]
+        return await self._terminal_manager.kill_terminal(params)
 
     async def sessionUpdate(self, params: SessionNotification) -> None:
         update = params.update
@@ -105,12 +134,6 @@ class ExampleClient(Client):
             prefix = "[tool]"
 
         print(f"| Agent: {prefix} {text}")
-
-    async def extMethod(self, method: str, params: dict) -> dict:  # noqa: ARG002
-        raise RequestError.method_not_found(method)
-
-    async def extNotification(self, method: str, params: dict) -> None:  # noqa: ARG002
-        raise RequestError.method_not_found(method)
 
 
 async def read_console(prompt: str) -> str:
@@ -234,6 +257,10 @@ async def interactive_loop(conn: ClientSideConnection, session_id: str) -> None:
             await _run_tests()
             continue
 
+        if line in ("/exit", "/quit", "exit", "quit"):
+            print("[exiting]")
+            break
+
         if current_mode == "ask":
             if permission_always:
                 pass  # proceed without prompting again
@@ -293,20 +320,22 @@ async def run_client(program: str, args: Iterable[str]) -> int:
     await conn.initialize(
         InitializeRequest(
             protocolVersion=PROTOCOL_VERSION,
-            clientCapabilities=ClientCapabilities(),
+            clientCapabilities=ClientCapabilities(terminal=True),
             clientInfo=Implementation(name="example-client", title="Example Client", version="0.1.0"),
         )
     )
     session = await conn.newSession(NewSessionRequest(mcpServers=[], cwd=os.getcwd()))
 
-    await interactive_loop(conn, session.sessionId)
-
-    if proc.returncode is None:
-        proc.terminate()
-        with contextlib.suppress(ProcessLookupError):
-            await proc.wait()
-
-    return 0
+    try:
+        await interactive_loop(conn, session.sessionId)
+        return 0
+    except KeyboardInterrupt:
+        return 130
+    finally:
+        if proc.returncode is None:
+            proc.terminate()
+            with contextlib.suppress(ProcessLookupError):
+                await proc.wait()
 
 
 async def main(argv: list[str]) -> int:
@@ -320,4 +349,7 @@ async def main(argv: list[str]) -> int:
 
 
 if __name__ == "__main__":
-    raise SystemExit(asyncio.run(main(sys.argv)))
+    try:
+        raise SystemExit(asyncio.run(main(sys.argv)))
+    except KeyboardInterrupt:
+        raise SystemExit(130)

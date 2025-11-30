@@ -65,7 +65,7 @@ from acp.schema import AllowedOutcome
 
 from isaac.tools import get_tools, parse_tool_request, run_tool
 from isaac.fs import read_text_file, write_text_file
-from isaac.terminal import (
+from isaac.agent_terminal import (
     TerminalState,
     create_terminal,
     terminal_output,
@@ -79,7 +79,6 @@ from isaac.slash import handle_slash_command
 from isaac import models as model_registry
 from isaac.runner import register_tools, run_with_runner, stream_with_runner
 from acp.contrib.tool_calls import ToolCallTracker
-
 logger = logging.getLogger("acp_server")
 
 @dataclass

@@ -1,15 +1,14 @@
-"""Terminal management mapped to ACP terminal endpoints.
+"""Agent-side ACP terminal implementation.
 
-See: https://agentclientprotocol.com/protocol/terminals
+Implements terminal endpoints per https://agentclientprotocol.com/protocol/terminals
+so a client can launch and manage terminals on the agent host.
 """
 
 from __future__ import annotations
 
 import asyncio
-import signal
-from dataclasses import dataclass
 from pathlib import Path
-from typing import Dict, Optional
+from typing import Dict
 
 from acp import (
     CreateTerminalRequest,
@@ -23,25 +22,9 @@ from acp import (
     WaitForTerminalExitRequest,
     WaitForTerminalExitResponse,
 )
-from acp.schema import TerminalExitStatus
 
-from .fs import resolve_path_for_session
-
-
-@dataclass
-class TerminalState:
-    proc: asyncio.subprocess.Process
-    output_limit: Optional[int] = None
-
-
-async def _read_nonblocking(stream: asyncio.StreamReader | None, limit: int = 65536) -> str:
-    if stream is None:
-        return ""
-    try:
-        data = await asyncio.wait_for(stream.read(limit), timeout=0.01)
-        return data.decode(errors="ignore") if data else ""
-    except asyncio.TimeoutError:
-        return ""
+from isaac.fs import resolve_path_for_session
+from isaac.terminal_common import TerminalState, build_exit_status, read_nonblocking
 
 
 async def create_terminal(
@@ -84,8 +67,8 @@ async def terminal_output(
     if not state:
         return TerminalOutputResponse(output="", truncated=False, exitStatus=None)
 
-    stdout = await _read_nonblocking(state.proc.stdout)
-    stderr = await _read_nonblocking(state.proc.stderr)
+    stdout = await read_nonblocking(state.proc.stdout)
+    stderr = await read_nonblocking(state.proc.stderr)
     combined = (stdout or "") + (stderr or "")
 
     truncated = False
@@ -93,17 +76,7 @@ async def terminal_output(
         truncated = True
         combined = combined.encode()[: state.output_limit].decode(errors="ignore")
 
-    exit_status = None
-    if state.proc.returncode is not None:
-        if state.proc.returncode < 0:
-            sig = abs(state.proc.returncode)
-            try:
-                sig_name = signal.Signals(sig).name
-            except Exception:
-                sig_name = f"SIG{sig}"
-            exit_status = TerminalExitStatus(exitCode=None, signal=sig_name)
-        else:
-            exit_status = TerminalExitStatus(exitCode=state.proc.returncode, signal=None)
+    exit_status = build_exit_status(state.proc.returncode)
 
     return TerminalOutputResponse(output=combined, truncated=truncated, exitStatus=exit_status)
 
@@ -116,16 +89,11 @@ async def wait_for_terminal_exit(
     if not state:
         return WaitForTerminalExitResponse(exitCode=None, signal=None)
     returncode = await state.proc.wait()
-    if returncode is None:
-        return WaitForTerminalExitResponse(exitCode=None, signal=None)
-    if returncode < 0:
-        sig = abs(returncode)
-        try:
-            sig_name = signal.Signals(sig).name
-        except Exception:
-            sig_name = f"SIG{sig}"
-        return WaitForTerminalExitResponse(exitCode=None, signal=sig_name)
-    return WaitForTerminalExitResponse(exitCode=returncode, signal=None)
+    exit_status = build_exit_status(returncode)
+    return WaitForTerminalExitResponse(
+        exitCode=exit_status.exitCode if exit_status else None,
+        signal=exit_status.signal if exit_status else None,
+    )
 
 
 async def kill_terminal(

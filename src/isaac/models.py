@@ -70,8 +70,16 @@ DEFAULT_CONFIG = {
             "base_url": "http://localhost:11434/v1",
             "description": "Ollama qwen2.5-coder-tools:3b (local)",
         },
+        "ollama-NazareAI-Python-Programmer-3B": {
+            "provider": "ollama",
+            "model": "0xroyce/NazareAI-Python-Programmer-3B",
+            "base_url": "http://localhost:11434/v1",
+            "description": "NazareAI-Python-Programmer-3B (local)",
+        },
     },
 }
+
+
 
 MODELS_FILE = Path(__file__).resolve().parents[2] / "models.json"
 
