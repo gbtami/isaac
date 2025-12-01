@@ -10,6 +10,8 @@ from .read_file import read_file
 from .run_command import run_command
 from .edit_file import edit_file
 from .code_search import code_search
+from .apply_patch import apply_patch
+from .file_summary import file_summary
 
 try:
     from acp.schema import Tool, ToolParameter  # type: ignore
@@ -36,6 +38,8 @@ TOOL_HANDLERS: Dict[str, ToolHandler] = {
     "tool_run_command": run_command,
     "tool_edit_file": edit_file,
     "tool_code_search": code_search,
+    "tool_apply_patch": apply_patch,
+    "tool_file_summary": file_summary,
 }
 
 
@@ -97,6 +101,32 @@ def get_tools() -> List[Any]:
                     "create": {"type": "boolean", "description": "Create file if missing"},
                 },
                 required=["file_path", "new_content"],
+            ),
+        ),
+        Tool(
+            function="tool_apply_patch",
+            description="Apply a unified diff patch to a file",
+            parameters=ToolParameter(
+                type="object",
+                properties={
+                    "file_path": {"type": "string", "description": "Path to the file to patch"},
+                    "patch": {"type": "string", "description": "Unified diff patch text"},
+                    "strip": {"type": "integer", "description": "Strip leading path components (patch -p)"},
+                },
+                required=["file_path", "patch"],
+            ),
+        ),
+        Tool(
+            function="tool_file_summary",
+            description="Summarize a file (head/tail and line count)",
+            parameters=ToolParameter(
+                type="object",
+                properties={
+                    "file_path": {"type": "string", "description": "Path to summarize"},
+                    "head_lines": {"type": "integer", "description": "Number of head lines to include"},
+                    "tail_lines": {"type": "integer", "description": "Number of tail lines to include"},
+                },
+                required=["file_path"],
             ),
         ),
         Tool(

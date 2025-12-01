@@ -25,6 +25,8 @@ from pydantic_ai.providers.ollama import OllamaProvider  # type: ignore
 from pydantic_ai.providers.openai import OpenAIProvider  # type: ignore
 from pydantic_ai.providers.openrouter import OpenRouterProvider  # type: ignore
 
+from isaac.agent.brain.prompt import SYSTEM_PROMPT
+
 logger = logging.getLogger("acp_server")
 
 HIDDEN_MODELS = {"test", "function-model"}
@@ -211,6 +213,6 @@ def build_agent(
     model_obj = _build_provider_model(model_id, model_entry)
     logger.info("MODEL: %s", model_obj.model_name)
 
-    agent = PydanticAgent(model_obj, toolsets=toolsets or ())
+    agent = PydanticAgent(model_obj, toolsets=toolsets or (), system_prompt=SYSTEM_PROMPT)
     register_tools(agent)
     return agent

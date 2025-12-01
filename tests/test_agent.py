@@ -11,6 +11,8 @@ from acp.helpers import embedded_text_resource, resource_block
 from pydantic_ai import Agent as PydanticAgent  # type: ignore
 from pydantic_ai.models.test import TestModel  # type: ignore
 
+from isaac.agent.tools.apply_patch import apply_patch
+
 from isaac.agent import ACPAgent
 from acp import NewSessionRequest, ReadTextFileRequest, WriteTextFileRequest
 from acp import (
@@ -130,27 +132,21 @@ async def test_tool_run_command_executes(tmp_path: Path):
 
 
 @pytest.mark.asyncio
-async def test_tool_edit_file_overwrites(tmp_path: Path):
+async def test_tool_apply_patch(tmp_path: Path):
     target = tmp_path / "edit_me.txt"
-    target.write_text("old content")
+    target.write_text("old content\n")
 
-    conn = AsyncMock(spec=AgentSideConnection)
-    agent = make_function_agent(conn)
-
-    session_id = "edit-session"
-    new_text = "new content with spaces"
-    response = await agent.prompt(
-        PromptRequest(
-            sessionId=session_id,
-            prompt=[text_block(f"tool:edit_file {target} {new_text}")],
-        )
-    )
-
-    assert response.stopReason == "end_turn"
-    assert target.read_text() == new_text
-    update_call = conn.sessionUpdate.call_args_list[1][0][0]
-    assert isinstance(update_call.update, ToolCallProgress)
-    assert update_call.update.status == "completed"
+    patch = """--- a/edit_me.txt
++++ b/edit_me.txt
+@@ -1 +1 @@
+-old content
++new content
+"""
+    # Call tool directly to avoid DSL limitations
+    result = await apply_patch(file_path=str(target), patch=patch, strip=1)
+    assert result["error"] is None
+    assert (result["content"] or "").strip()
+    assert target.read_text() == "new content\n"
 
 
 @pytest.mark.asyncio

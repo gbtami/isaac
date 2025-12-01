@@ -93,6 +93,7 @@ from isaac.agent.session_modes import build_mode_state
 from isaac.agent.slash import handle_slash_command
 from isaac.agent import models as model_registry
 from isaac.agent.runner import register_tools, run_with_runner, stream_with_runner
+from isaac.agent.brain.planner import parse_plan_from_text
 from acp.contrib.tool_calls import ToolCallTracker
 
 logger = logging.getLogger("acp_server")
@@ -341,6 +342,9 @@ class ACPAgent(Agent):
         # If nothing was streamed (e.g., fallback runner), ensure the response is sent once.
         if not response_text:
             await _push_chunk(response_text)
+        plan_update = parse_plan_from_text(response_text or "")
+        if plan_update:
+            await self._send_update(session_notification(params.sessionId, plan_update))
         return PromptResponse(stopReason="end_turn")
 
     async def cancel(self, params: CancelNotification) -> None:
