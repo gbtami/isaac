@@ -120,9 +120,9 @@ async def test_tool_run_command_executes(tmp_path: Path):
     )
 
     assert response.stopReason == "end_turn"
-    assert conn.sessionUpdate.call_count == 2
+    assert conn.sessionUpdate.call_count >= 2
 
-    update_call = conn.sessionUpdate.call_args_list[1][0][0]
+    update_call = conn.sessionUpdate.call_args_list[-1][0][0]
     assert isinstance(update_call.update, ToolCallProgress)
     assert update_call.update.status == "completed"
     assert update_call.update.rawOutput["returncode"] == 0

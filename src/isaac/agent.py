@@ -10,6 +10,7 @@ Relevant ACP sections:
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import logging
 import uuid
 from dataclasses import dataclass
@@ -125,6 +126,8 @@ class ACPAgent(Agent):
         self._agent_title = agent_title
         self._agent_version = agent_version
         self._ai_runner = ai_runner or create_default_runner()
+        self._command_timeout_s = 30.0
+        self._terminal_output_limit = 64 * 1024  # 64KB cap for streamed tool output
 
     async def initialize(self, params: InitializeRequest) -> InitializeResponse:
         logger.info("Received initialize request: %s", params)
@@ -264,6 +267,14 @@ class ACPAgent(Agent):
         arguments = getattr(tool_call, "arguments", {}) or {}
         tool_call_id = getattr(tool_call, "toolCallId", str(uuid.uuid4()))
 
+        if function_name == "tool_run_command":
+            await self._execute_run_command_with_terminal(
+                session_id,
+                tool_call_id=tool_call_id,
+                arguments=arguments,
+            )
+            return
+
         await self._execute_tool(
             session_id,
             tool_name=function_name,
@@ -311,6 +322,140 @@ class ACPAgent(Agent):
             status=status,
             raw_output=result,
             content=[tool_content(text_block(summary))],
+        )
+        await self._conn.sessionUpdate(session_notification(session_id, progress))
+
+    async def _execute_run_command_with_terminal(
+        self,
+        session_id: str,
+        *,
+        tool_call_id: str,
+        arguments: dict[str, Any],
+    ) -> None:
+        """Run the run_command tool using an ACP terminal for streamed output."""
+        tracker = ToolCallTracker(id_factory=lambda: tool_call_id)
+        start = tracker.start(
+            external_id=tool_call_id,
+            title="tool_run_command",
+            status="in_progress",
+            raw_input={"tool": "run_command", **arguments},
+        )
+        await self._conn.sessionUpdate(session_notification(session_id, start))
+
+        command = arguments.get("command") or ""
+        cwd_arg = arguments.get("cwd")
+        cancel_event = self._cancel_events.setdefault(session_id, asyncio.Event())
+        cancel_event.clear()
+        timeout_s = float(arguments.get("timeout") or self._command_timeout_s)
+
+        try:
+            create_resp = await create_terminal(
+                self._session_cwds,
+                self._terminals,
+                CreateTerminalRequest(
+                    sessionId=session_id,
+                    command="bash",
+                    args=["-lc", command],
+                    cwd=cwd_arg,
+                    outputByteLimit=self._terminal_output_limit,
+                ),
+            )
+        except Exception as exc:  # pragma: no cover - defensive
+            progress = tracker.progress(
+                external_id=tool_call_id,
+                status="failed",
+                raw_output={"content": None, "error": f"Failed to start command: {exc}"},
+                content=[tool_content(text_block(f"Failed to start command: {exc}"))],
+            )
+            await self._conn.sessionUpdate(session_notification(session_id, progress))
+            return
+
+        term_id = create_resp.terminalId
+        collected: list[str] = []
+        truncated = False
+        exit_code: int | None = None
+        error_msg: str | None = None
+
+        try:
+            start_time = asyncio.get_event_loop().time()
+            while True:
+                if cancel_event.is_set():
+                    error_msg = "cancelled"
+                    await self.killTerminalCommand(
+                        KillTerminalCommandRequest(sessionId=session_id, terminalId=term_id)
+                    )
+                    break
+
+                elapsed = asyncio.get_event_loop().time() - start_time
+                if elapsed > timeout_s:
+                    error_msg = f"Command timed out after {timeout_s}s"
+                    await self.killTerminalCommand(
+                        KillTerminalCommandRequest(sessionId=session_id, terminalId=term_id)
+                    )
+                    break
+
+                out_resp = await terminal_output(
+                    self._terminals,
+                    TerminalOutputRequest(sessionId=session_id, terminalId=term_id),
+                )
+                chunk = out_resp.output or ""
+                if chunk:
+                    collected.append(chunk)
+                    truncated = truncated or out_resp.truncated
+                    progress = tracker.progress(
+                        external_id=tool_call_id,
+                        status="in_progress",
+                        raw_output={
+                            "content": chunk,
+                            "error": None,
+                            "returncode": exit_code,
+                            "truncated": out_resp.truncated,
+                        },
+                        content=[tool_content(text_block(chunk))],
+                    )
+                    await self._conn.sessionUpdate(session_notification(session_id, progress))
+
+                if out_resp.exitStatus:
+                    exit_code = out_resp.exitStatus.exitCode
+                    break
+
+                await asyncio.sleep(0.2)
+        finally:
+            with contextlib.suppress(Exception):
+                await release_terminal(
+                    self._terminals,
+                    ReleaseTerminalRequest(sessionId=session_id, terminalId=term_id),
+                )
+
+        if not collected:
+            with contextlib.suppress(Exception):
+                final_out = await terminal_output(
+                    self._terminals,
+                    TerminalOutputRequest(sessionId=session_id, terminalId=term_id),
+                )
+                if final_out.output:
+                    collected.append(final_out.output)
+                    truncated = truncated or final_out.truncated
+                    exit_code = exit_code or (
+                        final_out.exitStatus.exitCode if final_out.exitStatus else None
+                    )
+
+        full_output = "".join(collected).rstrip("\n")
+        status = "failed" if error_msg else "completed"
+        if exit_code not in (0, None) and not error_msg:
+            status = "failed"
+
+        summary = error_msg or full_output or ""
+        progress = tracker.progress(
+            external_id=tool_call_id,
+            status=status,
+            raw_output={
+                "content": full_output,
+                "error": error_msg,
+                "returncode": exit_code,
+                "truncated": truncated,
+            },
+            content=[tool_content(text_block(summary))] if summary else None,
         )
         await self._conn.sessionUpdate(session_notification(session_id, progress))
 

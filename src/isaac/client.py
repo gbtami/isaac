@@ -16,6 +16,7 @@ import asyncio.subprocess as aio_subprocess
 
 from prompt_toolkit import PromptSession  # type: ignore
 from prompt_toolkit.key_binding import KeyBindings  # type: ignore
+from prompt_toolkit.patch_stdout import patch_stdout  # type: ignore
 from acp import (
     CancelNotification,
     Client,
@@ -111,6 +112,28 @@ class ExampleClient(Client):
 
     async def sessionUpdate(self, params: SessionNotification) -> None:
         update = params.update
+        if isinstance(update, ToolCallStart):
+            print(f"| Tool[start]: {getattr(update, 'title', '')}")
+            return
+        if isinstance(update, ToolCallProgress):
+            raw_out = getattr(update, "rawOutput", {}) or {}
+            if update.status == "completed":
+                rc = raw_out.get("returncode")
+                err = raw_out.get("error")
+                truncated = raw_out.get("truncated")
+                summary_bits = []
+                if rc is not None:
+                    summary_bits.append(f"rc={rc}")
+                if err:
+                    summary_bits.append(f"error={err}")
+                if truncated:
+                    summary_bits.append("truncated")
+                summary = " ".join(summary_bits) if summary_bits else "done"
+                print(f"| Tool[{update.status}]: {summary}")
+            else:
+                text = raw_out.get("content") or raw_out.get("error") or ""
+                print(f"| Tool[{update.status}]: {text}")
+            return
         if not isinstance(update, AgentMessageChunk):
             return
 
@@ -119,6 +142,11 @@ class ExampleClient(Client):
         prefix = ""
         if isinstance(content, TextContentBlock):
             text = content.text
+            if prefix:
+                print(f"| Agent: {prefix} {text}")
+            else:
+                print(text, end="", flush=True)
+            return
         elif isinstance(content, ImageContentBlock):
             text = "<image>"
         elif isinstance(content, AudioContentBlock):
@@ -129,9 +157,6 @@ class ExampleClient(Client):
             text = "<resource>"
         else:
             text = "<content>"
-
-        if isinstance(update, (ToolCallStart, ToolCallProgress)):
-            prefix = "[tool]"
 
         print(f"| Agent: {prefix} {text}")
 
@@ -187,109 +212,111 @@ async def interactive_loop(conn: ClientSideConnection, session_id: str) -> None:
 
     @kb.add("escape")
     def _(event):  # type: ignore
-        event.app.exit(result=CANCEL_TOKEN)
+        if not event.app.is_done:
+            event.app.exit(result=CANCEL_TOKEN)
 
     session = PromptSession(key_bindings=kb)
     current_mode = "ask"
     current_model = model_registry.load_models_config().get("current", "function-model")
     permission_always = False
 
-    while True:
-        try:
-            line = await session.prompt_async(f"{current_mode}|{current_model}> ")
-            if line == CANCEL_TOKEN:
-                await conn.cancel(CancelNotification(sessionId=session_id))
-                print("[cancelled]")
-                continue
-        except EOFError:
-            break
-        except KeyboardInterrupt:
-            print("", file=sys.stderr)
-            break
-
-        if not line:
-            continue
-
-        # Handle slash commands locally
-        if line.startswith("/models"):
-            cfg = model_registry.load_models_config()
-            current = cfg.get("current", "function-model")
-            print(f"Current model: {current}")
-            for mid, meta in model_registry.list_user_models().items():
-                desc = meta.get("description", "")
-                print(f"- {mid}: {desc}")
-            continue
-
-        if line.startswith("/model"):
-            parts = line.split()
-            selection = parts[1] if len(parts) > 1 else await _select_model_interactive()
-            if not selection:
-                print("[model unchanged]")
-                continue
+    with patch_stdout():
+        while True:
             try:
-                model_registry.set_current_model(selection)
-            except ValueError as exc:
-                print(f"[{exc}]")
-                continue
-            current_model = selection
-            await conn.setSessionModel(
-                SetSessionModelRequest(sessionId=session_id, modelId=selection)
-            )
-            print(f"[model set to {selection}]")
-            continue
-
-        if line.startswith("/mode"):
-            parts = line.split()
-            if len(parts) == 1:
-                print("Usage: /mode <ask|yolo>")
-                continue
-            await conn.setSessionMode(
-                SetSessionModeRequest(sessionId=session_id, modeId=parts[1])
-            )
-            current_mode = parts[1]
-            # Reset per-session permission policy when switching modes
-            permission_always = False
-            print(f"[mode set to {current_mode}]")
-            continue
-
-        if line.startswith("/test"):
-            print("[running tests: uv run pytest]")
-            await _run_tests()
-            continue
-
-        if line in ("/exit", "/quit", "exit", "quit"):
-            print("[exiting]")
-            break
-
-        if current_mode == "ask":
-            if permission_always:
-                pass  # proceed without prompting again
-            else:
-                print("Permission required. Choose:")
-                print("1) Yes, proceed (once)")
-                print("2) Yes, don't ask again for this session")
-                print("3) No, revise the request")
-                loop = asyncio.get_running_loop()
-                try:
-                    raw = await loop.run_in_executor(None, lambda: input("Choice [1-3]: ").strip())
-                except Exception:
-                    raw = "3"
-                choice = {"1": "once", "2": "always", "3": "deny"}.get(raw, "deny")
-                if choice == "deny":
-                    print("[prompt cancelled; please rephrase]")
+                line = await session.prompt_async(f"{current_mode}|{current_model}> ")
+                if line == CANCEL_TOKEN:
+                    await conn.cancel(CancelNotification(sessionId=session_id))
+                    print("[cancelled]")
                     continue
-                if choice == "always":
-                    permission_always = True
+            except EOFError:
+                break
+            except KeyboardInterrupt:
+                print("", file=sys.stderr)
+                continue
 
-        try:
-            await conn.prompt(
-                PromptRequest(
-                    sessionId=session_id,
-                    prompt=[text_block(line)],
+            if not line:
+                continue
+
+            # Handle slash commands locally
+            if line.startswith("/models"):
+                cfg = model_registry.load_models_config()
+                current = cfg.get("current", "function-model")
+                print(f"Current model: {current}")
+                for mid, meta in model_registry.list_user_models().items():
+                    desc = meta.get("description", "")
+                    print(f"- {mid}: {desc}")
+                continue
+
+            if line.startswith("/model"):
+                parts = line.split()
+                selection = parts[1] if len(parts) > 1 else await _select_model_interactive()
+                if not selection:
+                    print("[model unchanged]")
+                    continue
+                try:
+                    model_registry.set_current_model(selection)
+                except ValueError as exc:
+                    print(f"[{exc}]")
+                    continue
+                current_model = selection
+                await conn.setSessionModel(
+                    SetSessionModelRequest(sessionId=session_id, modelId=selection)
                 )
-            )
-        except Exception as exc:  # noqa: BLE001
-            logging.error("Prompt failed: %s", exc)
+                print(f"[model set to {selection}]")
+                continue
+
+            if line.startswith("/mode"):
+                parts = line.split()
+                if len(parts) == 1:
+                    print("Usage: /mode <ask|yolo>")
+                    continue
+                await conn.setSessionMode(
+                    SetSessionModeRequest(sessionId=session_id, modeId=parts[1])
+                )
+                current_mode = parts[1]
+                # Reset per-session permission policy when switching modes
+                permission_always = False
+                print(f"[mode set to {current_mode}]")
+                continue
+
+            if line.startswith("/test"):
+                print("[running tests: uv run pytest]")
+                await _run_tests()
+                continue
+
+            if line in ("/exit", "/quit", "exit", "quit"):
+                print("[exiting]")
+                break
+
+            if current_mode == "ask":
+                if permission_always:
+                    pass  # proceed without prompting again
+                else:
+                    print("Permission required. Choose:")
+                    print("1) Yes, proceed (once)")
+                    print("2) Yes, don't ask again for this session")
+                    print("3) No, revise the request")
+                    loop = asyncio.get_running_loop()
+                    try:
+                        raw = await loop.run_in_executor(None, lambda: input("Choice [1-3]: ").strip())
+                    except Exception:
+                        raw = "3"
+                    choice = {"1": "once", "2": "always", "3": "deny"}.get(raw, "deny")
+                    if choice == "deny":
+                        print("[prompt cancelled; please rephrase]")
+                        continue
+                    if choice == "always":
+                        permission_always = True
+
+            try:
+                await conn.prompt(
+                    PromptRequest(
+                        sessionId=session_id,
+                        prompt=[text_block(line)],
+                    )
+                )
+            except Exception as exc:  # noqa: BLE001
+                logging.error("Prompt failed: %s", exc)
 
 
 async def run_client(program: str, args: Iterable[str]) -> int:
