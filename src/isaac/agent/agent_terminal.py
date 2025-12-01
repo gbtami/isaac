@@ -23,8 +23,8 @@ from acp import (
     WaitForTerminalExitResponse,
 )
 
-from isaac.fs import resolve_path_for_session
-from isaac.terminal_common import TerminalState, build_exit_status, read_nonblocking
+from isaac.agent.fs import resolve_path_for_session
+from isaac.shared.terminal_common import TerminalState, build_exit_status, read_nonblocking
 
 
 async def create_terminal(
@@ -32,6 +32,7 @@ async def create_terminal(
     terminals: Dict[str, TerminalState],
     params: CreateTerminalRequest,
 ) -> CreateTerminalResponse:
+    """Spawn a terminal on the agent host (Terminals spec)."""
     import os
     import uuid
 
@@ -63,6 +64,7 @@ async def terminal_output(
     terminals: Dict[str, TerminalState],
     params: TerminalOutputRequest,
 ) -> TerminalOutputResponse:
+    """Return incremental stdout/stderr for a terminal."""
     state = terminals.get(params.terminalId)
     if not state:
         return TerminalOutputResponse(output="", truncated=False, exitStatus=None)
@@ -85,6 +87,7 @@ async def wait_for_terminal_exit(
     terminals: Dict[str, TerminalState],
     params: WaitForTerminalExitRequest,
 ) -> WaitForTerminalExitResponse:
+    """Await process completion for a terminal."""
     state = terminals.get(params.terminalId)
     if not state:
         return WaitForTerminalExitResponse(exitCode=None, signal=None)
@@ -100,6 +103,7 @@ async def kill_terminal(
     terminals: Dict[str, TerminalState],
     params: KillTerminalCommandRequest,
 ) -> KillTerminalCommandResponse:
+    """Kill a running terminal process."""
     state = terminals.get(params.terminalId)
     if state and state.proc.returncode is None:
         state.proc.kill()
@@ -110,6 +114,7 @@ async def release_terminal(
     terminals: Dict[str, TerminalState],
     params: ReleaseTerminalRequest,
 ) -> ReleaseTerminalResponse:
+    """Release terminal resources, terminating if still alive."""
     state = terminals.pop(params.terminalId, None)
     if state and state.proc.returncode is None:
         state.proc.terminate()

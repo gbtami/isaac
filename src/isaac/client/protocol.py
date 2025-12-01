@@ -1,0 +1,158 @@
+"""Protocol-facing ACP client implementation and session update handling."""
+
+from __future__ import annotations
+
+from typing import Any
+
+from acp import (
+    Client,
+    CreateTerminalRequest,
+    CreateTerminalResponse,
+    KillTerminalCommandRequest,
+    KillTerminalCommandResponse,
+    ReleaseTerminalRequest,
+    ReleaseTerminalResponse,
+    RequestError,
+    RequestPermissionResponse,
+    SessionNotification,
+    SetSessionModeRequest,
+    TerminalOutputRequest,
+    TerminalOutputResponse,
+    WaitForTerminalExitRequest,
+    WaitForTerminalExitResponse,
+)
+from acp.schema import (
+    AgentMessageChunk,
+    AllowedOutcome,
+    AudioContentBlock,
+    CurrentModeUpdate,
+    EmbeddedResourceContentBlock,
+    ImageContentBlock,
+    ResourceContentBlock,
+    TextContentBlock,
+    ToolCallProgress,
+    ToolCallStart,
+)
+
+from isaac.client.client_terminal import ClientTerminalManager
+from isaac.client.session_state import SessionUIState
+
+
+class ExampleClient(Client):
+    """Minimal ACP client for exercising the protocol endpoints."""
+
+    def __init__(self, state: SessionUIState) -> None:
+        self._last_prompt = ""
+        self._state = state
+        self._terminal_manager = ClientTerminalManager()
+
+    async def requestPermission(self, params):  # type: ignore[override]
+        """Prompt the user for a permission choice (Prompt Turn permission flow)."""
+        try:
+            for idx, opt in enumerate(params.options, start=1):
+                label = getattr(opt, "label", opt.optionId)
+                print(f"{idx}) {label}")
+            choice = input("Permission choice (number): ").strip()
+            if choice.isdigit() and 1 <= int(choice) <= len(params.options):
+                selection = params.options[int(choice) - 1].optionId
+            else:
+                selection = params.options[0].optionId if params.options else "default"
+        except Exception:
+            selection = params.options[0].optionId if params.options else "default"
+        return RequestPermissionResponse(outcome=AllowedOutcome(optionId=selection))
+
+    async def writeTextFile(self, params):  # type: ignore[override]
+        raise RequestError.method_not_found("fs/write_text_file")
+
+    async def readTextFile(self, params):  # type: ignore[override]
+        raise RequestError.method_not_found("fs/read_text_file")
+
+    async def createTerminal(self, params: CreateTerminalRequest) -> CreateTerminalResponse:  # type: ignore[override]
+        """Create a terminal on the client host per Terminals section."""
+        return await self._terminal_manager.create_terminal(params)
+
+    async def terminalOutput(self, params: TerminalOutputRequest) -> TerminalOutputResponse:  # type: ignore[override]
+        """Return terminal output to the agent."""
+        return await self._terminal_manager.terminal_output(params)
+
+    async def releaseTerminal(self, params: ReleaseTerminalRequest) -> ReleaseTerminalResponse:  # type: ignore[override]
+        return await self._terminal_manager.release_terminal(params)
+
+    async def waitForTerminalExit(
+        self, params: WaitForTerminalExitRequest
+    ) -> WaitForTerminalExitResponse:  # type: ignore[override]
+        """Block until the requested client terminal exits."""
+        return await self._terminal_manager.wait_for_terminal_exit(params)
+
+    async def killTerminalCommand(
+        self, params: KillTerminalCommandRequest
+    ) -> KillTerminalCommandResponse:  # type: ignore[override]
+        return await self._terminal_manager.kill_terminal(params)
+
+    async def sessionUpdate(self, params: SessionNotification) -> None:
+        update = params.update
+        if isinstance(update, CurrentModeUpdate):
+            self._state.current_mode = update.currentModeId
+            print(f"[mode update -> {self._state.current_mode}]")
+            return
+        if isinstance(update, ToolCallStart):
+            print(f"| Tool[start]: {getattr(update, 'title', '')}")
+            return
+        if isinstance(update, ToolCallProgress):
+            raw_out = getattr(update, "rawOutput", {}) or {}
+            if update.status == "completed":
+                rc = raw_out.get("returncode")
+                err = raw_out.get("error")
+                truncated = raw_out.get("truncated")
+                summary_bits = []
+                if rc is not None:
+                    summary_bits.append(f"rc={rc}")
+                if err:
+                    summary_bits.append(f"error={err}")
+                if truncated:
+                    summary_bits.append("truncated")
+                summary = " ".join(summary_bits) if summary_bits else "done"
+                print(f"| Tool[{update.status}]: {summary}")
+            else:
+                text = raw_out.get("content") or raw_out.get("error") or ""
+                print(f"| Tool[{update.status}]: {text}")
+            return
+        if not isinstance(update, AgentMessageChunk):
+            return
+
+        content = update.content
+        text: str
+        prefix = ""
+        if isinstance(content, TextContentBlock):
+            text = content.text
+            if self._state.collect_models:
+                self._state.model_buffer = (self._state.model_buffer or []) + [text]
+            if prefix:
+                print(f"| Agent: {prefix} {text}", end="", flush=True)
+            else:
+                print(text, end="", flush=True)
+            self._state.pending_newline = True
+            return
+        elif isinstance(content, ImageContentBlock):
+            text = "<image>"
+        elif isinstance(content, AudioContentBlock):
+            text = "<audio>"
+        elif isinstance(content, ResourceContentBlock):
+            text = content.uri or "<resource>"
+        elif isinstance(content, EmbeddedResourceContentBlock):
+            text = "<resource>"
+        else:
+            text = "<content>"
+
+        print(f"| Agent: {prefix} {text}")
+
+
+async def set_mode(
+    conn: Any,
+    session_id: str,
+    state: SessionUIState,
+    mode: str,
+) -> None:
+    await conn.setSessionMode(SetSessionModeRequest(sessionId=session_id, modeId=mode))
+    state.current_mode = mode
+    print(f"[mode set to {state.current_mode}]")

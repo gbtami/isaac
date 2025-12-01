@@ -7,7 +7,7 @@ from typing import Any, Callable
 
 from pydantic_ai.messages import PartDeltaEvent, PartEndEvent  # type: ignore
 from pydantic_ai.run import AgentRunResultEvent  # type: ignore
-from isaac.tools import TOOL_HANDLERS, run_tool
+from isaac.agent.tools import TOOL_HANDLERS, run_tool
 
 
 def register_tools(agent: Any) -> None:

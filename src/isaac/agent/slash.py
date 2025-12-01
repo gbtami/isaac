@@ -17,6 +17,7 @@ def list_slash_commands() -> List[str]:
 
 
 def handle_slash_command(session_id: str, prompt: str) -> SessionNotification | None:
+    """Handle server-side slash commands (Slash Commands section)."""
     if prompt.strip() == "/test":
         output = _run_pytest()
         return SessionNotification(

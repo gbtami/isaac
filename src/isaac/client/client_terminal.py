@@ -25,7 +25,7 @@ from acp import (
     WaitForTerminalExitResponse,
 )
 
-from isaac.terminal_common import TerminalState, build_exit_status, read_nonblocking
+from isaac.shared.terminal_common import TerminalState, build_exit_status, read_nonblocking
 
 
 class ClientTerminalManager:
@@ -35,6 +35,7 @@ class ClientTerminalManager:
         self._terminals: Dict[str, TerminalState] = terminals or {}
 
     async def create_terminal(self, params: CreateTerminalRequest) -> CreateTerminalResponse:
+        """Create a client-hosted terminal for agent use (Terminals spec)."""
         cwd = Path(params.cwd) if params.cwd else Path.cwd()
         env = os.environ.copy()
         if params.env:
@@ -55,6 +56,7 @@ class ClientTerminalManager:
         return CreateTerminalResponse(terminalId=terminal_id)
 
     async def terminal_output(self, params: TerminalOutputRequest) -> TerminalOutputResponse:
+        """Return streamed output for a client terminal."""
         state = self._terminals.get(params.terminalId)
         if not state:
             return TerminalOutputResponse(output="", truncated=False, exitStatus=None)
@@ -75,6 +77,7 @@ class ClientTerminalManager:
     async def wait_for_terminal_exit(
         self, params: WaitForTerminalExitRequest
     ) -> WaitForTerminalExitResponse:
+        """Wait for a terminal to exit."""
         state = self._terminals.get(params.terminalId)
         if not state:
             return WaitForTerminalExitResponse(exitCode=None, signal=None)
@@ -86,6 +89,7 @@ class ClientTerminalManager:
         )
 
     async def kill_terminal(self, params: KillTerminalCommandRequest) -> KillTerminalCommandResponse:
+        """Forcefully kill a terminal process."""
         state = self._terminals.get(params.terminalId)
         if state and state.proc.returncode is None:
             state.proc.kill()
@@ -94,6 +98,7 @@ class ClientTerminalManager:
     async def release_terminal(
         self, params: ReleaseTerminalRequest
     ) -> ReleaseTerminalResponse:
+        """Release and terminate a client terminal if still running."""
         state = self._terminals.pop(params.terminalId, None)
         if state and state.proc.returncode is None:
             state.proc.terminate()

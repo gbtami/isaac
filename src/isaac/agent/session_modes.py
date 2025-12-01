@@ -9,6 +9,7 @@ from typing import Any, Dict
 
 
 def available_modes() -> list[dict[str, str]]:
+    """Return advertised modes per Session Modes section."""
     return [
         {"id": "ask", "name": "Ask", "description": "Normal assistant responses"},
         {"id": "yolo", "name": "Yolo", "description": "Act without extra permission prompts"},
@@ -16,6 +17,7 @@ def available_modes() -> list[dict[str, str]]:
 
 
 def build_mode_state(session_modes: Dict[str, str], session_id: str, current_mode: str) -> Any:
+    """Construct SessionModeState for session/new responses."""
     session_modes[session_id] = current_mode
     try:
         from acp.schema import SessionModeState, SessionMode  # type: ignore

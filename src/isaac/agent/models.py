@@ -79,19 +79,21 @@ DEFAULT_CONFIG = {
     },
 }
 
+CONFIG_DIR = Path(os.getenv("XDG_CONFIG_HOME") or (Path.home() / ".config")) / "isaac"
+CONFIG_DIR.mkdir(parents=True, exist_ok=True)
 
-
-MODELS_FILE = Path(__file__).resolve().parents[2] / "models.json"
+MODELS_FILE = CONFIG_DIR / "models.json"
 
 
 def load_models_config() -> Dict[str, Any]:
     if not MODELS_FILE.exists():
         MODELS_FILE.write_text(json.dumps(DEFAULT_CONFIG, indent=2), encoding="utf-8")
-        return DEFAULT_CONFIG.copy()
-    try:
-        config = json.loads(MODELS_FILE.read_text(encoding="utf-8"))
-    except Exception:
         config = DEFAULT_CONFIG.copy()
+    else:
+        try:
+            config = json.loads(MODELS_FILE.read_text(encoding="utf-8"))
+        except Exception:
+            config = DEFAULT_CONFIG.copy()
     dirty = False
     # Backfill missing defaults
     for key, value in DEFAULT_CONFIG["models"].items():
@@ -160,7 +162,9 @@ def _build_provider_model(model_id: str, model_entry: Dict[str, Any]) -> Any:
         if not key:
             raise RuntimeError("ANTHROPIC_API_KEY is required for anthropic models")
         url = os.getenv("ANTHROPIC_BASE_URL") or base_url
-        provider_obj = AnthropicProvider(api_key=key, base_url=url) if url else AnthropicProvider(api_key=key)
+        provider_obj = (
+            AnthropicProvider(api_key=key, base_url=url) if url else AnthropicProvider(api_key=key)
+        )
         return AnthropicModel(model_spec, provider=provider_obj)
 
     if provider == "google":
@@ -168,7 +172,9 @@ def _build_provider_model(model_id: str, model_entry: Dict[str, Any]) -> Any:
         if not key:
             raise RuntimeError("GOOGLE_API_KEY is required for google models")
         url = os.getenv("GOOGLE_API_BASE_URL") or base_url
-        provider_obj = GoogleProvider(api_key=key, base_url=url) if url else GoogleProvider(api_key=key)
+        provider_obj = (
+            GoogleProvider(api_key=key, base_url=url) if url else GoogleProvider(api_key=key)
+        )
         return GoogleModel(model_spec, provider=provider_obj)
 
     if provider == "openrouter":
@@ -191,7 +197,12 @@ def _build_provider_model(model_id: str, model_entry: Dict[str, Any]) -> Any:
     return model_spec
 
 
-def build_agent(model_id: str, register_tools: Callable[[Any], None]) -> Any:
+def build_agent(
+    model_id: str,
+    register_tools: Callable[[Any], None],
+    *,
+    toolsets: list[Any] | None = None,
+) -> Any:
     """Build a pydantic-ai Agent for the given model id."""
     load_dotenv()
     config = load_models_config()
@@ -200,6 +211,6 @@ def build_agent(model_id: str, register_tools: Callable[[Any], None]) -> Any:
     model_obj = _build_provider_model(model_id, model_entry)
     logger.info("MODEL: %s", model_obj.model_name)
 
-    agent = PydanticAgent(model_obj)
+    agent = PydanticAgent(model_obj, toolsets=toolsets or ())
     register_tools(agent)
     return agent

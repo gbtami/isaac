@@ -1,0 +1,114 @@
+"""Interactive ACP client with REPL, tool calls, and terminal support."""
+
+from __future__ import annotations
+
+import argparse
+import asyncio
+import contextlib
+import logging
+import os
+import sys
+from pathlib import Path
+from typing import Any, Iterable
+
+import asyncio.subprocess as aio_subprocess
+from acp import ClientSideConnection, InitializeRequest, NewSessionRequest, PROTOCOL_VERSION
+from acp.schema import ClientCapabilities, FileSystemCapability, Implementation
+
+from isaac.client.mcp_config import load_mcp_config
+from isaac.client.protocol import ExampleClient
+from isaac.client.repl import interactive_loop
+from isaac.client.session_state import SessionUIState
+
+
+async def run_client(program: str, args: Iterable[str], mcp_servers: list[Any]) -> int:
+    logging.basicConfig(level=logging.INFO)
+
+    program_path = Path(program)
+    spawn_program = program
+    spawn_args = list(args)
+
+    if program_path.exists() and not os.access(program_path, os.X_OK):
+        spawn_program = sys.executable
+        spawn_args = [str(program_path), *spawn_args]
+
+    proc = await asyncio.create_subprocess_exec(
+        spawn_program,
+        *spawn_args,
+        stdin=aio_subprocess.PIPE,
+        stdout=aio_subprocess.PIPE,
+    )
+
+    if proc.stdin is None or proc.stdout is None:
+        print("Agent process does not expose stdio pipes", file=sys.stderr)
+        return 1
+
+    state = SessionUIState(current_mode="ask", current_model="unknown", mcp_servers=[])
+
+    client_impl = ExampleClient(state)
+    conn = ClientSideConnection(lambda _agent: client_impl, proc.stdin, proc.stdout)
+
+    await conn.initialize(
+        InitializeRequest(
+            protocolVersion=PROTOCOL_VERSION,
+            clientCapabilities=ClientCapabilities(
+                fs=FileSystemCapability(readTextFile=False, writeTextFile=False),
+                terminal=True,
+            ),
+            clientInfo=Implementation(
+                name="example-client", title="Example Client", version="0.1.0"
+            ),
+        )
+    )
+    state.mcp_servers = [
+        (srv.get("name") if isinstance(srv, dict) else getattr(srv, "name", "<server>"))
+        or "<server>"
+        for srv in mcp_servers
+    ]
+    session = await conn.newSession(NewSessionRequest(mcpServers=mcp_servers, cwd=os.getcwd()))
+    try:
+        ext_models = await conn.extMethod("model/list", {"sessionId": session.sessionId})
+        if isinstance(ext_models, dict):
+            current = ext_models.get("current")
+            if isinstance(current, str):
+                state.current_model = current
+    except Exception:
+        state.current_model = state.current_model
+    if getattr(session, "modes", None) and getattr(session.modes, "currentModeId", None):
+        state.current_mode = session.modes.currentModeId
+
+    try:
+        await interactive_loop(conn, session.sessionId, state)
+        return 0
+    except KeyboardInterrupt:
+        return 130
+    finally:
+        if proc.returncode is None:
+            proc.terminate()
+            with contextlib.suppress(ProcessLookupError):
+                await proc.wait()
+
+
+async def main(argv: list[str]) -> int:
+    parser = argparse.ArgumentParser(description="Run ACP client against an agent program.")
+    parser.add_argument(
+        "--mcp-config",
+        type=str,
+        help="Path to JSON file containing ACP mcpServers array (stdio/http/sse entries).",
+    )
+    parser.add_argument("agent_program", help="Path to the agent program to launch")
+    parser.add_argument("agent_args", nargs=argparse.REMAINDER, help="Arguments for the agent")
+    args = parser.parse_args(argv[1:])
+
+    mcp_servers: list[Any] = []
+    if args.mcp_config:
+        mcp_servers = load_mcp_config(args.mcp_config)
+
+    return await run_client(args.agent_program, args.agent_args, mcp_servers)
+
+
+if __name__ == "__main__":
+    try:
+        raise SystemExit(asyncio.run(main(sys.argv)))
+    except KeyboardInterrupt:
+        raise SystemExit(130)
