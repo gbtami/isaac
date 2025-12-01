@@ -87,6 +87,7 @@ from isaac.agent.agent_terminal import (
     kill_terminal,
     release_terminal,
 )
+from isaac.agent.brain.history import build_chat_history
 from isaac.agent.planner import parse_plan_request, build_plan_notification
 from isaac.agent.session_modes import build_mode_state
 from isaac.agent.slash import handle_slash_command
@@ -283,6 +284,7 @@ class ACPAgent(Agent):
         cancel_event = self._cancel_events.setdefault(params.sessionId, asyncio.Event())
         cancel_event.clear()
         self._store_user_prompt(params.sessionId, params.prompt)
+        history = build_chat_history(self._session_history.get(params.sessionId, []))
 
         for block in params.prompt:
             tool_call = getattr(block, "toolCall", None)
@@ -331,7 +333,9 @@ class ACPAgent(Agent):
                 )
             )
 
-        response_text = await stream_with_runner(runner, prompt_text, _push_chunk, cancel_event)
+        response_text = await stream_with_runner(
+            runner, prompt_text, _push_chunk, cancel_event, history=history
+        )
         if response_text is None:
             return PromptResponse(stopReason="cancelled")
         # If nothing was streamed (e.g., fallback runner), ensure the response is sent once.
