@@ -23,9 +23,9 @@ from acp import (
 )
 from acp.schema import (
     AgentMessageChunk,
+    AgentPlanUpdate,
     AllowedOutcome,
     AudioContentBlock,
-    AgentPlanUpdate,
     CurrentModeUpdate,
     EmbeddedResourceContentBlock,
     ImageContentBlock,

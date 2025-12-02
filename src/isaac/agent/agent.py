@@ -274,6 +274,9 @@ class ACPAgent(Agent):
                 toolsets=toolsets,
             )
             self._session_model_ids[params.sessionId] = params.modelId
+            with contextlib.suppress(Exception):
+                # Persist selection so subsequent runs default to the same model.
+                model_registry.set_current_model(params.modelId)
         except Exception as exc:  # pragma: no cover - model build errors
             logger.error("Failed to set session model: %s", exc)
             return SetSessionModelResponse()
@@ -339,6 +342,15 @@ class ACPAgent(Agent):
         )
         if response_text is None:
             return PromptResponse(stopReason="cancelled")
+        if response_text.startswith("Provider error:"):
+            msg = response_text.removeprefix("Provider error:").strip()
+            await self._send_update(
+                session_notification(
+                    params.sessionId,
+                    update_agent_message(text_block(f"Model/provider error: {msg}")),
+                )
+            )
+            return PromptResponse(stopReason="end_turn")
         # If nothing was streamed (e.g., fallback runner), ensure the response is sent once.
         if not response_text:
             await _push_chunk(response_text)
@@ -422,6 +434,10 @@ class ACPAgent(Agent):
             content=[tool_content(text_block(summary))],
         )
         await self._send_update(session_notification(session_id, progress))
+        if tool_name == "tool_generate_plan":
+            plan_update = parse_plan_from_text(str(result.get("content") or ""))
+            if plan_update:
+                await self._send_update(session_notification(session_id, plan_update))
 
     async def _execute_run_command_with_terminal(
         self,

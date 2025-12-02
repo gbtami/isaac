@@ -15,7 +15,9 @@ def _resolve(base: Optional[str], target: str) -> Path:
     return Path(base or Path.cwd()) / p
 
 
-async def apply_patch(file_path: str, patch: str, strip: Optional[int] = None, cwd: Optional[str] = None) -> dict:
+async def apply_patch(
+    file_path: str, patch: str, strip: Optional[int] = None, cwd: Optional[str] = None
+) -> dict:
     """Apply a unified diff patch to a file using the `patch` command."""
     path = _resolve(cwd, file_path)
     if not path.exists():

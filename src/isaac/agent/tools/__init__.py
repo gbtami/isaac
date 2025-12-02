@@ -42,10 +42,23 @@ TOOL_HANDLERS: Dict[str, ToolHandler] = {
     "tool_file_summary": file_summary,
 }
 
+# Tools permitted for planning delegate (read-only, non-destructive)
+READ_ONLY_TOOLS = {
+    "tool_list_files",
+    "tool_read_file",
+    "tool_file_summary",
+    "tool_code_search",
+}
+
+# Optional, dynamically-registered tools (e.g., planning delegate)
+EXTRA_TOOL_HANDLERS: Dict[str, ToolHandler] = {}
+EXTRA_TOOLS: Dict[str, Any] = {}
+EXTRA_DSL: Dict[str, tuple[str, Callable[[list[str], str], dict | None]]] = {}
+
 
 def get_tools() -> List[Any]:
     """Return ACP tool descriptions (with graceful fallback when schema lacks Tool)."""
-    return [
+    base_tools = [
         Tool(
             function="tool_list_files",
             description="List files and directories recursively",
@@ -111,7 +124,10 @@ def get_tools() -> List[Any]:
                 properties={
                     "file_path": {"type": "string", "description": "Path to the file to patch"},
                     "patch": {"type": "string", "description": "Unified diff patch text"},
-                    "strip": {"type": "integer", "description": "Strip leading path components (patch -p)"},
+                    "strip": {
+                        "type": "integer",
+                        "description": "Strip leading path components (patch -p)",
+                    },
                 },
                 required=["file_path", "patch"],
             ),
@@ -123,8 +139,14 @@ def get_tools() -> List[Any]:
                 type="object",
                 properties={
                     "file_path": {"type": "string", "description": "Path to summarize"},
-                    "head_lines": {"type": "integer", "description": "Number of head lines to include"},
-                    "tail_lines": {"type": "integer", "description": "Number of tail lines to include"},
+                    "head_lines": {
+                        "type": "integer",
+                        "description": "Number of head lines to include",
+                    },
+                    "tail_lines": {
+                        "type": "integer",
+                        "description": "Number of tail lines to include",
+                    },
                 },
                 required=["file_path"],
             ),
@@ -149,10 +171,12 @@ def get_tools() -> List[Any]:
             ),
         ),
     ]
+    base_tools.extend(EXTRA_TOOLS.values())
+    return base_tools
 
 
 async def run_tool(function_name: str, **kwargs: Any) -> dict:
-    handler = TOOL_HANDLERS.get(function_name)
+    handler = TOOL_HANDLERS.get(function_name) or EXTRA_TOOL_HANDLERS.get(function_name)
     if not handler:
         return {"content": None, "error": f"Unknown tool function: {function_name}"}
     try:
@@ -243,9 +267,54 @@ def parse_tool_request(prompt_text: str) -> dict[str, Any] | None:
     parser = DSL_PARSERS.get(dsl_name)
     tool_name = DSL_TO_TOOL.get(dsl_name)
     if not parser or not tool_name:
+        extra = EXTRA_DSL.get(dsl_name)
+        if extra:
+            tool_name, parser = extra
+    if not parser or not tool_name:
         return None
 
     parsed_args = parser(args, raw[len(dsl_name) :].strip() if raw.startswith(dsl_name) else raw)
     if parsed_args is None:
         return None
     return {"tool_name": tool_name, **parsed_args}
+
+
+def register_planning_tool(
+    handler: ToolHandler,
+    *,
+    description: str = "Generate a task plan using a planning sub-agent",
+) -> None:
+    """Register the planning delegate tool so models can call it."""
+
+    EXTRA_TOOL_HANDLERS["tool_generate_plan"] = handler
+    EXTRA_TOOLS["tool_generate_plan"] = Tool(
+        function="tool_generate_plan",
+        description=description,
+        parameters=ToolParameter(
+            type="object",
+            properties={
+                "goal": {"type": "string", "description": "Goal to plan for"},
+                "context": {"type": "string", "description": "Optional extra context"},
+            },
+            required=["goal"],
+        ),
+    )
+    EXTRA_DSL["plan"] = (
+        "tool_generate_plan",
+        lambda args, raw: {"goal": " ".join(args)} if args else None,
+    )
+
+
+def register_readonly_tools(agent: Any) -> None:
+    """Register read-only tool wrappers on the given agent (for planning delegate)."""
+
+    for name in READ_ONLY_TOOLS:
+
+        def _make_tool(fn_name: str):
+            @agent.tool_plain(name=fn_name)  # type: ignore[misc]
+            async def _wrapper(**kwargs: Any) -> Any:
+                return await run_tool(fn_name, **kwargs)
+
+            return _wrapper
+
+        _make_tool(name)

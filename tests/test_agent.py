@@ -12,6 +12,8 @@ from pydantic_ai import Agent as PydanticAgent  # type: ignore
 from pydantic_ai.models.test import TestModel  # type: ignore
 
 from isaac.agent.tools.apply_patch import apply_patch
+from isaac.agent.brain.planning_delegate import build_planning_agent
+from isaac.agent.runner import register_tools
 
 from isaac.agent import ACPAgent
 from acp import NewSessionRequest, ReadTextFileRequest, WriteTextFileRequest
@@ -25,7 +27,20 @@ from acp import (
 
 def make_function_agent(conn: AgentSideConnection) -> ACPAgent:
     """Helper to build ACPAgent with a deterministic in-process model."""
-    return ACPAgent(conn, ai_runner=PydanticAgent(TestModel(call_tools=[])))
+    runner = PydanticAgent(TestModel(call_tools=[]))
+    planning_runner = build_planning_agent(TestModel(call_tools=[]))
+    register_tools(runner, planning_agent=planning_runner)
+    return ACPAgent(conn, ai_runner=runner)
+
+
+def make_error_agent(conn: AgentSideConnection) -> ACPAgent:
+    """Agent whose runner fails to simulate provider errors."""
+
+    class ErrorRunner:
+        async def run_stream_events(self, prompt: str):  # pragma: no cover - simple stub
+            raise RuntimeError("rate limited")
+
+    return ACPAgent(conn, ai_runner=ErrorRunner())
 
 
 @pytest.mark.asyncio
@@ -150,6 +165,25 @@ async def test_tool_apply_patch(tmp_path: Path):
 
 
 @pytest.mark.asyncio
+async def test_provider_error_is_sent_to_client():
+    conn = AsyncMock(spec=AgentSideConnection)
+    agent = make_error_agent(conn)
+
+    session_id = "err-session"
+    response = await agent.prompt(
+        PromptRequest(sessionId=session_id, prompt=[text_block("do something")])
+    )
+
+    assert response.stopReason == "end_turn"
+    updates = [
+        call_args[0][0].update
+        for call_args in conn.sessionUpdate.call_args_list
+        if isinstance(call_args[0][0].update, AgentMessageChunk)
+    ]
+    assert any("Model/provider error" in getattr(u.content, "text", "") for u in updates)
+
+
+@pytest.mark.asyncio
 async def test_tool_code_search(tmp_path: Path):
     file_a = tmp_path / "a.txt"
     file_b = tmp_path / "b.txt"
@@ -212,6 +246,21 @@ async def test_plan_updates():
     assert hasattr(notification.update, "entries")
     assert len(notification.update.entries) == 2
     assert response.stopReason == "end_turn"
+
+
+@pytest.mark.asyncio
+async def test_plan_tool_emits_agent_plan():
+    conn = AsyncMock(spec=AgentSideConnection)
+    agent = make_function_agent(conn)
+
+    session_id = "plan-tool-session"
+    response = await agent.prompt(
+        PromptRequest(sessionId=session_id, prompt=[text_block("tool:plan ship a release")])
+    )
+
+    assert response.stopReason == "end_turn"
+    updates = [call.args[0].update for call in conn.sessionUpdate.await_args_list]  # type: ignore[attr-defined]
+    assert any(getattr(u, "entries", None) for u in updates)
 
 
 @pytest.mark.asyncio

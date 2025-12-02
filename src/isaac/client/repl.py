@@ -15,6 +15,7 @@ from prompt_toolkit.key_binding import KeyBindings  # type: ignore
 from isaac.client.protocol import set_mode
 from isaac.client.session_state import SessionUIState
 from isaac.client.status_box import render_status_box
+from isaac.client.thinking import toggle_thinking
 
 
 async def read_console(prompt: str) -> str:
@@ -189,6 +190,7 @@ async def _handle_slash(
             "/models       - Fetch available models from the agent and select one\n"
             "/model <id>   - Set model to the given id\n"
             "/mode <id>    - Set agent mode (ask|yolo)\n"
+            "/thinking on|off - Toggle display of model thinking traces\n"
             "/test         - Run pytest locally\n"
             "/exit         - Exit the client\n"
         )
@@ -225,6 +227,14 @@ async def _handle_slash(
     if line == "/test":
         print("[running tests: uv run pytest]")
         await _run_tests()
+        return True
+    if line.startswith("/thinking"):
+        parts = line.split()
+        if len(parts) == 2 and parts[1] in {"on", "off"}:
+            msg = toggle_thinking(state, parts[1] == "on")
+            print(msg)
+        else:
+            print("Usage: /thinking on|off")
         return True
     if line in ("/exit", "/quit"):
         print("[exiting]")

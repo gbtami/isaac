@@ -7,10 +7,11 @@ from typing import Any, Callable
 
 from pydantic_ai.messages import PartDeltaEvent, PartEndEvent  # type: ignore
 from pydantic_ai.run import AgentRunResultEvent  # type: ignore
-from isaac.agent.tools import TOOL_HANDLERS, run_tool
+from isaac.agent.tools import TOOL_HANDLERS, run_tool, register_planning_tool
+from isaac.agent.brain.planning_delegate import make_planning_tool
 
 
-def register_tools(agent: Any) -> None:
+def register_tools(agent: Any, planning_agent: Any | None = None) -> None:
     for name in TOOL_HANDLERS.keys():
 
         def _make_tool(fn_name: str):
@@ -21,6 +22,15 @@ def register_tools(agent: Any) -> None:
             return _wrapper
 
         _make_tool(name)
+
+    if planning_agent is not None:
+        planning_handler = make_planning_tool(planning_agent)
+
+        @agent.tool_plain(name="tool_generate_plan")  # type: ignore[misc]
+        async def _planning_delegate(**kwargs: Any) -> Any:
+            return await planning_handler(**kwargs)
+
+        register_planning_tool(planning_handler)
 
 
 async def run_with_runner(runner: Any, prompt_text: str, *, history: Any | None = None) -> str:
@@ -46,7 +56,7 @@ async def run_with_runner(runner: Any, prompt_text: str, *, history: Any | None 
         if isinstance(result, str):
             return result
     except Exception as exc:  # pragma: no cover
-        return f"Error: {exc}"
+        return f"Provider error: {exc}"
 
     return f"Echo: {prompt_text}"
 
@@ -64,35 +74,40 @@ async def stream_with_runner(
     stream_method: Callable[[str], Any] = getattr(runner, "run_stream_events")
 
     output_parts: list[str] = []
-    event_iter = None
-    if history is not None:
-        try:
-            event_iter = stream_method(prompt_text, messages=history)
-        except TypeError:
-            event_iter = None
-    if event_iter is None:
-        event_iter = stream_method(prompt_text)
-    async for event in event_iter:
-        if cancel_event.is_set():
-            return None
-        if isinstance(event, str):
-            output_parts.append(event)
-            await on_text(event)
-            continue
-        if isinstance(event, PartDeltaEvent):
-            delta = getattr(event.delta, "content_delta", "")
-            if delta:
-                output_parts.append(delta)
-                await on_text(delta)
-        elif isinstance(event, PartEndEvent):
-            part = getattr(event.part, "content", "")
-            if part and not output_parts:
-                output_parts.append(part)
-                await on_text(part)
-        elif isinstance(event, AgentRunResultEvent):
-            result = getattr(event, "result", None)
-            if result is not None and getattr(result, "output", None):
-                full = getattr(result, "output")
-                return str(full)
+    try:
+        event_iter = None
+        if history is not None:
+            try:
+                event_iter = stream_method(prompt_text, messages=history)
+            except TypeError:
+                event_iter = None
+        if event_iter is None:
+            event_iter = stream_method(prompt_text)
+        if asyncio.iscoroutine(event_iter):
+            event_iter = await event_iter
+        async for event in event_iter:
+            if cancel_event.is_set():
+                return None
+            if isinstance(event, str):
+                output_parts.append(event)
+                await on_text(event)
+                continue
+            if isinstance(event, PartDeltaEvent):
+                delta = getattr(event.delta, "content_delta", "")
+                if delta:
+                    output_parts.append(delta)
+                    await on_text(delta)
+            elif isinstance(event, PartEndEvent):
+                part = getattr(event.part, "content", "")
+                if part and not output_parts:
+                    output_parts.append(part)
+                    await on_text(part)
+            elif isinstance(event, AgentRunResultEvent):
+                result = getattr(event, "result", None)
+                if result is not None and getattr(result, "output", None):
+                    full = getattr(result, "output")
+                    return str(full)
+    except Exception as exc:  # pragma: no cover - provider errors
+        return f"Provider error: {exc}"
 
     return "".join(output_parts) or None

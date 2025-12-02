@@ -14,10 +14,10 @@ from typing import Any, Callable, Dict
 
 from dotenv import load_dotenv
 from pydantic_ai import Agent as PydanticAgent  # type: ignore
-from pydantic_ai.models.anthropic import AnthropicModel  # type: ignore
-from pydantic_ai.models.google import GoogleModel  # type: ignore
+from pydantic_ai.models.anthropic import AnthropicModel, AnthropicModelSettings  # type: ignore
+from pydantic_ai.models.google import GoogleModel, GoogleModelSettings  # type: ignore
 from pydantic_ai.models.openai import OpenAIChatModel  # type: ignore
-from pydantic_ai.models.openrouter import OpenRouterModel  # type: ignore
+from pydantic_ai.models.openrouter import OpenRouterModel, OpenRouterModelSettings  # type: ignore
 from pydantic_ai.models.test import TestModel  # type: ignore
 from pydantic_ai.providers.anthropic import AnthropicProvider  # type: ignore
 from pydantic_ai.providers.google import GoogleProvider  # type: ignore
@@ -26,19 +26,17 @@ from pydantic_ai.providers.openai import OpenAIProvider  # type: ignore
 from pydantic_ai.providers.openrouter import OpenRouterProvider  # type: ignore
 
 from isaac.agent.brain.prompt import SYSTEM_PROMPT
+from isaac.agent.brain.planning_delegate import build_planning_agent
+from isaac.agent.tools import register_readonly_tools
 
 logger = logging.getLogger("acp_server")
 
 OLLAMA_BASE_URL = "http://localhost:11434/v1"
 
-HIDDEN_MODELS = {"test", "function-model"}
+HIDDEN_MODELS = {"function-model"}
 DEFAULT_CONFIG = {
     "current": "function-model",
     "models": {
-        "test": {
-            "model": "test",
-            "description": "Deterministic local model for offline/testing",
-        },
         "function-model": {
             "provider": "function",
             "model": "function",
@@ -54,10 +52,10 @@ DEFAULT_CONFIG = {
             "model": "claude-3-5-sonnet-20240620",
             "description": "Anthropic Claude 3.5 Sonnet",
         },
-        "google-gemini-2.5-pro": {
+        "google-gemini-2.5-flash": {
             "provider": "google",
-            "model": "gemini-2.5-pro",
-            "description": "Google Gemini 2.5 Pro",
+            "model": "gemini-2.5-flash",
+            "description": "Google Gemini 2.5 Flash",
         },
         "openrouter-x-ai/grok-4.1-fast:free": {
             "provider": "openrouter",
@@ -159,38 +157,43 @@ def _build_provider_model(model_id: str, model_entry: Dict[str, Any]) -> Any:
         if not key:
             raise RuntimeError("OPENAI_API_KEY is required for openai models")
         provider_obj = OpenAIProvider(api_key=key)
-        return OpenAIChatModel(model_spec, provider=provider_obj)
+        return OpenAIChatModel(model_spec, provider=provider_obj), None
 
     if provider == "anthropic":
         key = api_key or os.getenv("ANTHROPIC_API_KEY")
         if not key:
             raise RuntimeError("ANTHROPIC_API_KEY is required for anthropic models")
         provider_obj = AnthropicProvider(api_key=key)
-        return AnthropicModel(model_spec, provider=provider_obj)
+        settings = AnthropicModelSettings(
+            anthropic_thinking={"type": "enabled", "budget_tokens": 512}
+        )
+        return AnthropicModel(model_spec, provider=provider_obj), settings
 
     if provider == "google":
         key = api_key or os.getenv("GOOGLE_API_KEY")
         if not key:
             raise RuntimeError("GOOGLE_API_KEY is required for google models")
         provider_obj = GoogleProvider(api_key=key)
-        return GoogleModel(model_spec, provider=provider_obj)
+        settings = GoogleModelSettings(google_thinking_config={"include_thoughts": True})
+        return GoogleModel(model_spec, provider=provider_obj), settings
 
     if provider == "openrouter":
         key = api_key or os.getenv("OPENROUTER_API_KEY")
         if not key:
             raise RuntimeError("OPENROUTER_API_KEY is required for openrouter models")
         provider_obj = OpenRouterProvider(api_key=key)
-        return OpenRouterModel(model_spec, provider=provider_obj)
+        settings = OpenRouterModelSettings(openrouter_reasoning={"effort": "medium"})
+        return OpenRouterModel(model_spec, provider=provider_obj), settings
 
     if provider == "ollama":
         provider_obj = OllamaProvider(base_url=OLLAMA_BASE_URL)
-        return OpenAIChatModel(model_spec, provider=provider_obj)
+        return OpenAIChatModel(model_spec, provider=provider_obj), None
 
     if provider == "function":
-        return TestModel(call_tools=[])
+        return TestModel(call_tools=[]), None
 
     # default to test or direct spec
-    return model_spec
+    return model_spec, None
 
 
 def build_agent(
@@ -202,11 +205,21 @@ def build_agent(
     """Build a pydantic-ai Agent for the given model id."""
     load_dotenv()
     config = load_models_config()
-    model_entry = config.get("models", {}).get(model_id) or DEFAULT_CONFIG["models"]["test"]
+    model_entry = (
+        config.get("models", {}).get(model_id) or DEFAULT_CONFIG["models"]["function-model"]
+    )
 
-    model_obj = _build_provider_model(model_id, model_entry)
+    model_obj, model_settings = _build_provider_model(model_id, model_entry)
     logger.info("MODEL: %s", model_obj.model_name)
+    planner_obj, planner_settings = _build_provider_model(model_id, model_entry)
 
-    agent = PydanticAgent(model_obj, toolsets=toolsets or (), system_prompt=SYSTEM_PROMPT)
-    register_tools(agent)
+    agent = PydanticAgent(
+        model_obj,
+        toolsets=toolsets or (),
+        system_prompt=SYSTEM_PROMPT,
+        model_settings=model_settings,
+    )
+    planning_agent = build_planning_agent(planner_obj, planner_settings)
+    register_readonly_tools(planning_agent)
+    register_tools(agent, planning_agent=planning_agent)
     return agent

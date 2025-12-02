@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from unittest.mock import AsyncMock
 
@@ -15,6 +16,7 @@ from acp.helpers import session_notification, update_agent_message
 from acp.schema import AgentMessageChunk, SessionNotification, TextContentBlock, UserMessageChunk
 
 from isaac.agent.agent import ACPAgent
+from isaac.agent import models as model_registry
 
 
 def _make_user_chunk(session_id: str, text: str) -> SessionNotification:
@@ -51,6 +53,29 @@ async def test_initialize_advertises_ext_methods(monkeypatch, tmp_path: Path):
 async def test_ext_methods_list_and_set(monkeypatch, tmp_path: Path):
     monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "xdg"))
     monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setattr(
+        model_registry,
+        "MODELS_FILE",
+        tmp_path / "xdg" / "isaac" / "models.json",
+    )
+    minimal_config = {
+        "current": "function-model",
+        "models": {
+            "function-model": {
+                "provider": "function",
+                "model": "function",
+                "description": "In-process function model for deterministic testing",
+            },
+            "user-function": {
+                "provider": "function",
+                "model": "function",
+                "description": "User-visible function model for tests",
+            },
+        },
+    }
+    monkeypatch.setattr(model_registry, "DEFAULT_CONFIG", minimal_config)
+    model_registry.MODELS_FILE.parent.mkdir(parents=True, exist_ok=True)
+    model_registry.MODELS_FILE.write_text(json.dumps(minimal_config), encoding="utf-8")
     conn = AsyncMock(spec=AgentSideConnection)
     agent = ACPAgent(conn)
     session = await agent.newSession(NewSessionRequest(cwd=str(tmp_path), mcpServers=[]))
@@ -66,6 +91,8 @@ async def test_ext_methods_list_and_set(monkeypatch, tmp_path: Path):
         {"sessionId": session.sessionId, "modelId": target_id},
     )
     assert resp.get("current") == target_id
+    cfg = model_registry.load_models_config()
+    assert cfg.get("current") == target_id
 
 
 @pytest.mark.asyncio

@@ -88,16 +88,16 @@ class ClientTerminalManager:
             signal=exit_status.signal if exit_status else None,
         )
 
-    async def kill_terminal(self, params: KillTerminalCommandRequest) -> KillTerminalCommandResponse:
+    async def kill_terminal(
+        self, params: KillTerminalCommandRequest
+    ) -> KillTerminalCommandResponse:
         """Forcefully kill a terminal process."""
         state = self._terminals.get(params.terminalId)
         if state and state.proc.returncode is None:
             state.proc.kill()
         return KillTerminalCommandResponse()
 
-    async def release_terminal(
-        self, params: ReleaseTerminalRequest
-    ) -> ReleaseTerminalResponse:
+    async def release_terminal(self, params: ReleaseTerminalRequest) -> ReleaseTerminalResponse:
         """Release and terminate a client terminal if still running."""
         state = self._terminals.pop(params.terminalId, None)
         if state and state.proc.returncode is None:

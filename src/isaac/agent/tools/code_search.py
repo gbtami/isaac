@@ -55,7 +55,9 @@ async def code_search(
             if glob and not fnmatch.fnmatch(file.name, glob):
                 continue
             try:
-                for idx, line in enumerate(file.read_text(encoding="utf-8", errors="ignore").splitlines(), start=1):
+                for idx, line in enumerate(
+                    file.read_text(encoding="utf-8", errors="ignore").splitlines(), start=1
+                ):
                     if regex.search(line):
                         rel = file.relative_to(path)
                         matches.append(f"{rel}:{idx}:{line}")
