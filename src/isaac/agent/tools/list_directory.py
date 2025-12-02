@@ -1,9 +1,18 @@
 from pathlib import Path
+from typing import Optional
+
+
+def _resolve(base: Optional[str], target: str) -> Path:
+    p = Path(target)
+    if p.is_absolute():
+        return p
+    return Path(base or Path.cwd()) / p
 
 
 async def list_files(
     directory: str = ".",
     recursive: bool = True,
+    cwd: Optional[str] = None,
 ) -> dict:
     """List files and directories in a given path.
 
@@ -14,7 +23,7 @@ async def list_files(
     Returns:
         dict: A dictionary containing 'content' (string listing) and 'error' (string or None).
     """
-    path = Path(directory)
+    path = _resolve(cwd, directory)
     if not path.exists():
         return {"content": None, "error": f"Directory '{directory}' does not exist."}
 

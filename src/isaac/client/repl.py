@@ -11,7 +11,6 @@ from acp import CancelNotification, ClientSideConnection, PromptRequest, text_bl
 from acp import SetSessionModelRequest
 from prompt_toolkit import PromptSession  # type: ignore
 from prompt_toolkit.key_binding import KeyBindings  # type: ignore
-from prompt_toolkit.patch_stdout import patch_stdout  # type: ignore
 
 from isaac.client.protocol import set_mode
 from isaac.client.session_state import SessionUIState
@@ -55,43 +54,42 @@ async def interactive_loop(
         print(render_status_box(state))
         state.show_status_on_start = False
 
-    with patch_stdout():
-        while True:
-            try:
-                line = await session.prompt_async(f"{state.current_mode}|{state.current_model}> ")
-                if line == CANCEL_TOKEN:
-                    await conn.cancel(CancelNotification(sessionId=session_id))
-                    print("[cancelled]")
-                    continue
-            except EOFError:
-                break
-            except KeyboardInterrupt:
-                print("", file=sys.stderr)
+    while True:
+        try:
+            line = await session.prompt_async(f"{state.current_mode}|{state.current_model}> ")
+            if line == CANCEL_TOKEN:
+                await conn.cancel(CancelNotification(sessionId=session_id))
+                print("[cancelled]")
+                continue
+        except EOFError:
+            break
+        except KeyboardInterrupt:
+            print("", file=sys.stderr)
+            continue
+
+        if not line:
+            continue
+
+        # Handle slash commands locally
+        if line.startswith("/"):
+            handled = await _handle_slash(
+                line, conn, session_id, state, permission_reset=lambda: None
+            )
+            if handled:
                 continue
 
-            if not line:
-                continue
-
-            # Handle slash commands locally
-            if line.startswith("/"):
-                handled = await _handle_slash(
-                    line, conn, session_id, state, permission_reset=lambda: None
+        try:
+            await conn.prompt(
+                PromptRequest(
+                    sessionId=session_id,
+                    prompt=[text_block(line)],
                 )
-                if handled:
-                    continue
-
-            try:
-                await conn.prompt(
-                    PromptRequest(
-                        sessionId=session_id,
-                        prompt=[text_block(line)],
-                    )
-                )
-            except Exception as exc:  # noqa: BLE001
-                logging.error("Prompt failed: %s", exc)
-            if state.pending_newline:
-                print()
-                state.pending_newline = False
+            )
+        except Exception as exc:  # noqa: BLE001
+            logging.error("Prompt failed: %s", exc)
+        if state.pending_newline:
+            print()
+            state.pending_newline = False
 
 
 async def _interactive_model_select(

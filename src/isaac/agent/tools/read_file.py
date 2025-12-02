@@ -2,10 +2,18 @@ from typing import Optional
 from pathlib import Path
 
 
+def _resolve(base: Optional[str], target: str) -> Path:
+    p = Path(target)
+    if p.is_absolute():
+        return p
+    return Path(base or Path.cwd()) / p
+
+
 async def read_file(
     file_path: str,
     start_line: Optional[int] = None,
     num_lines: Optional[int] = None,
+    cwd: Optional[str] = None,
 ) -> dict:
     """Read a file with optional line range.
 
@@ -17,7 +25,7 @@ async def read_file(
     Returns:
         dict: A dictionary with 'content' (str or None), 'num_tokens' (int), and 'error' (str or None).
     """
-    path = Path(file_path)
+    path = _resolve(cwd, file_path)
     if not path.exists():
         return {"content": None, "num_tokens": 0, "error": f"File '{file_path}' does not exist."}
 

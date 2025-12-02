@@ -8,9 +8,16 @@ from pathlib import Path
 from typing import Optional
 
 
-async def apply_patch(file_path: str, patch: str, strip: Optional[int] = None) -> dict:
+def _resolve(base: Optional[str], target: str) -> Path:
+    p = Path(target)
+    if p.is_absolute():
+        return p
+    return Path(base or Path.cwd()) / p
+
+
+async def apply_patch(file_path: str, patch: str, strip: Optional[int] = None, cwd: Optional[str] = None) -> dict:
     """Apply a unified diff patch to a file using the `patch` command."""
-    path = Path(file_path)
+    path = _resolve(cwd, file_path)
     if not path.exists():
         return {"content": None, "error": f"File not found: {file_path}"}
 

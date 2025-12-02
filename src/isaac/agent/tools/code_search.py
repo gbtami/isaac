@@ -13,9 +13,11 @@ async def code_search(
     glob: Optional[str] = None,
     case_sensitive: bool = True,
     timeout: Optional[float] = None,
+    cwd: Optional[str] = None,
 ) -> dict:
     """Search for a pattern in code using ripgrep with a Python fallback."""
-    path = Path(directory or ".")
+    base = Path(cwd or Path.cwd())
+    path = (base / directory) if not Path(directory).is_absolute() else Path(directory)
     if not path.exists():
         return {
             "content": None,

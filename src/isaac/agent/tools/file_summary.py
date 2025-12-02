@@ -6,10 +6,20 @@ from pathlib import Path
 from typing import Optional
 
 
+def _resolve(base: Optional[str], target: str) -> Path:
+    p = Path(target)
+    if p.is_absolute():
+        return p
+    return Path(base or Path.cwd()) / p
+
+
 async def file_summary(
-    file_path: str, head_lines: Optional[int] = 20, tail_lines: Optional[int] = 20
+    file_path: str,
+    head_lines: Optional[int] = 20,
+    tail_lines: Optional[int] = 20,
+    cwd: Optional[str] = None,
 ) -> dict:
-    path = Path(file_path)
+    path = _resolve(cwd, file_path)
     if not path.exists():
         return {"content": None, "error": f"File not found: {file_path}"}
     if not path.is_file():

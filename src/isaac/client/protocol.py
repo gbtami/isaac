@@ -25,6 +25,7 @@ from acp.schema import (
     AgentMessageChunk,
     AllowedOutcome,
     AudioContentBlock,
+    AgentPlanUpdate,
     CurrentModeUpdate,
     EmbeddedResourceContentBlock,
     ImageContentBlock,
@@ -35,6 +36,7 @@ from acp.schema import (
 )
 
 from isaac.client.client_terminal import ClientTerminalManager
+from isaac.client.display import print_agent_text, print_mode_update, print_plan, print_tool
 from isaac.client.session_state import SessionUIState
 
 
@@ -93,10 +95,10 @@ class ExampleClient(Client):
         update = params.update
         if isinstance(update, CurrentModeUpdate):
             self._state.current_mode = update.currentModeId
-            print(f"[mode update -> {self._state.current_mode}]")
+            print_mode_update(self._state.current_mode)
             return
         if isinstance(update, ToolCallStart):
-            print(f"| Tool[start]: {getattr(update, 'title', '')}")
+            print_tool("start", getattr(update, "title", ""))
             return
         if isinstance(update, ToolCallProgress):
             raw_out = getattr(update, "rawOutput", {}) or {}
@@ -112,10 +114,20 @@ class ExampleClient(Client):
                 if truncated:
                     summary_bits.append("truncated")
                 summary = " ".join(summary_bits) if summary_bits else "done"
-                print(f"| Tool[{update.status}]: {summary}")
+                print_tool(update.status, summary)
             else:
                 text = raw_out.get("content") or raw_out.get("error") or ""
-                print(f"| Tool[{update.status}]: {text}")
+                print_tool(update.status, text)
+            if getattr(update, "content", None):
+                for item in update.content or []:
+                    inner = getattr(item, "content", None)
+                    if hasattr(inner, "text") and getattr(inner, "text", None):
+                        print_agent_text(str(inner.text))
+                        self._state.pending_newline = True
+            return
+        if isinstance(update, AgentPlanUpdate):
+            entries = [getattr(e, "content", "") for e in update.entries or []]
+            print_plan(entries)
             return
         if not isinstance(update, AgentMessageChunk):
             return
@@ -127,10 +139,7 @@ class ExampleClient(Client):
             text = content.text
             if self._state.collect_models:
                 self._state.model_buffer = (self._state.model_buffer or []) + [text]
-            if prefix:
-                print(f"| Agent: {prefix} {text}", end="", flush=True)
-            else:
-                print(text, end="", flush=True)
+            print_agent_text(text)
             self._state.pending_newline = True
             return
         elif isinstance(content, ImageContentBlock):
@@ -143,8 +152,7 @@ class ExampleClient(Client):
             text = "<resource>"
         else:
             text = "<content>"
-
-        print(f"| Agent: {prefix} {text}")
+        print_agent_text(f"{prefix} {text}" if prefix else text)
 
 
 async def set_mode(
@@ -155,4 +163,4 @@ async def set_mode(
 ) -> None:
     await conn.setSessionMode(SetSessionModeRequest(sessionId=session_id, modeId=mode))
     state.current_mode = mode
-    print(f"[mode set to {state.current_mode}]")
+    print_mode_update(state.current_mode)

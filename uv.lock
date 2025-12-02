@@ -976,6 +976,7 @@ dependencies = [
     { name = "prompt-toolkit" },
     { name = "pydantic-ai" },
     { name = "python-dotenv" },
+    { name = "rich" },
 ]
 
 [package.optional-dependencies]
@@ -994,6 +995,7 @@ requires-dist = [
     { name = "pytest", marker = "extra == 'test'" },
     { name = "pytest-asyncio", marker = "extra == 'test'" },
     { name = "python-dotenv" },
+    { name = "rich" },
     { name = "ruff", marker = "extra == 'test'" },
 ]
 provides-extras = ["test"]

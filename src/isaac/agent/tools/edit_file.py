@@ -1,9 +1,19 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Optional
 
 
-async def edit_file(file_path: str, new_content: str, create: bool = True, **_: object) -> dict:
+def _resolve(base: Optional[str], target: str) -> Path:
+    p = Path(target)
+    if p.is_absolute():
+        return p
+    return Path(base or Path.cwd()) / p
+
+
+async def edit_file(
+    file_path: str, new_content: str, create: bool = True, cwd: Optional[str] = None, **_: object
+) -> dict:
     """Overwrite a file with new content.
 
     Args:
@@ -11,7 +21,7 @@ async def edit_file(file_path: str, new_content: str, create: bool = True, **_: 
         new_content: Complete replacement content for the file.
         create: Whether to create the file if it does not exist.
     """
-    path = Path(file_path)
+    path = _resolve(cwd, file_path)
 
     if not path.exists() and not create:
         return {"content": None, "error": f"File '{file_path}' does not exist", "returncode": -1}

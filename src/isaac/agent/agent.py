@@ -396,7 +396,11 @@ class ACPAgent(Agent):
 
         cancel_event = self._cancel_events.setdefault(session_id, asyncio.Event())
         result: dict[str, Any] | None = await _await_with_cancel(
-            run_tool(tool_name, **(arguments or {})),
+            run_tool(
+                tool_name,
+                cwd=str(self._session_cwds.get(session_id, Path.cwd())),
+                **(arguments or {}),
+            ),
             cancel_event,
         )
         if result is None:

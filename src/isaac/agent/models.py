@@ -29,6 +29,8 @@ from isaac.agent.brain.prompt import SYSTEM_PROMPT
 
 logger = logging.getLogger("acp_server")
 
+OLLAMA_BASE_URL = "http://localhost:11434/v1"
+
 HIDDEN_MODELS = {"test", "function-model"}
 DEFAULT_CONFIG = {
     "current": "function-model",
@@ -45,37 +47,41 @@ DEFAULT_CONFIG = {
         "openai-gpt4o-mini": {
             "provider": "openai",
             "model": "gpt-4o-mini",
-            "base_url": "https://api.openai.com/v1",
             "description": "OpenAI GPT-4o mini",
         },
         "anthropic-claude-3-5-sonnet": {
             "provider": "anthropic",
             "model": "claude-3-5-sonnet-20240620",
-            "base_url": "https://api.anthropic.com",
             "description": "Anthropic Claude 3.5 Sonnet",
         },
         "google-gemini-2.5-pro": {
             "provider": "google",
             "model": "gemini-2.5-pro",
-            "base_url": "https://generativelanguage.googleapis.com",
             "description": "Google Gemini 2.5 Pro",
         },
-        "openrouter-gpt4o-mini": {
+        "openrouter-x-ai/grok-4.1-fast:free": {
             "provider": "openrouter",
-            "model": "openai/gpt-4o-mini",
-            "base_url": "https://openrouter.ai/api/v1",
-            "description": "OpenRouter proxy for GPT-4o mini",
+            "model": "x-ai/grok-4.1-fast:free",
+            "description": "OpenRouter proxy for x-ai/grok-4.1-fast:free",
+        },
+        "openrouter-z-ai/glm-4.5-air:free": {
+            "provider": "openrouter",
+            "model": "z-ai/glm-4.5-air:free",
+            "description": "OpenRouter proxy for z-ai/glm-4.5-air:free",
+        },
+        "openrouter-kwaipilot/kat-coder-pro:free": {
+            "provider": "openrouter",
+            "model": "kwaipilot/kat-coder-pro:free",
+            "description": "OpenRouter proxy for kwaipilot/kat-coder-pro:free",
         },
         "ollama-qwen2.5-coder-3b": {
             "provider": "ollama",
             "model": "hhao/qwen2.5-coder-tools:3b",
-            "base_url": "http://localhost:11434/v1",
             "description": "Ollama qwen2.5-coder-tools:3b (local)",
         },
         "ollama-NazareAI-Python-Programmer-3B": {
             "provider": "ollama",
             "model": "0xroyce/NazareAI-Python-Programmer-3B",
-            "base_url": "http://localhost:11434/v1",
             "description": "NazareAI-Python-Programmer-3B (local)",
         },
     },
@@ -146,50 +152,38 @@ def set_current_model(model_id: str) -> str:
 def _build_provider_model(model_id: str, model_entry: Dict[str, Any]) -> Any:
     provider = (model_entry.get("provider") or "").lower()
     model_spec = model_entry.get("model") or "test"
-    base_url = model_entry.get("base_url") or DEFAULT_CONFIG["models"].get(model_id, {}).get(
-        "base_url"
-    )
     api_key = model_entry.get("api_key")
 
     if provider == "openai":
         key = api_key or os.getenv("OPENAI_API_KEY")
         if not key:
             raise RuntimeError("OPENAI_API_KEY is required for openai models")
-        url = os.getenv("OPENAI_BASE_URL") or base_url
-        provider_obj = OpenAIProvider(base_url=url, api_key=key)
+        provider_obj = OpenAIProvider(api_key=key)
         return OpenAIChatModel(model_spec, provider=provider_obj)
 
     if provider == "anthropic":
         key = api_key or os.getenv("ANTHROPIC_API_KEY")
         if not key:
             raise RuntimeError("ANTHROPIC_API_KEY is required for anthropic models")
-        url = os.getenv("ANTHROPIC_BASE_URL") or base_url
-        provider_obj = (
-            AnthropicProvider(api_key=key, base_url=url) if url else AnthropicProvider(api_key=key)
-        )
+        provider_obj = AnthropicProvider(api_key=key)
         return AnthropicModel(model_spec, provider=provider_obj)
 
     if provider == "google":
         key = api_key or os.getenv("GOOGLE_API_KEY")
         if not key:
             raise RuntimeError("GOOGLE_API_KEY is required for google models")
-        url = os.getenv("GOOGLE_API_BASE_URL") or base_url
-        provider_obj = (
-            GoogleProvider(api_key=key, base_url=url) if url else GoogleProvider(api_key=key)
-        )
+        provider_obj = GoogleProvider(api_key=key)
         return GoogleModel(model_spec, provider=provider_obj)
 
     if provider == "openrouter":
         key = api_key or os.getenv("OPENROUTER_API_KEY")
         if not key:
             raise RuntimeError("OPENROUTER_API_KEY is required for openrouter models")
-        url = os.getenv("OPENROUTER_BASE_URL") or base_url
-        provider_obj = OpenRouterProvider(api_key=key, base_url=url)
+        provider_obj = OpenRouterProvider(api_key=key)
         return OpenRouterModel(model_spec, provider=provider_obj)
 
     if provider == "ollama":
-        url = os.getenv("OLLAMA_BASE_URL") or base_url
-        provider_obj = OllamaProvider(base_url=url)
+        provider_obj = OllamaProvider(base_url=OLLAMA_BASE_URL)
         return OpenAIChatModel(model_spec, provider=provider_obj)
 
     if provider == "function":
