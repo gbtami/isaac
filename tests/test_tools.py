@@ -3,6 +3,9 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
+from acp import RequestPermissionResponse
+from acp.schema import AllowedOutcome
+from unittest.mock import AsyncMock
 
 from isaac.agent.tools.apply_patch import apply_patch
 from isaac.agent.tools.code_search import code_search
@@ -10,7 +13,9 @@ from isaac.agent.tools.edit_file import edit_file
 from isaac.agent.tools.file_summary import file_summary
 from isaac.agent.tools.list_directory import list_files
 from isaac.agent.tools.read_file import read_file
+from isaac.agent.tools import run_tool
 from isaac.agent.tools.run_command import run_command
+from tests.utils import make_function_agent
 
 
 @pytest.mark.asyncio
@@ -39,6 +44,8 @@ async def test_edit_file(tmp_path: Path):
     result = await edit_file(file_path=str(target), new_content="new", create=True)
     assert result["error"] is None
     assert target.read_text() == "new"
+    assert "diff" in result
+    assert "+new" in result["diff"] or "new" in result["diff"]
 
 
 @pytest.mark.asyncio
@@ -79,3 +86,60 @@ async def test_file_summary(tmp_path: Path):
     result = await file_summary(file_path=str(target), head_lines=1, tail_lines=1)
     assert result["error"] is None
     assert "Lines: 3" in result["content"]
+
+
+@pytest.mark.asyncio
+async def test_run_tool_reports_missing_args():
+    result = await run_tool("tool_edit_file")
+    assert result["error"].startswith("Missing required arguments:")
+
+
+@pytest.mark.asyncio
+async def test_run_command_requests_permission():
+    conn = AsyncMock()
+    conn.requestPermission = AsyncMock(
+        return_value=RequestPermissionResponse(
+            outcome=AllowedOutcome(optionId="reject_once", outcome="selected")
+        )
+    )
+    agent = make_function_agent(conn)
+    session_id = "perm-session"
+    agent._session_modes[session_id] = "ask"
+    agent._session_cwds[session_id] = Path.cwd()
+
+    await agent._execute_run_command_with_terminal(
+        session_id, tool_call_id="tc1", arguments={"command": "echo hi"}
+    )
+
+    conn.requestPermission.assert_awaited()
+    assert conn.sessionUpdate.await_args_list, "Expected a sessionUpdate for permission denial"
+    updates = [call.args[0].update for call in conn.sessionUpdate.await_args_list]  # type: ignore[attr-defined]
+    failed = [u for u in updates if getattr(u, "status", "") == "failed"]
+    assert failed, "Expected a failed tool update after permission denial"
+    raw_out = getattr(failed[-1], "rawOutput", {}) or {}
+    assert raw_out.get("error") == "permission denied"
+
+
+@pytest.mark.asyncio
+async def test_allow_always_cached_per_command():
+    conn = AsyncMock()
+    conn.requestPermission = AsyncMock(
+        return_value=RequestPermissionResponse(
+            outcome=AllowedOutcome(optionId="allow_always", outcome="selected")
+        )
+    )
+    agent = make_function_agent(conn)
+    session_id = "perm-cache"
+    agent._session_modes[session_id] = "ask"
+    agent._session_cwds[session_id] = Path.cwd()
+
+    first = await agent._request_run_permission(
+        session_id, tool_call_id="tc-1", command="echo cached", cwd=None
+    )
+    second = await agent._request_run_permission(
+        session_id, tool_call_id="tc-2", command="echo cached", cwd=None
+    )
+
+    assert first is True
+    assert second is True
+    conn.requestPermission.assert_awaited_once()

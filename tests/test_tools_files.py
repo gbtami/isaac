@@ -12,8 +12,9 @@ from acp import (
     WriteTextFileRequest,
     text_block,
     NewSessionRequest,
+    RequestPermissionResponse,
 )
-from acp.schema import ToolCallProgress, ToolCallStart
+from acp.schema import ToolCallProgress, ToolCallStart, AllowedOutcome
 
 from isaac.agent.tools.apply_patch import apply_patch
 from isaac.agent.tools.list_directory import list_files
@@ -74,6 +75,13 @@ async def test_tool_read_file_returns_content(tmp_path: Path):
 @pytest.mark.asyncio
 async def test_tool_run_command_executes(tmp_path: Path):
     conn = AsyncMock(spec=AgentSideConnection)
+
+    async def _allow(_: object):
+        return RequestPermissionResponse(
+            outcome=AllowedOutcome(optionId="allow_once", outcome="selected")
+        )
+
+    conn.requestPermission = _allow  # type: ignore[attr-defined]
     agent = make_function_agent(conn)
 
     session_id = "cmd-session"

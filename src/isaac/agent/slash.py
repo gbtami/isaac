@@ -6,14 +6,8 @@ See: https://agentclientprotocol.com/protocol/slash-commands
 from __future__ import annotations
 
 import subprocess
-from typing import List
-
 from acp import SessionNotification
 from acp.helpers import update_agent_message, text_block
-
-
-def list_slash_commands() -> List[str]:
-    return ["/mode", "/test"]
 
 
 def handle_slash_command(session_id: str, prompt: str) -> SessionNotification | None:

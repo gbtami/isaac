@@ -5,17 +5,13 @@ from unittest.mock import AsyncMock
 
 import pytest
 from acp import PromptRequest, text_block
-from acp.schema import AgentPlanUpdate
-from pydantic_ai import Agent as PydanticAgent  # type: ignore
-from pydantic_ai.models.test import TestModel  # type: ignore
+from acp.schema import AgentMessageChunk, AgentPlanUpdate
 
-from isaac.agent.brain.planning_delegate import build_planning_agent
-from isaac.agent.runner import register_tools
 from tests.utils import make_function_agent
 
 
 @pytest.mark.asyncio
-async def test_plan_updates():
+async def test_plan_updates_for_plan_prefix():
     conn = AsyncMock()
     agent = make_function_agent(conn)
 
@@ -32,57 +28,66 @@ async def test_plan_updates():
     assert response.stopReason == "end_turn"
 
 
-@pytest.mark.asyncio
-async def test_plan_tool_emits_agent_plan():
-    conn = AsyncMock()
-    agent = make_function_agent(conn)
+class _PlanningRunner:
+    def __init__(self, content: str):
+        self.prompts: list[str] = []
+        self.content = content
 
-    session_id = "plan-tool-session"
-    response = await agent.prompt(
-        PromptRequest(sessionId=session_id, prompt=[text_block("tool:plan ship a release")])
+    async def run(self, prompt: str, messages=None):
+        self.prompts.append(prompt)
+        return SimpleNamespace(output=self.content)
+
+
+class _StreamingExecutor:
+    def __init__(self):
+        self.prompts: list[str] = []
+
+    async def run_stream_events(self, prompt: str, messages=None):
+        self.prompts.append(prompt)
+
+        async def _gen():
+            yield "executed"
+
+        return _gen()
+
+
+@pytest.mark.asyncio
+async def test_programmatic_plan_then_execute():
+    conn = AsyncMock()
+    planning_runner = _PlanningRunner("Plan:\n- alpha\n- beta")
+    executor = _StreamingExecutor()
+    agent = make_function_agent(conn)
+    agent._planning_runner = planning_runner  # type: ignore[attr-defined]
+    agent._ai_runner = executor  # type: ignore[attr-defined]
+
+    session_id = "handoff"
+    await agent.prompt(PromptRequest(sessionId=session_id, prompt=[text_block("do work")]))
+
+    updates = [call.args[0].update for call in conn.sessionUpdate.await_args_list]  # type: ignore[attr-defined]
+    assert any(isinstance(u, AgentPlanUpdate) for u in updates)
+    assert any(
+        isinstance(u, AgentMessageChunk)
+        and getattr(getattr(u, "content", None), "text", "") == "executed"
+        for u in updates
+    )
+    assert len(planning_runner.prompts) == 1
+    assert len(executor.prompts) == 1
+    assert "Plan:" in executor.prompts[0]
+
+
+@pytest.mark.asyncio
+async def test_plan_only_prompt_skips_execution():
+    conn = AsyncMock()
+    planning_runner = _PlanningRunner("Plan:\n- alpha\n- beta")
+    executor = _StreamingExecutor()
+    agent = make_function_agent(conn)
+    agent._planning_runner = planning_runner  # type: ignore[attr-defined]
+    agent._ai_runner = executor  # type: ignore[attr-defined]
+
+    session_id = "plan-only"
+    await agent.prompt(
+        PromptRequest(sessionId=session_id, prompt=[text_block("Just a plan only, no execution.")])
     )
 
-    assert response.stopReason == "end_turn"
-    updates = [call.args[0].update for call in conn.sessionUpdate.await_args_list]  # type: ignore[attr-defined]
-    assert any(getattr(u, "entries", None) for u in updates)
-
-
-@pytest.mark.asyncio
-@pytest.mark.parametrize("plan_mode", ["structured", "text"])
-async def test_planning_tool_emits_plan_update(plan_mode: str):
-    conn = AsyncMock()
-    # Main runner always calls the planning tool.
-    runner = PydanticAgent(TestModel(call_tools=["tool_generate_plan"]))
-
-    if plan_mode == "structured":
-        planning_runner = build_planning_agent(
-            TestModel(call_tools=[], custom_output_args={"steps": ["alpha", "beta"]})
-        )
-    else:
-        planning_runner = build_planning_agent(TestModel(call_tools=[]))
-
-        class FakePlanResult:
-            def __init__(self):
-                self.output = None
-                self.response = SimpleNamespace(parts=[SimpleNamespace(content="Plan:\n- alpha\n- beta")])
-
-        planning_runner.run = AsyncMock(return_value=FakePlanResult())
-
-    register_tools(runner, planning_agent=planning_runner)
-    agent = make_function_agent(conn)
-    # swap runner and planning agent into ACPAgent instance
-    agent._ai_runner = runner  # type: ignore[attr-defined]
-
-    session_id = f"plan-session-{plan_mode}"
-    await agent.prompt(PromptRequest(sessionId=session_id, prompt=[text_block("need a plan")]))
-
-    plan_updates = [
-        call_args[0][0].update
-        for call_args in conn.sessionUpdate.call_args_list
-        if isinstance(call_args[0][0].update, AgentPlanUpdate)
-    ]
-    assert plan_updates, "Expected an AgentPlanUpdate from planning tool"
-    first_entries = plan_updates[0].entries or []
-    assert len(first_entries) == 2
-    assert first_entries[0].content == "alpha"
-    assert first_entries[1].content == "beta"
+    assert len(planning_runner.prompts) == 1
+    assert executor.prompts == []

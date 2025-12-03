@@ -36,7 +36,13 @@ from acp.schema import (
 )
 
 from isaac.client.client_terminal import ClientTerminalManager
-from isaac.client.display import print_agent_text, print_mode_update, print_plan, print_tool
+from isaac.client.display import (
+    print_agent_text,
+    print_diff,
+    print_mode_update,
+    print_plan,
+    print_tool,
+)
 from isaac.client.session_state import SessionUIState
 
 
@@ -101,19 +107,19 @@ class ExampleClient(Client):
             if self._state.pending_newline:
                 print()
                 self._state.pending_newline = False
-            print_tool("start", getattr(update, "title", ""))
+            title = getattr(update, "title", "")
+            raw_in = getattr(update, "rawInput", {}) or {}
+            cmd = None
+            if raw_in.get("tool") == "tool_run_command":
+                cmd = raw_in.get("command")
+            suffix = f" cmd=`{cmd}`" if cmd else ""
+            print_tool("start", f"{title}{suffix}")
             return
         if isinstance(update, ToolCallProgress):
             if self._state.pending_newline:
                 print()
                 self._state.pending_newline = False
             raw_out = getattr(update, "rawOutput", {}) or {}
-            tool_name = raw_out.get("tool") or raw_out.get("tool_name") or getattr(
-                update, "title", ""
-            )
-            if tool_name == "tool_generate_plan":
-                # Plan is emitted via AgentPlanUpdate; avoid duplicate display here.
-                return
             if update.status == "completed":
                 rc = raw_out.get("returncode")
                 err = raw_out.get("error")
@@ -134,7 +140,11 @@ class ExampleClient(Client):
                 for item in update.content or []:
                     inner = getattr(item, "content", None)
                     if hasattr(inner, "text") and getattr(inner, "text", None):
-                        print_agent_text(str(inner.text))
+                        payload = str(inner.text)
+                        if raw_out.get("tool") == "tool_edit_file" and raw_out.get("diff"):
+                            print_diff(raw_out["diff"])
+                        else:
+                            print_agent_text(payload)
                         self._state.pending_newline = True
             return
         if isinstance(update, AgentPlanUpdate):

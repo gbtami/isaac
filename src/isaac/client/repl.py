@@ -18,11 +18,6 @@ from isaac.client.status_box import render_status_box
 from isaac.client.thinking import toggle_thinking
 
 
-async def read_console(prompt: str) -> str:
-    loop = asyncio.get_running_loop()
-    return await loop.run_in_executor(None, lambda: input(prompt))
-
-
 async def _run_tests() -> int:
     proc = await asyncio.create_subprocess_shell(
         "uv run pytest",

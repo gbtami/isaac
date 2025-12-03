@@ -27,7 +27,7 @@ from pydantic_ai.providers.openai import OpenAIProvider  # type: ignore
 from pydantic_ai.providers.openrouter import OpenRouterProvider  # type: ignore
 
 from isaac.agent.brain.prompt import SYSTEM_PROMPT
-from isaac.agent.brain.planning_delegate import build_planning_agent
+from isaac.agent.brain.planning_agent import build_planning_agent
 from isaac.agent.tools import register_readonly_tools
 
 logger = logging.getLogger("acp_server")
@@ -244,13 +244,14 @@ def _build_provider_model(model_id: str, model_entry: Dict[str, Any]) -> Any:
     return model_spec, None
 
 
-def build_agent(
+def build_agent_pair(
     model_id: str,
     register_tools: Callable[[Any], None],
     *,
     toolsets: list[Any] | None = None,
-) -> Any:
-    """Build a pydantic-ai Agent for the given model id."""
+) -> tuple[Any, Any]:
+    """Build executor and planner agents for programmatic hand-off."""
+
     load_dotenv()
     config = load_models_config()
     model_entry = (
@@ -258,16 +259,18 @@ def build_agent(
     )
 
     model_obj, model_settings = _build_provider_model(model_id, model_entry)
-    logger.info("MODEL: %s", model_obj.model_name)
     planner_obj, planner_settings = _build_provider_model(model_id, model_entry)
+    logger.info("MODEL (executor): %s", model_obj.model_name)
+    logger.info("MODEL (planner): %s", planner_obj.model_name)
 
-    agent = PydanticAgent(
+    executor = PydanticAgent(
         model_obj,
         toolsets=toolsets or (),
         system_prompt=SYSTEM_PROMPT,
         model_settings=model_settings,
     )
-    planning_agent = build_planning_agent(planner_obj, planner_settings)
-    register_readonly_tools(planning_agent)
-    register_tools(agent, planning_agent=planning_agent)
-    return agent
+    register_tools(executor)
+
+    planner = build_planning_agent(planner_obj, planner_settings)
+    register_readonly_tools(planner)
+    return executor, planner

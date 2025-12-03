@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any, Iterable, List
 
-from acp.schema import AgentMessageChunk, UserMessageChunk
+from acp.schema import AgentMessageChunk, AgentPlanUpdate, ToolCallProgress, UserMessageChunk
 
 
 def build_chat_history(updates: Iterable[Any]) -> List[dict[str, str]]:
@@ -20,4 +20,18 @@ def build_chat_history(updates: Iterable[Any]) -> List[dict[str, str]]:
             content = getattr(update_obj, "content", None)
             if content and getattr(content, "text", None):
                 history.append({"role": "assistant", "content": content.text})
+        elif isinstance(update_obj, ToolCallProgress):
+            blocks = getattr(update_obj, "content", None) or []
+            for block in blocks:
+                inner = getattr(block, "content", None)
+                text = getattr(inner, "text", None) if inner else None
+                if text:
+                    history.append({"role": "assistant", "content": text})
+        elif isinstance(update_obj, AgentPlanUpdate):
+            entries = getattr(update_obj, "entries", None) or []
+            text = "\n".join(
+                f"- {getattr(e, 'content', '')}" for e in entries if getattr(e, "content", "")
+            )
+            if text:
+                history.append({"role": "assistant", "content": f"Plan:\n{text}"})
     return history

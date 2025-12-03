@@ -180,6 +180,25 @@ async def run_tool(function_name: str, **kwargs: Any) -> dict:
     if not handler:
         return {"content": None, "error": f"Unknown tool function: {function_name}"}
     try:
+        import inspect
+
+        sig = inspect.signature(handler)
+        missing = [
+            name
+            for name, param in sig.parameters.items()
+            if param.default is inspect._empty
+            and param.kind
+            in (inspect.Parameter.POSITIONAL_OR_KEYWORD, inspect.Parameter.KEYWORD_ONLY)
+            and name not in kwargs
+        ]
+        if missing:
+            return {
+                "content": None,
+                "error": f"Missing required arguments: {', '.join(missing)}",
+            }
+    except Exception:  # pragma: no cover - best effort validation
+        pass
+    try:
         return await handler(**kwargs)
     except Exception as exc:
         # Drop unexpected args (e.g., from LLM hallucinations) and retry once
@@ -277,32 +296,6 @@ def parse_tool_request(prompt_text: str) -> dict[str, Any] | None:
     if parsed_args is None:
         return None
     return {"tool_name": tool_name, **parsed_args}
-
-
-def register_planning_tool(
-    handler: ToolHandler,
-    *,
-    description: str = "Generate a task plan using a planning sub-agent",
-) -> None:
-    """Register the planning delegate tool so models can call it."""
-
-    EXTRA_TOOL_HANDLERS["tool_generate_plan"] = handler
-    EXTRA_TOOLS["tool_generate_plan"] = Tool(
-        function="tool_generate_plan",
-        description=description,
-        parameters=ToolParameter(
-            type="object",
-            properties={
-                "goal": {"type": "string", "description": "Goal to plan for"},
-                "context": {"type": "string", "description": "Optional extra context"},
-            },
-            required=["goal"],
-        ),
-    )
-    EXTRA_DSL["plan"] = (
-        "tool_generate_plan",
-        lambda args, raw: {"goal": " ".join(args)} if args else None,
-    )
 
 
 def register_readonly_tools(agent: Any) -> None:

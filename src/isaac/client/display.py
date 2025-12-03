@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Iterable
 
 from rich.console import Console
-from rich.panel import Panel
+from rich.syntax import Syntax
 from rich.table import Table
 from rich.text import Text
 
@@ -33,8 +33,9 @@ def print_agent_text(text: str) -> None:
     console.print(Text(text, style="green"), end="")
 
 
-def print_thinking_text(text: str) -> None:
-    console.print(Text(text, style="blue"), end="")
+def print_diff(text: str) -> None:
+    """Render a unified diff with syntax highlighting."""
+    console.print(Syntax(text, "diff", theme="ansi_dark", line_numbers=False))
 
 
 def print_plan(entries: Iterable[str]) -> None:
@@ -44,10 +45,3 @@ def print_plan(entries: Iterable[str]) -> None:
     for idx, entry in enumerate(entries, start=1):
         table.add_row(str(idx), entry)
     console.print(table)
-
-
-def print_status(panel: Panel | str) -> None:
-    if isinstance(panel, Panel):
-        console.print(panel)
-    else:
-        console.print(panel)

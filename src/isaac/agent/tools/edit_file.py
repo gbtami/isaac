@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import difflib
 from pathlib import Path
 from typing import Optional
 
@@ -22,6 +23,12 @@ async def edit_file(
         create: Whether to create the file if it does not exist.
     """
     path = _resolve(cwd, file_path)
+    old_text = ""
+    if path.exists():
+        try:
+            old_text = path.read_text(encoding="utf-8")
+        except Exception:
+            old_text = ""
 
     if not path.exists() and not create:
         return {"content": None, "error": f"File '{file_path}' does not exist", "returncode": -1}
@@ -29,8 +36,22 @@ async def edit_file(
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(new_content, encoding="utf-8")
+        old_lines = old_text.splitlines(keepends=True)
+        new_lines = new_content.splitlines(keepends=True)
+        diff = "".join(
+            difflib.unified_diff(
+                old_lines,
+                new_lines,
+                fromfile=file_path,
+                tofile=file_path,
+                lineterm="",
+            )
+        )
+        summary = f"Wrote {len(new_content)} bytes to {file_path}"
+        content = f"{summary}\n{diff}" if diff else summary
         return {
-            "content": f"Wrote {len(new_content)} bytes to {file_path}",
+            "content": content,
+            "diff": diff,
             "error": None,
             "returncode": 0,
         }

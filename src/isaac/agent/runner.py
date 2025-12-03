@@ -9,11 +9,10 @@ from pydantic_ai.messages import PartDeltaEvent, PartEndEvent  # type: ignore
 from pydantic_ai.run import AgentRunResultEvent  # type: ignore
 import logging
 
-from isaac.agent.tools import TOOL_HANDLERS, run_tool, register_planning_tool
-from isaac.agent.brain.planning_delegate import make_planning_tool
+from isaac.agent.tools import TOOL_HANDLERS, run_tool
 
 
-def register_tools(agent: Any, planning_agent: Any | None = None) -> None:
+def register_tools(agent: Any) -> None:
     logger = logging.getLogger("acp_server")
 
     for name in TOOL_HANDLERS.keys():
@@ -27,16 +26,6 @@ def register_tools(agent: Any, planning_agent: Any | None = None) -> None:
             return _wrapper
 
         _make_tool(name)
-
-    if planning_agent is not None:
-        planning_handler = make_planning_tool(planning_agent)
-
-        @agent.tool_plain(name="tool_generate_plan")  # type: ignore[misc]
-        async def _planning_delegate(**kwargs: Any) -> Any:
-            logger.info("Planning tool invoked via pydantic with args=%s", sorted(kwargs))
-            return await planning_handler(**kwargs)
-
-        register_planning_tool(planning_handler)
 
 
 async def run_with_runner(
@@ -132,7 +121,9 @@ async def stream_with_runner(
                 kind = getattr(event.part, "part_kind", "")
                 if kind and kind not in {"text", "thinking"}:
                     logging.getLogger("acp_server").debug(
-                        "Received PartEndEvent kind=%s content=%s", kind, getattr(event.part, "content", None)
+                        "Received PartEndEvent kind=%s content=%s",
+                        kind,
+                        getattr(event.part, "content", None),
                     )
                 part = getattr(event.part, "content", "")
                 if part and not output_parts:

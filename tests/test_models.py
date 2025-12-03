@@ -3,7 +3,13 @@ from __future__ import annotations
 from unittest.mock import AsyncMock
 
 import pytest
-from acp import AgentSideConnection, PromptRequest, SetSessionModelRequest, text_block, NewSessionRequest
+from acp import (
+    AgentSideConnection,
+    PromptRequest,
+    SetSessionModelRequest,
+    text_block,
+    NewSessionRequest,
+)
 from acp.schema import AgentMessageChunk
 
 from tests.utils import make_function_agent
