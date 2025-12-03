@@ -14,6 +14,8 @@ def render_status_box(state: SessionUIState) -> str:
             lines.append(f"MCP: {srv}")
     else:
         lines.append("MCP: <none>")
+    if state.usage_summary:
+        lines.append(f"Context: {state.usage_summary}")
 
     width = max(len(line) for line in lines + ["Status"]) + 2
     border = "+" + "=" * width + "+"

@@ -15,3 +15,4 @@ class SessionUIState:
     show_status_on_start: bool = True
     pending_newline: bool = False
     show_thinking: bool = False
+    usage_summary: str | None = None

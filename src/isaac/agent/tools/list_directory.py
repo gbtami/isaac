@@ -1,5 +1,8 @@
+import os
 from pathlib import Path
-from typing import Optional
+from typing import Callable, Optional
+
+import pathspec  # type: ignore
 
 
 def _resolve(base: Optional[str], target: str) -> Path:
@@ -31,18 +34,61 @@ async def list_files(
         return {"content": None, "error": f"'{directory}' is not a directory."}
 
     try:
+        patterns = _load_gitignore_patterns(path)
+        matcher = _build_matcher(patterns)
         if recursive:
             items = []
-            for item in path.rglob("*"):
-                item_type = "dir" if item.is_dir() else "file"
-                items.append(f"{item.relative_to(path)} [{item_type}]")
+            for root, dirs, files in os.walk(path):
+                rel_root = Path(root).relative_to(path)
+                # Prune ignored dirs to avoid descending into them.
+                for d in list(dirs):
+                    rel_dir = (rel_root / d) if rel_root != Path(".") else Path(d)
+                    if matcher(rel_dir, is_dir=True):
+                        dirs.remove(d)
+                # Add remaining dirs and files
+                for d in dirs:
+                    rel_dir = (rel_root / d) if rel_root != Path(".") else Path(d)
+                    if not matcher(rel_dir, is_dir=True):
+                        items.append(f"{rel_dir} [dir]")
+                for f in files:
+                    rel_file = (rel_root / f) if rel_root != Path(".") else Path(f)
+                    if matcher(rel_file, is_dir=False):
+                        continue
+                    items.append(f"{rel_file} [file]")
             result = "\n".join(sorted(items))
         else:
-            items = [
-                f"{item.name} [{'dir' if item.is_dir() else 'file'}]" for item in path.iterdir()
-            ]
+            items = []
+            for item in path.iterdir():
+                rel = Path(item.name)
+                if matcher(rel, is_dir=item.is_dir()):
+                    continue
+                items.append(f"{rel} [{'dir' if item.is_dir() else 'file'}]")
             result = "\n".join(sorted(items))
 
         return {"content": result, "error": None}
     except Exception as e:
         return {"content": None, "error": f"Error listing directory: {str(e)}"}
+
+
+def _load_gitignore_patterns(root: Path) -> list[str]:
+    gitignore_path = root / ".gitignore"
+    if not gitignore_path.exists():
+        return []
+    try:
+        with gitignore_path.open(encoding="utf-8") as f:
+            return [line.strip() for line in f if line.strip() and not line.strip().startswith("#")]
+    except Exception:
+        return []
+
+
+def _build_matcher(patterns: list[str]) -> Callable[[Path, bool], bool]:
+    spec = pathspec.PathSpec.from_lines("gitwildmatch", patterns) if patterns else None
+
+    def _match(path: Path, is_dir: bool) -> bool:
+        if spec is None:
+            return False
+        rel_str = str(path)
+        # Ensure directories match when patterns include trailing slashes semantics.
+        return spec.match_file(rel_str + ("/" if is_dir else ""))
+
+    return _match

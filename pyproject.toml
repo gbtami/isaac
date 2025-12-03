@@ -9,6 +9,7 @@ dependencies = [
     "prompt-toolkit==3.0.52",
     "python-dotenv",
     "ollama",
+    "pathspec",
     "rich",
 ]
 

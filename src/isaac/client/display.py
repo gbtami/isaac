@@ -18,12 +18,19 @@ def print_mode_update(mode: str) -> None:
 
 
 def print_tool(status: str, message: str) -> None:
-    style = "green" if status == "completed" else "yellow" if status == "in_progress" else "red"
+    normalized = status.lower()
+    style = (
+        "green"
+        if normalized == "completed"
+        else "yellow"
+        if normalized in {"in_progress", "start"}
+        else "red"
+    )
     console.print(Text(f"| Tool[{status}]: {message}", style=style))
 
 
 def print_agent_text(text: str) -> None:
-    console.print(Text(text, style="cyan"), end="")
+    console.print(Text(text, style="green"), end="")
 
 
 def print_thinking_text(text: str) -> None:
@@ -31,8 +38,8 @@ def print_thinking_text(text: str) -> None:
 
 
 def print_plan(entries: Iterable[str]) -> None:
-    table = Table(title="Plan", show_header=False, box=None, border_style="magenta")
-    table.add_column("#", width=4, style="magenta")
+    table = Table(title="Plan", show_header=False, box=None, border_style="cyan")
+    table.add_column("#", width=4, style="cyan")
     table.add_column("Item", style="white")
     for idx, entry in enumerate(entries, start=1):
         table.add_row(str(idx), entry)

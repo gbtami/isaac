@@ -57,7 +57,10 @@ async def interactive_loop(
 
     while True:
         try:
-            line = await session.prompt_async(f"{state.current_mode}|{state.current_model}> ")
+            usage_suffix = f" [{state.usage_summary}]" if state.usage_summary else ""
+            line = await session.prompt_async(
+                f"{state.current_mode}|{state.current_model}{usage_suffix}> "
+            )
             if line == CANCEL_TOKEN:
                 await conn.cancel(CancelNotification(sessionId=session_id))
                 print("[cancelled]")
@@ -240,5 +243,8 @@ async def _handle_slash(
         print("[exiting]")
         raise SystemExit(0)
 
-    print("Available slash commands: /status, /models, /model <id>, /mode <ask|yolo>, /test, /exit")
+    print(
+        "Available slash commands: /status, /models, /model <id>, /mode <ask|yolo>, "
+        "/thinking on|off, /test, /exit"
+    )
     return True

@@ -9,6 +9,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import urllib.request
 from pathlib import Path
 from typing import Any, Callable, Dict
 
@@ -62,10 +63,11 @@ DEFAULT_CONFIG = {
             "model": "x-ai/grok-4.1-fast:free",
             "description": "OpenRouter proxy for x-ai/grok-4.1-fast:free",
         },
-        "openrouter-z-ai/glm-4.5-air:free": {
+        "openrouter-moonshotai/kimi-k2:free": {
             "provider": "openrouter",
-            "model": "z-ai/glm-4.5-air:free",
-            "description": "OpenRouter proxy for z-ai/glm-4.5-air:free",
+            "model": "moonshotai/kimi-k2:free",
+            "description": "OpenRouter proxy for moonshotai/kimi-k2:free",
+            "context_limit": "32000",
         },
         "openrouter-kwaipilot/kat-coder-pro:free": {
             "provider": "openrouter",
@@ -89,17 +91,22 @@ CONFIG_DIR = Path(os.getenv("XDG_CONFIG_HOME") or (Path.home() / ".config")) / "
 CONFIG_DIR.mkdir(parents=True, exist_ok=True)
 
 MODELS_FILE = CONFIG_DIR / "models.json"
+MODELS_DEV_URL = "https://models.dev/api.json"
 
 
 def load_models_config() -> Dict[str, Any]:
+    created = False
     if not MODELS_FILE.exists():
-        MODELS_FILE.write_text(json.dumps(DEFAULT_CONFIG, indent=2), encoding="utf-8")
-        config = DEFAULT_CONFIG.copy()
+        # Deep copy to avoid mutating defaults
+        config = json.loads(json.dumps(DEFAULT_CONFIG))
+        _apply_context_limits(config)
+        MODELS_FILE.write_text(json.dumps(config, indent=2), encoding="utf-8")
+        created = True
     else:
         try:
             config = json.loads(MODELS_FILE.read_text(encoding="utf-8"))
         except Exception:
-            config = DEFAULT_CONFIG.copy()
+            config = json.loads(json.dumps(DEFAULT_CONFIG))
     dirty = False
     # Backfill missing defaults
     for key, value in DEFAULT_CONFIG["models"].items():
@@ -119,7 +126,7 @@ def load_models_config() -> Dict[str, Any]:
     config["models"]["function-model"] = fn_model
 
     config.setdefault("current", DEFAULT_CONFIG["current"])
-    if dirty:
+    if dirty and not created:
         save_models_config(config)
     return config
 
@@ -145,6 +152,47 @@ def set_current_model(model_id: str) -> str:
     config["current"] = model_id
     save_models_config(config)
     return model_id
+
+
+def get_context_limit(model_id: str) -> int | None:
+    """Optional per-model context window (tokens) if configured."""
+    config = load_models_config()
+    model_entry = config.get("models", {}).get(model_id, {})
+    limit = model_entry.get("context_limit")
+    return int(limit) if isinstance(limit, int) else None
+
+
+def _apply_context_limits(config: Dict[str, Any]) -> None:
+    """Populate context_limit fields from models.dev when available."""
+    try:
+        limits_index = _fetch_models_dev_limits()
+    except Exception:  # pragma: no cover - network failure path
+        limits_index = {}
+
+    for model_id, meta in config.get("models", {}).items():
+        if meta.get("context_limit") is not None:
+            continue
+        provider = (meta.get("provider") or "").lower()
+        model_name = (meta.get("model") or "").lower()
+        if not provider or not model_name:
+            continue
+        limit = limits_index.get((provider, model_name))
+        if limit:
+            meta["context_limit"] = limit
+
+
+def _fetch_models_dev_limits() -> Dict[tuple[str, str], int]:
+    """Fetch models.dev index and build (provider, model) -> context_limit map."""
+    with urllib.request.urlopen(MODELS_DEV_URL, timeout=5) as resp:  # type: ignore[call-arg]
+        data = json.loads(resp.read().decode("utf-8"))
+    index: Dict[tuple[str, str], int] = {}
+    for provider_key, provider_data in data.items():
+        models = provider_data.get("models", {}) or {}
+        for model_key, model_data in models.items():
+            limit = (model_data.get("limit") or {}).get("context")
+            if isinstance(limit, (int, float)) and limit > 0:
+                index[(provider_key.lower(), model_key.lower())] = int(limit)
+    return index
 
 
 def _build_provider_model(model_id: str, model_entry: Dict[str, Any]) -> Any:

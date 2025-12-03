@@ -115,6 +115,8 @@ async def test_session_load_replays_history(monkeypatch, tmp_path: Path):
         LoadSessionRequest(sessionId=session.sessionId, cwd=str(tmp_path), mcpServers=[])
     )
 
-    assert conn.sessionUpdate.await_count == 2
+    # We may emit an extra usage hint; ensure history is replayed.
+    assert conn.sessionUpdate.await_count >= 2
     updates = [call.args[0].update for call in conn.sessionUpdate.await_args_list]  # type: ignore[attr-defined]
-    assert any(isinstance(u, AgentMessageChunk) for u in updates)
+    texts = [getattr(u.content, "text", "") for u in updates if isinstance(u, AgentMessageChunk)]
+    assert "world" in " ".join(texts)

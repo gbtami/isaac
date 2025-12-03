@@ -95,6 +95,8 @@ from isaac.agent import models as model_registry
 from isaac.agent.runner import register_tools, run_with_runner, stream_with_runner
 from isaac.agent.brain.planner import parse_plan_from_text
 from acp.contrib.tool_calls import ToolCallTracker
+from acp.helpers import plan_entry, update_plan
+from pydantic_ai.messages import FunctionToolCallEvent, FunctionToolResultEvent, RetryPromptPart
 
 logger = logging.getLogger("acp_server")
 
@@ -150,6 +152,7 @@ class ACPAgent(Agent):
         self._command_timeout_s = 30.0
         self._terminal_output_limit = 64 * 1024  # 64KB cap for streamed tool output
         self._session_store = SessionStore(Path.home() / ".isaac" / "sessions")
+        self._session_last_chunk: Dict[str, str | None] = {}
 
     async def initialize(self, params: InitializeRequest) -> InitializeResponse:
         """Handle ACP initialize handshake (Initialization section)."""
@@ -211,6 +214,7 @@ class ACPAgent(Agent):
         self._session_mcp_servers[session_id] = params.mcpServers
         self._persist_session_meta(session_id, cwd, params.mcpServers, current_mode="ask")
         mode_state = build_mode_state(self._session_modes, session_id, current_mode="ask")
+        await self._send_usage_hint(session_id)
         return NewSessionResponse(sessionId=session_id, modes=mode_state)
 
     async def loadSession(self, params: LoadSessionRequest) -> LoadSessionResponse | None:
@@ -237,6 +241,7 @@ class ACPAgent(Agent):
         self._persist_session_meta(params.sessionId, cwd, mcp_servers, current_mode=mode)
         for note in history:
             await self._conn.sessionUpdate(note)
+        await self._send_usage_hint(params.sessionId)
         return LoadSessionResponse()
 
     async def setSessionMode(self, params: SetSessionModeRequest) -> SetSessionModeResponse | None:
@@ -277,6 +282,7 @@ class ACPAgent(Agent):
             with contextlib.suppress(Exception):
                 # Persist selection so subsequent runs default to the same model.
                 model_registry.set_current_model(params.modelId)
+            await self._send_usage_hint(params.sessionId)
         except Exception as exc:  # pragma: no cover - model build errors
             logger.error("Failed to set session model: %s", exc)
             return SetSessionModelResponse()
@@ -289,6 +295,8 @@ class ACPAgent(Agent):
         cancel_event.clear()
         self._store_user_prompt(params.sessionId, params.prompt)
         history = build_chat_history(self._session_history.get(params.sessionId, []))
+        # Reset last text chunk tracking for this prompt turn.
+        self._session_last_chunk[params.sessionId] = None
 
         for block in params.prompt:
             tool_call = getattr(block, "toolCall", None)
@@ -328,8 +336,13 @@ class ACPAgent(Agent):
             return PromptResponse(stopReason="cancelled")
 
         runner = self._session_models.get(params.sessionId, self._ai_runner)
+        tool_trackers: Dict[str, ToolCallTracker] = {}
 
         async def _push_chunk(chunk: str) -> None:
+            last = self._session_last_chunk.get(params.sessionId)
+            if chunk == last:
+                return
+            self._session_last_chunk[params.sessionId] = chunk
             await self._send_update(
                 session_notification(
                     params.sessionId,
@@ -337,8 +350,73 @@ class ACPAgent(Agent):
                 )
             )
 
-        response_text = await stream_with_runner(
-            runner, prompt_text, _push_chunk, cancel_event, history=history
+        async def _handle_runner_event(event: Any) -> bool:
+            if isinstance(event, FunctionToolCallEvent):
+                tool_name = getattr(event.part, "tool_name", None) or ""
+                tracker = ToolCallTracker(id_factory=lambda: event.tool_call_id)
+                tool_trackers[event.tool_call_id] = tracker
+                logger.info(
+                    "LLM requested tool %s session=%s args_keys=%s",
+                    tool_name,
+                    params.sessionId,
+                    sorted((event.part.args or {}).keys()),
+                )
+                start = tracker.start(
+                    external_id=event.tool_call_id,
+                    title=tool_name,
+                    status="in_progress",
+                    raw_input={"tool": tool_name, **(event.part.args or {})},
+                )
+                await self._send_update(session_notification(params.sessionId, start))
+                return True
+
+            if isinstance(event, FunctionToolResultEvent):
+                tracker = tool_trackers.pop(event.tool_call_id, None) or ToolCallTracker(
+                    id_factory=lambda: event.tool_call_id
+                )
+                result_part = event.result
+                tool_name = getattr(result_part, "tool_name", None) or ""
+                content = getattr(result_part, "content", None)
+                raw_output: dict[str, Any] = {}
+                if isinstance(content, dict):
+                    raw_output.update(content)
+                else:
+                    raw_output["content"] = content
+                raw_output.setdefault("tool", tool_name)
+                status = "completed"
+                if isinstance(result_part, RetryPromptPart):
+                    raw_output["error"] = result_part.model_response()
+                    status = "failed"
+                else:
+                    raw_output.setdefault("error", None)
+                summary = raw_output.get("error") or raw_output.get("content") or ""
+                logger.info(
+                    "LLM tool result %s session=%s status=%s preview=%s",
+                    tool_name,
+                    params.sessionId,
+                    status,
+                    str(summary)[:160].replace("\n", "\\n"),
+                )
+                progress = tracker.progress(
+                    external_id=event.tool_call_id,
+                    status=status,
+                    raw_output=raw_output,
+                    content=[tool_content(text_block(str(summary)))] if summary else None,
+                )
+                await self._send_update(session_notification(params.sessionId, progress))
+                if tool_name == "tool_generate_plan":
+                    await self._emit_plan_update(params.sessionId, raw_output)
+                return True
+
+            return False
+
+        response_text, usage = await stream_with_runner(
+            runner,
+            prompt_text,
+            _push_chunk,
+            cancel_event,
+            history=history,
+            on_event=_handle_runner_event,
         )
         if response_text is None:
             return PromptResponse(stopReason="cancelled")
@@ -356,7 +434,26 @@ class ACPAgent(Agent):
             await _push_chunk(response_text)
         plan_update = parse_plan_from_text(response_text or "")
         if plan_update:
+            logger.info(
+                "Parsed plan from model text for session %s entries=%s",
+                params.sessionId,
+                len(plan_update.entries) if getattr(plan_update, "entries", None) else 0,
+            )
             await self._send_update(session_notification(params.sessionId, plan_update))
+        context_limit = model_registry.get_context_limit(self._session_model_ids.get(params.sessionId, ""))
+        usage_text = _format_usage(
+            usage,
+            context_limit,
+            self._session_model_ids.get(params.sessionId, ""),
+        )
+        if not usage_text and context_limit:
+            usage_text = "[usage] pct=100"
+        if usage_text:
+            await self._send_update(
+                session_notification(
+                    params.sessionId, update_agent_message(text_block(usage_text))
+                )
+            )
         return PromptResponse(stopReason="end_turn")
 
     async def cancel(self, params: CancelNotification) -> None:
@@ -398,6 +495,9 @@ class ACPAgent(Agent):
         """Execute a regular tool and stream ACP tool_call_update notifications."""
         tool_call_id = tool_call_id or str(uuid.uuid4())
         tracker = ToolCallTracker(id_factory=lambda: tool_call_id)
+        logger.info(
+            "Tool call start %s session=%s args_keys=%s", tool_name, session_id, sorted(arguments or {})
+        )
         start = tracker.start(
             external_id=tool_call_id,
             title=tool_name,
@@ -425,19 +525,60 @@ class ACPAgent(Agent):
             await self._send_update(session_notification(session_id, progress))
             return
 
+        if tool_name == "tool_generate_plan":
+            logger.info(
+                "Planning tool invoked for session %s with args keys=%s",
+                session_id,
+                sorted(arguments or {}),
+            )
+            logger.info("Planning tool result keys=%s", sorted(result.keys()))
         status = "completed" if not result.get("error") else "failed"
         summary = result.get("content") or result.get("error") or ""
+        # Include tool name for downstream clients to interpret plan tool output.
+        result_with_tool = dict(result)
+        result_with_tool.setdefault("tool", tool_name)
+        logger.info(
+            "Tool call done %s session=%s status=%s summary_preview=%s",
+            tool_name,
+            session_id,
+            status,
+            str(summary)[:160].replace("\n", "\\n"),
+        )
         progress = tracker.progress(
             external_id=tool_call_id,
             status=status,
-            raw_output=result,
+            raw_output=result_with_tool,
             content=[tool_content(text_block(summary))],
         )
         await self._send_update(session_notification(session_id, progress))
         if tool_name == "tool_generate_plan":
-            plan_update = parse_plan_from_text(str(result.get("content") or ""))
-            if plan_update:
-                await self._send_update(session_notification(session_id, plan_update))
+            await self._emit_plan_update(session_id, result_with_tool)
+
+    async def _emit_plan_update(self, session_id: str, result: dict[str, Any]) -> None:
+        """Convert planning tool results into ACP AgentPlanUpdate notifications."""
+        steps = result.get("plan_steps")
+        plan_update = None
+        if isinstance(steps, list) and steps:
+            entries = [plan_entry(str(item)) for item in steps if str(item)]
+            plan_update = update_plan(entries)
+        else:
+            plan_text = str(result.get("content") or "").strip()
+            plan_update = parse_plan_from_text(plan_text)
+            if not plan_update and plan_text:
+                plan_update = update_plan([plan_entry(plan_text)])
+        if plan_update:
+            entry_count = len(plan_update.entries) if getattr(plan_update, "entries", None) else 0
+            logger.info(
+                "Emitting AgentPlanUpdate with %s entries for session %s", entry_count, session_id
+            )
+            await self._send_update(session_notification(session_id, plan_update))
+        else:
+            logger.warning(
+                "Planning tool produced no plan update for session %s; raw plan_steps=%s content_preview=%s",
+                session_id,
+                steps,
+                str(result.get("content", ""))[:120],
+            )
 
     async def _execute_run_command_with_terminal(
         self,
@@ -574,7 +715,8 @@ class ACPAgent(Agent):
         await self._send_update(session_notification(session_id, progress))
 
     async def _run_ai(self, prompt_text: str) -> str:
-        return await run_with_runner(self._ai_runner, prompt_text)
+        result_text, _usage = await run_with_runner(self._ai_runner, prompt_text)
+        return result_text
 
     def _handle_model_command(self, session_id: str, prompt_text: str):
         """Handle `/model` control commands sent as prompt text."""
@@ -704,6 +846,38 @@ class ACPAgent(Agent):
     def _load_session_history(self, session_id: str) -> list[SessionNotification]:
         return self._session_store.load_history(session_id)
 
+    async def _send_usage_hint(self, session_id: str) -> None:
+        """Emit a usage marker so the client can show context % immediately."""
+        model_id = self._session_model_ids.get(session_id, "")
+        context_limit = model_registry.get_context_limit(model_id)
+        if not context_limit:
+            return
+        usage_text = "[usage] pct=100"
+        await self._send_update(
+            session_notification(session_id, update_agent_message(text_block(usage_text)))
+        )
+
+
+def _format_usage(usage: Any, context_limit: int | None, model_id: str) -> str:
+    """Build a compact usage marker for the client to parse (percent remaining)."""
+
+    def _get(field: str) -> int | None:
+        if hasattr(usage, field):
+            val = getattr(usage, field)
+            return int(val) if isinstance(val, (int, float)) else None
+        if isinstance(usage, dict) and field in usage:
+            val = usage.get(field)
+            return int(val) if isinstance(val, (int, float)) else None
+        return None
+
+    input_tokens = _get("input_tokens") or _get("prompt_tokens")
+    if context_limit is None or input_tokens is None:
+        return ""
+
+    remaining = max(0, context_limit - input_tokens)
+    pct_left = max(0.0, remaining / context_limit * 100.0)
+    return f"[usage] pct={pct_left:.0f}"
+
 
 async def run_acp_agent():
     """Run the ACP server."""
@@ -725,7 +899,7 @@ def _setup_acp_logging():
         root_logger.removeHandler(handler)
 
     logging.basicConfig(
-        level=logging.DEBUG,
+        level=logging.INFO,
         format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
         handlers=[logging.FileHandler(log_file)],
     )

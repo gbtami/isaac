@@ -98,10 +98,22 @@ class ExampleClient(Client):
             print_mode_update(self._state.current_mode)
             return
         if isinstance(update, ToolCallStart):
+            if self._state.pending_newline:
+                print()
+                self._state.pending_newline = False
             print_tool("start", getattr(update, "title", ""))
             return
         if isinstance(update, ToolCallProgress):
+            if self._state.pending_newline:
+                print()
+                self._state.pending_newline = False
             raw_out = getattr(update, "rawOutput", {}) or {}
+            tool_name = raw_out.get("tool") or raw_out.get("tool_name") or getattr(
+                update, "title", ""
+            )
+            if tool_name == "tool_generate_plan":
+                # Plan is emitted via AgentPlanUpdate; avoid duplicate display here.
+                return
             if update.status == "completed":
                 rc = raw_out.get("returncode")
                 err = raw_out.get("error")
@@ -137,6 +149,8 @@ class ExampleClient(Client):
         prefix = ""
         if isinstance(content, TextContentBlock):
             text = content.text
+            if _maybe_capture_usage(text, self._state):
+                return
             if self._state.collect_models:
                 self._state.model_buffer = (self._state.model_buffer or []) + [text]
             print_agent_text(text)
@@ -153,6 +167,49 @@ class ExampleClient(Client):
         else:
             text = "<content>"
         print_agent_text(f"{prefix} {text}" if prefix else text)
+
+
+def _maybe_capture_usage(text: str, state: SessionUIState) -> bool:
+    """Capture usage marker sent by agent and store in state."""
+    if not text.startswith("[usage]"):
+        return False
+    parts = text.split()
+    kv = {}
+    for part in parts[1:]:
+        if "=" in part:
+            k, v = part.split("=", 1)
+            kv[k] = v
+    pct = kv.get("pct")
+    if pct:
+        pct_val = pct.rstrip("%")
+        try:
+            state.usage_summary = f"{float(pct_val):.0f}% left"
+        except Exception:
+            state.usage_summary = f"{pct} left"
+    else:
+        state.usage_summary = None
+    return True
+
+
+def _extract_plan_entries(text: str) -> list[str]:
+    """Parse simple plan text into entries."""
+    lines = [ln.strip() for ln in text.splitlines() if ln.strip()]
+    if not lines:
+        return []
+    start_idx = None
+    for idx, line in enumerate(lines):
+        if line.lower().startswith("plan:"):
+            start_idx = idx + 1
+            break
+    if start_idx is None or start_idx >= len(lines):
+        return []
+    entries: list[str] = []
+    for line in lines[start_idx:]:
+        if line[0] in {"-", "*"}:
+            entries.append(line.lstrip("-* ").strip())
+        elif line[:2].isdigit() and "." in line:
+            entries.append(line.split(".", 1)[1].strip())
+    return entries
 
 
 async def set_mode(
