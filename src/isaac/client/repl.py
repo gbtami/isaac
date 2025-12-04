@@ -18,21 +18,6 @@ from isaac.client.status_box import render_status_box
 from isaac.client.thinking import toggle_thinking
 
 
-async def _run_tests() -> int:
-    proc = await asyncio.create_subprocess_shell(
-        "uv run pytest",
-        stdout=asyncio.subprocess.PIPE,
-        stderr=asyncio.subprocess.STDOUT,
-    )
-    assert proc.stdout is not None
-    while True:
-        line = await proc.stdout.readline()
-        if not line:
-            break
-        print(line.decode().rstrip())
-    return await proc.wait()
-
-
 async def interactive_loop(
     conn: ClientSideConnection, session_id: str, state: SessionUIState
 ) -> None:
@@ -75,6 +60,15 @@ async def interactive_loop(
                 line, conn, session_id, state, permission_reset=lambda: None
             )
             if handled:
+                continue
+            # Guard against mistyped slash commands from going to the model.
+            cmd = line.split()[0]
+            agent_slash = {"/log", "/model"}
+            if cmd not in agent_slash:
+                print(
+                    "Available slash commands: /status, /models, /model <id>, "
+                    "/mode <ask|yolo>, /thinking on|off, /log <level>, /exit"
+                )
                 continue
 
         try:
@@ -189,7 +183,7 @@ async def _handle_slash(
             "/model <id>   - Set model to the given id\n"
             "/mode <id>    - Set agent mode (ask|yolo)\n"
             "/thinking on|off - Toggle display of model thinking traces\n"
-            "/test         - Run pytest locally\n"
+            "/log <level>  - Set agent log level (DEBUG, INFO, WARNING, ERROR, CRITICAL)\n"
             "/exit         - Exit the client\n"
         )
         return True
@@ -214,18 +208,6 @@ async def _handle_slash(
             )
         print(f"[model set to {selection}]")
         return True
-    if line.startswith("/mode"):
-        parts = line.split()
-        if len(parts) == 1:
-            print("Usage: /mode <ask|yolo>")
-            return True
-        await set_mode(conn, session_id, state, parts[1])
-        permission_reset()
-        return True
-    if line == "/test":
-        print("[running tests: uv run pytest]")
-        await _run_tests()
-        return True
     if line.startswith("/thinking"):
         parts = line.split()
         if len(parts) == 2 and parts[1] in {"on", "off"}:
@@ -238,8 +220,14 @@ async def _handle_slash(
         print("[exiting]")
         raise SystemExit(0)
 
-    print(
-        "Available slash commands: /status, /models, /model <id>, /mode <ask|yolo>, "
-        "/thinking on|off, /test, /exit"
-    )
-    return True
+    if line.startswith("/mode"):
+        parts = line.split()
+        if len(parts) == 1:
+            print("Usage: /mode <ask|yolo>")
+            return True
+        await set_mode(conn, session_id, state, parts[1])
+        permission_reset()
+        return True
+
+    # Unknown slash commands fall through to the agent for server-side handling.
+    return False

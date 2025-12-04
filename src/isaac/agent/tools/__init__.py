@@ -50,12 +50,6 @@ READ_ONLY_TOOLS = {
     "tool_code_search",
 }
 
-# Optional, dynamically-registered tools (e.g., planning delegate)
-EXTRA_TOOL_HANDLERS: Dict[str, ToolHandler] = {}
-EXTRA_TOOLS: Dict[str, Any] = {}
-EXTRA_DSL: Dict[str, tuple[str, Callable[[list[str], str], dict | None]]] = {}
-
-
 def get_tools() -> List[Any]:
     """Return ACP tool descriptions (with graceful fallback when schema lacks Tool)."""
     base_tools = [
@@ -171,12 +165,11 @@ def get_tools() -> List[Any]:
             ),
         ),
     ]
-    base_tools.extend(EXTRA_TOOLS.values())
     return base_tools
 
 
 async def run_tool(function_name: str, **kwargs: Any) -> dict:
-    handler = TOOL_HANDLERS.get(function_name) or EXTRA_TOOL_HANDLERS.get(function_name)
+    handler = TOOL_HANDLERS.get(function_name)
     if not handler:
         return {"content": None, "error": f"Unknown tool function: {function_name}"}
     try:
@@ -285,10 +278,6 @@ def parse_tool_request(prompt_text: str) -> dict[str, Any] | None:
     args = parts[1:]
     parser = DSL_PARSERS.get(dsl_name)
     tool_name = DSL_TO_TOOL.get(dsl_name)
-    if not parser or not tool_name:
-        extra = EXTRA_DSL.get(dsl_name)
-        if extra:
-            tool_name, parser = extra
     if not parser or not tool_name:
         return None
 

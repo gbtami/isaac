@@ -67,6 +67,9 @@ from acp.helpers import (
 from acp.schema import (
     AgentCapabilities,
     AllowedOutcome,
+    AvailableCommand,
+    AvailableCommandsUpdate,
+    CommandInputHint,
     CurrentModeUpdate,
     Implementation,
     McpCapabilities,
@@ -154,6 +157,7 @@ class ACPAgent(Agent):
         self._agent_name = agent_name
         self._agent_title = agent_title
         self._agent_version = agent_version
+        self._session_commands_advertised: set[str] = set()
         if ai_runner is None and planning_runner is None:
             self._ai_runner, self._planning_runner = create_default_runners()
         else:
@@ -228,6 +232,7 @@ class ACPAgent(Agent):
         self._persist_session_meta(session_id, cwd, params.mcpServers, current_mode="ask")
         mode_state = build_mode_state(self._session_modes, session_id, current_mode="ask")
         await self._send_usage_hint(session_id)
+        await self._send_available_commands(session_id)
         return NewSessionResponse(sessionId=session_id, modes=mode_state)
 
     async def loadSession(self, params: LoadSessionRequest) -> LoadSessionResponse | None:
@@ -258,6 +263,7 @@ class ACPAgent(Agent):
         for note in history:
             await self._conn.sessionUpdate(note)
         await self._send_usage_hint(params.sessionId)
+        await self._send_available_commands(params.sessionId)
         return LoadSessionResponse()
 
     async def setSessionMode(self, params: SetSessionModeRequest) -> SetSessionModeResponse | None:
@@ -908,6 +914,28 @@ class ACPAgent(Agent):
         await self._send_update(
             session_notification(session_id, update_agent_message(text_block(usage_text)))
         )
+
+    async def _send_available_commands(self, session_id: str) -> None:
+        """Advertise slash commands using `available_commands_update` per ACP spec."""
+        if session_id in self._session_commands_advertised:
+            return
+        commands = [
+            AvailableCommand(
+                name="log",
+                description="Set agent log level (DEBUG, INFO, WARNING, ERROR, CRITICAL).",
+                input=CommandInputHint(hint="/log <level>"),
+            ),
+            AvailableCommand(
+                name="model",
+                description="List or switch models.",
+                input=CommandInputHint(hint="/model <id>"),
+            ),
+        ]
+        update = AvailableCommandsUpdate(
+            sessionUpdate="available_commands_update", availableCommands=commands
+        )
+        await self._send_update(session_notification(session_id, update))
+        self._session_commands_advertised.add(session_id)
 
     async def _request_run_permission(
         self,
