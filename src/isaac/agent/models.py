@@ -67,7 +67,6 @@ DEFAULT_CONFIG = {
             "provider": "openrouter",
             "model": "moonshotai/kimi-k2:free",
             "description": "OpenRouter proxy for moonshotai/kimi-k2:free",
-            "context_limit": "32000",
         },
         "openrouter-kwaipilot/kat-coder-pro:free": {
             "provider": "openrouter",
