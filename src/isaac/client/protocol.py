@@ -190,28 +190,28 @@ class ExampleClient(Client):
             return
 
         content = update.content
-        text: str
+        display_text: str
         prefix = ""
         if isinstance(content, TextContentBlock):
-            text = content.text
-            if _maybe_capture_usage(text, self._state):
+            display_text = content.text
+            if _maybe_capture_usage(display_text, self._state):
                 return
             if self._state.collect_models:
-                self._state.model_buffer = (self._state.model_buffer or []) + [text]
-            print_agent_text(text)
+                self._state.model_buffer = (self._state.model_buffer or []) + [display_text]
+            print_agent_text(display_text)
             self._state.pending_newline = True
             return
         elif isinstance(content, ImageContentBlock):
-            text = "<image>"
+            display_text = "<image>"
         elif isinstance(content, AudioContentBlock):
-            text = "<audio>"
+            display_text = "<audio>"
         elif isinstance(content, ResourceContentBlock):
-            text = content.uri or "<resource>"
+            display_text = content.uri or "<resource>"
         elif isinstance(content, EmbeddedResourceContentBlock):
-            text = "<resource>"
+            display_text = "<resource>"
         else:
-            text = "<content>"
-        print_agent_text(f"{prefix} {text}" if prefix else text)
+            display_text = "<content>"
+        print_agent_text(f"{prefix} {display_text}" if prefix else display_text)
 
 
 def _maybe_capture_usage(text: str, state: SessionUIState) -> bool:

@@ -21,4 +21,5 @@ This project uses `uv` for environment and project management.
 ## Required Checks (run every change)
 - Format: `uv run ruff format .`
 - Lint: `uv run ruff check .`
+- Types: `uv run mypy src tests`
 - Tests: `uv run pytest`

@@ -5,30 +5,27 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Awaitable, Callable, Dict, List
 
+from .apply_patch import apply_patch
+from .code_search import code_search
+from .edit_file import edit_file
+from .file_summary import file_summary
 from .list_directory import list_files
 from .read_file import read_file
 from .run_command import run_command
-from .edit_file import edit_file
-from .code_search import code_search
-from .apply_patch import apply_patch
-from .file_summary import file_summary
 
-try:
-    from acp.schema import Tool, ToolParameter  # type: ignore
-except Exception:  # pragma: no cover - fallback for older SDKs
 
-    @dataclass
-    class ToolParameter:  # type: ignore[misc]
-        type: str
-        properties: dict[str, Any]
-        required: list[str]
+@dataclass
+class ToolParameter:
+    type: str
+    properties: dict[str, Any]
+    required: list[str]
 
-    @dataclass
-    class Tool:  # type: ignore[misc]
-        function: str
-        description: str
-        parameters: ToolParameter
 
+@dataclass
+class Tool:
+    function: str
+    description: str
+    parameters: ToolParameter
 
 ToolHandler = Callable[..., Awaitable[dict]]
 

@@ -29,7 +29,7 @@ async def interactive_loop(
         if not event.app.is_done:
             event.app.exit(result=CANCEL_TOKEN)
 
-    session = PromptSession(key_bindings=kb)
+    session: PromptSession = PromptSession(key_bindings=kb)
     if state.show_status_on_start:
         print(render_status_box(state))
         state.show_status_on_start = False

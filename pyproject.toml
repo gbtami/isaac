@@ -2,10 +2,20 @@
 name = "isaac"
 version = "0.1.0"
 description = "Simple ACP agent"
-requires-python = ">=3.12"
+requires-python = ">=3.10"
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "License :: OSI Approved :: MIT License",
+    "Intended Audience :: Developers",
+    "Topic :: Software Development :: Libraries",
+]
 dependencies = [
     "agent-client-protocol==0.7.0",
-    "pydantic-ai==1.25.1",
+    "pydantic-ai==1.26.0",
     "prompt-toolkit==3.0.52",
     "python-dotenv",
     "ollama",
@@ -25,6 +35,7 @@ test = [
     "ruff",
     "pytest",
     "pytest-asyncio",
+    "mypy",
 ]
 
 [tool.ruff]
@@ -35,3 +46,23 @@ packages = ["src/isaac"]
 
 [tool.pytest.ini_options]
 pythonpath = ["src"]
+
+[tool.mypy]
+python_version = "3.10"
+ignore_missing_imports = true
+disallow_untyped_defs = false
+warn_unused_ignores = false
+allow_untyped_globals = true
+exclude = ["\\.venv", "\\.uv-cache"]
+files = ["src", "tests"]
+disable_error_code = [
+    "attr-defined",
+    "assignment",
+    "call-arg",
+    "arg-type",
+    "misc",
+    "return-value",
+    "union-attr",
+    "dict-item",
+    "index",
+]
