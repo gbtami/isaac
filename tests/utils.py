@@ -3,7 +3,7 @@ from __future__ import annotations
 import inspect
 from unittest.mock import AsyncMock
 
-from acp import AgentSideConnection
+from acp.agent.connection import AgentSideConnection
 from acp import RequestPermissionResponse
 from acp.schema import AllowedOutcome
 from isaac.agent import ACPAgent
@@ -19,21 +19,21 @@ def make_function_agent(conn: AgentSideConnection) -> ACPAgent:
     runner = PydanticAgent(TestModel(call_tools=[]))
     planning_runner = build_planning_agent(TestModel(call_tools=[]))
     register_tools(runner)
-    if not inspect.iscoroutinefunction(getattr(conn, "sessionUpdate", None)):
-        conn.sessionUpdate = AsyncMock()
+    if not inspect.iscoroutinefunction(getattr(conn, "session_update", None)):
+        conn.session_update = AsyncMock()
 
     # Default permission responder for tests (can be overridden per test).
     async def _default_perm(_: object) -> RequestPermissionResponse:
         return RequestPermissionResponse(
-            outcome=AllowedOutcome(optionId="allow_once", outcome="selected")
+            outcome=AllowedOutcome(option_id="allow_once", outcome="selected")
         )
 
-    current_perm = getattr(conn, "requestPermission", None)
+    current_perm = getattr(conn, "request_permission", None)
     if not inspect.iscoroutinefunction(current_perm):
         if isinstance(current_perm, AsyncMock) and current_perm.return_value is not None:
             pass
         else:
-            conn.requestPermission = _default_perm  # type: ignore[attr-defined]
+            conn.request_permission = _default_perm  # type: ignore[attr-defined]
     return ACPAgent(conn, ai_runner=runner, planning_runner=planning_runner)
 
 

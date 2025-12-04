@@ -20,7 +20,7 @@ def handle_slash_command(session_id: str, prompt: str) -> SessionNotification | 
         level = parts[1] if len(parts) > 1 else ""
         output = _set_log_level(level)
         return SessionNotification(
-            sessionId=session_id,
+            session_id=session_id,
             update=update_agent_message(text_block(output)),
         )
     return None

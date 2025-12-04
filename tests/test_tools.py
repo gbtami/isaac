@@ -97,9 +97,9 @@ async def test_run_tool_reports_missing_args():
 @pytest.mark.asyncio
 async def test_run_command_requests_permission():
     conn = AsyncMock()
-    conn.requestPermission = AsyncMock(
+    conn.request_permission = AsyncMock(
         return_value=RequestPermissionResponse(
-            outcome=AllowedOutcome(optionId="reject_once", outcome="selected")
+            outcome=AllowedOutcome(option_id="reject_once", outcome="selected")
         )
     )
     agent = make_function_agent(conn)
@@ -111,21 +111,21 @@ async def test_run_command_requests_permission():
         session_id, tool_call_id="tc1", arguments={"command": "echo hi"}
     )
 
-    conn.requestPermission.assert_awaited()
-    assert conn.sessionUpdate.await_args_list, "Expected a sessionUpdate for permission denial"
-    updates = [call.args[0].update for call in conn.sessionUpdate.await_args_list]  # type: ignore[attr-defined]
+    conn.request_permission.assert_awaited()
+    assert conn.session_update.await_args_list, "Expected a session_update for permission denial"
+    updates = [call.kwargs["update"] for call in conn.session_update.await_args_list]  # type: ignore[attr-defined]
     failed = [u for u in updates if getattr(u, "status", "") == "failed"]
     assert failed, "Expected a failed tool update after permission denial"
-    raw_out = getattr(failed[-1], "rawOutput", {}) or {}
+    raw_out = getattr(failed[-1], "raw_output", {}) or {}
     assert raw_out.get("error") == "permission denied"
 
 
 @pytest.mark.asyncio
 async def test_allow_always_cached_per_command():
     conn = AsyncMock()
-    conn.requestPermission = AsyncMock(
+    conn.request_permission = AsyncMock(
         return_value=RequestPermissionResponse(
-            outcome=AllowedOutcome(optionId="allow_always", outcome="selected")
+            outcome=AllowedOutcome(option_id="allow_always", outcome="selected")
         )
     )
     agent = make_function_agent(conn)
@@ -142,4 +142,4 @@ async def test_allow_always_cached_per_command():
 
     assert first is True
     assert second is True
-    conn.requestPermission.assert_awaited_once()
+    conn.request_permission.assert_awaited_once()

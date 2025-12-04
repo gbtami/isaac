@@ -26,8 +26,8 @@ def build_mode_state(session_modes: Dict[str, str], session_id: str, current_mod
 
     modes = available_modes()
     return SessionModeState(
-        availableModes=[
+        available_modes=[
             SessionMode(id=m["id"], name=m["name"], description=m["description"]) for m in modes
         ],
-        currentModeId=current_mode,
+        current_mode_id=current_mode,
     )

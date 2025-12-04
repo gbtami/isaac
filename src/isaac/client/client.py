@@ -12,7 +12,8 @@ from pathlib import Path
 from typing import Any, Iterable
 
 import asyncio.subprocess as aio_subprocess
-from acp import ClientSideConnection, InitializeRequest, NewSessionRequest, PROTOCOL_VERSION
+from acp import PROTOCOL_VERSION
+from acp.core import connect_to_agent
 from acp.schema import ClientCapabilities, FileSystemCapability, Implementation
 
 from isaac.client.mcp_config import load_mcp_config
@@ -46,39 +47,35 @@ async def run_client(program: str, args: Iterable[str], mcp_servers: list[Any]) 
     state = SessionUIState(current_mode="ask", current_model="unknown", mcp_servers=[])
 
     client_impl = ExampleClient(state)
-    conn = ClientSideConnection(lambda _agent: client_impl, proc.stdin, proc.stdout)
+    conn = connect_to_agent(client_impl, proc.stdin, proc.stdout)
 
     await conn.initialize(
-        InitializeRequest(
-            protocolVersion=PROTOCOL_VERSION,
-            clientCapabilities=ClientCapabilities(
-                fs=FileSystemCapability(readTextFile=False, writeTextFile=False),
-                terminal=True,
-            ),
-            clientInfo=Implementation(
-                name="example-client", title="Example Client", version="0.1.0"
-            ),
-        )
+        protocol_version=PROTOCOL_VERSION,
+        client_capabilities=ClientCapabilities(
+            fs=FileSystemCapability(read_text_file=False, write_text_file=False),
+            terminal=True,
+        ),
+        client_info=Implementation(name="example-client", title="Example Client", version="0.1.0"),
     )
     state.mcp_servers = [
         (srv.get("name") if isinstance(srv, dict) else getattr(srv, "name", "<server>"))
         or "<server>"
         for srv in mcp_servers
     ]
-    session = await conn.newSession(NewSessionRequest(mcpServers=mcp_servers, cwd=os.getcwd()))
+    session = await conn.new_session(cwd=os.getcwd(), mcp_servers=mcp_servers)
     try:
-        ext_models = await conn.extMethod("model/list", {"sessionId": session.sessionId})
+        ext_models = await conn.ext_method("model/list", {"session_id": session.session_id})
         if isinstance(ext_models, dict):
             current = ext_models.get("current")
             if isinstance(current, str):
                 state.current_model = current
     except Exception:
         state.current_model = state.current_model
-    if getattr(session, "modes", None) and getattr(session.modes, "currentModeId", None):
-        state.current_mode = session.modes.currentModeId
+    if getattr(session, "modes", None) and getattr(session.modes, "current_mode_id", None):
+        state.current_mode = session.modes.current_mode_id
 
     try:
-        await interactive_loop(conn, session.sessionId, state)
+        await interactive_loop(conn, session.session_id, state)
         return 0
     except KeyboardInterrupt:
         return 130

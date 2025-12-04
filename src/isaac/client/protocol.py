@@ -15,7 +15,6 @@ from acp import (
     RequestError,
     RequestPermissionResponse,
     SessionNotification,
-    SetSessionModeRequest,
     TerminalOutputRequest,
     TerminalOutputResponse,
     WaitForTerminalExitRequest,
@@ -54,53 +53,89 @@ class ExampleClient(Client):
         self._state = state
         self._terminal_manager = ClientTerminalManager()
 
-    async def requestPermission(self, params):  # type: ignore[override]
+    async def request_permission(
+        self,
+        options,
+        session_id: str,
+        tool_call: Any,
+        **_: Any,
+    ) -> RequestPermissionResponse:
         """Prompt the user for a permission choice (Prompt Turn permission flow)."""
         try:
-            for idx, opt in enumerate(params.options, start=1):
-                label = getattr(opt, "label", opt.optionId)
+            for idx, opt in enumerate(options, start=1):
+                label = getattr(opt, "label", opt.option_id)
                 print(f"{idx}) {label}")
             choice = input("Permission choice (number): ").strip()
-            if choice.isdigit() and 1 <= int(choice) <= len(params.options):
-                selection = params.options[int(choice) - 1].optionId
+            if choice.isdigit() and 1 <= int(choice) <= len(options):
+                selection = options[int(choice) - 1].option_id
             else:
-                selection = params.options[0].optionId if params.options else "default"
+                selection = options[0].option_id if options else "default"
         except Exception:
-            selection = params.options[0].optionId if params.options else "default"
-        return RequestPermissionResponse(outcome=AllowedOutcome(optionId=selection))
+            selection = options[0].option_id if options else "default"
+        return RequestPermissionResponse(
+            outcome=AllowedOutcome(option_id=selection, outcome="selected")
+        )
 
-    async def writeTextFile(self, params):  # type: ignore[override]
+    async def write_text_file(self, *args: Any, **kwargs: Any):  # type: ignore[override]
         raise RequestError.method_not_found("fs/write_text_file")
 
-    async def readTextFile(self, params):  # type: ignore[override]
+    async def read_text_file(self, *args: Any, **kwargs: Any):  # type: ignore[override]
         raise RequestError.method_not_found("fs/read_text_file")
 
-    async def createTerminal(self, params: CreateTerminalRequest) -> CreateTerminalResponse:  # type: ignore[override]
+    async def create_terminal(
+        self,
+        command: str,
+        session_id: str,
+        args=None,
+        cwd=None,
+        env=None,
+        output_byte_limit=None,
+        **_: Any,
+    ) -> CreateTerminalResponse:
         """Create a terminal on the client host per Terminals section."""
-        return await self._terminal_manager.create_terminal(params)
+        req = CreateTerminalRequest(
+            command=command,
+            session_id=session_id,
+            args=args,
+            cwd=cwd,
+            env=env,
+            output_byte_limit=output_byte_limit,
+        )
+        return await self._terminal_manager.create_terminal(req)
 
-    async def terminalOutput(self, params: TerminalOutputRequest) -> TerminalOutputResponse:  # type: ignore[override]
+    async def terminal_output(
+        self, session_id: str, terminal_id: str, **_: Any
+    ) -> TerminalOutputResponse:
         """Return terminal output to the agent."""
-        return await self._terminal_manager.terminal_output(params)
+        req = TerminalOutputRequest(session_id=session_id, terminal_id=terminal_id)
+        return await self._terminal_manager.terminal_output(req)
 
-    async def releaseTerminal(self, params: ReleaseTerminalRequest) -> ReleaseTerminalResponse:  # type: ignore[override]
-        return await self._terminal_manager.release_terminal(params)
+    async def release_terminal(
+        self, session_id: str, terminal_id: str, **_: Any
+    ) -> ReleaseTerminalResponse:
+        req = ReleaseTerminalRequest(session_id=session_id, terminal_id=terminal_id)
+        return await self._terminal_manager.release_terminal(req)
 
-    async def waitForTerminalExit(
-        self, params: WaitForTerminalExitRequest
-    ) -> WaitForTerminalExitResponse:  # type: ignore[override]
+    async def wait_for_terminal_exit(
+        self, session_id: str, terminal_id: str, **_: Any
+    ) -> WaitForTerminalExitResponse:
         """Block until the requested client terminal exits."""
-        return await self._terminal_manager.wait_for_terminal_exit(params)
+        req = WaitForTerminalExitRequest(session_id=session_id, terminal_id=terminal_id)
+        return await self._terminal_manager.wait_for_terminal_exit(req)
 
-    async def killTerminalCommand(
-        self, params: KillTerminalCommandRequest
-    ) -> KillTerminalCommandResponse:  # type: ignore[override]
-        return await self._terminal_manager.kill_terminal(params)
+    async def kill_terminal_command(
+        self, session_id: str, terminal_id: str, **_: Any
+    ) -> KillTerminalCommandResponse:
+        req = KillTerminalCommandRequest(session_id=session_id, terminal_id=terminal_id)
+        return await self._terminal_manager.kill_terminal(req)
 
-    async def sessionUpdate(self, params: SessionNotification) -> None:
-        update = params.update
+    async def session_update(
+        self, session_id: str, update: SessionNotification | Any, **_: Any
+    ) -> None:
+        update_obj = update if not isinstance(update, SessionNotification) else update.update
+        update = update_obj or update
         if isinstance(update, CurrentModeUpdate):
-            self._state.current_mode = update.currentModeId
+            self._state.current_mode = update.current_mode_id
             print_mode_update(self._state.current_mode)
             return
         if isinstance(update, ToolCallStart):
@@ -108,7 +143,7 @@ class ExampleClient(Client):
                 print()
                 self._state.pending_newline = False
             title = getattr(update, "title", "")
-            raw_in = getattr(update, "rawInput", {}) or {}
+            raw_in = getattr(update, "raw_input", {}) or {}
             cmd = None
             if raw_in.get("tool") == "tool_run_command":
                 cmd = raw_in.get("command")
@@ -119,7 +154,7 @@ class ExampleClient(Client):
             if self._state.pending_newline:
                 print()
                 self._state.pending_newline = False
-            raw_out = getattr(update, "rawOutput", {}) or {}
+            raw_out = getattr(update, "raw_output", {}) or {}
             if update.status == "completed":
                 rc = raw_out.get("returncode")
                 err = raw_out.get("error")
@@ -228,6 +263,6 @@ async def set_mode(
     state: SessionUIState,
     mode: str,
 ) -> None:
-    await conn.setSessionMode(SetSessionModeRequest(sessionId=session_id, modeId=mode))
+    await conn.set_session_mode(mode_id=mode, session_id=session_id)
     state.current_mode = mode
     print_mode_update(state.current_mode)

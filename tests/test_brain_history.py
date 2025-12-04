@@ -1,8 +1,9 @@
 from __future__ import annotations
 
 from isaac.agent.brain.history import build_chat_history
+from acp import text_block
 from acp.helpers import session_notification, update_agent_message, tool_content
-from acp.schema import TextContentBlock, ToolCallProgress, UserMessageChunk
+from acp.schema import ToolCallProgress, UserMessageChunk
 
 
 def test_build_chat_history_from_updates():
@@ -10,21 +11,22 @@ def test_build_chat_history_from_updates():
         session_notification(
             "s1",
             UserMessageChunk(
-                sessionUpdate="user_message_chunk", content=TextContentBlock(type="text", text="hi")
+                session_update="user_message_chunk",
+                content=text_block("hi"),
             ),
         ),
         session_notification(
             "s1",
-            update_agent_message(TextContentBlock(type="text", text="hello")),
+            update_agent_message(text_block("hello")),
         ),
         session_notification(
             "s1",
             ToolCallProgress(
-                sessionUpdate="tool_call_update",
+                session_update="tool_call_update",
                 status="completed",
-                toolCallId="tc1",
-                rawOutput={"tool": "tool_run_command", "content": "done"},
-                content=[tool_content(TextContentBlock(type="text", text="tool output"))],
+                tool_call_id="tc1",
+                raw_output={"tool": "tool_run_command", "content": "done"},
+                content=[tool_content(text_block("tool output"))],
             ),
         ),
     ]

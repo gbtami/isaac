@@ -26,4 +26,4 @@ def parse_plan_request(prompt_text: str) -> list[str] | None:
 
 def build_plan_notification(session_id: str, items: List[str]) -> SessionNotification:
     entries = [plan_entry(item.strip()) for item in items if item.strip()]
-    return SessionNotification(sessionId=session_id, update=update_plan(entries))
+    return SessionNotification(session_id=session_id, update=update_plan(entries))

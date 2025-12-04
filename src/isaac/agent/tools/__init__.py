@@ -50,6 +50,7 @@ READ_ONLY_TOOLS = {
     "tool_code_search",
 }
 
+
 def get_tools() -> List[Any]:
     """Return ACP tool descriptions (with graceful fallback when schema lacks Tool)."""
     base_tools = [

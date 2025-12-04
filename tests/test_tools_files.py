@@ -5,15 +5,8 @@ from pathlib import Path
 from unittest.mock import AsyncMock
 
 import pytest
-from acp import (
-    AgentSideConnection,
-    PromptRequest,
-    ReadTextFileRequest,
-    WriteTextFileRequest,
-    text_block,
-    NewSessionRequest,
-    RequestPermissionResponse,
-)
+from acp import text_block, RequestPermissionResponse
+from acp.agent.connection import AgentSideConnection
 from acp.schema import ToolCallProgress, ToolCallStart, AllowedOutcome
 
 from isaac.agent.tools.apply_patch import apply_patch
@@ -32,22 +25,22 @@ async def test_tool_list_files_sends_progress(tmp_path: Path):
 
     session_id = "tool-session"
     response = await agent.prompt(
-        PromptRequest(sessionId=session_id, prompt=[text_block(f"tool:list_files {tmp_path}")])
+        prompt=[text_block(f"tool:list_files {tmp_path}")], session_id=session_id
     )
 
-    assert response.stopReason == "end_turn"
-    assert conn.sessionUpdate.call_count == 2
+    assert response.stop_reason == "end_turn"
+    assert conn.session_update.call_count == 2
 
-    start_call = conn.sessionUpdate.call_args_list[0][0][0]
-    update_call = conn.sessionUpdate.call_args_list[1][0][0]
+    start_call = conn.session_update.call_args_list[0].kwargs["update"]
+    update_call = conn.session_update.call_args_list[1].kwargs["update"]
 
-    assert isinstance(start_call.update, ToolCallStart)
-    assert start_call.update.status == "in_progress"
-    assert start_call.sessionId == session_id
+    assert isinstance(start_call, ToolCallStart)
+    assert start_call.status == "in_progress"
+    assert getattr(start_call, "session_id", session_id) == session_id
 
-    assert isinstance(update_call.update, ToolCallProgress)
-    assert update_call.update.status == "completed"
-    assert update_call.update.rawOutput["error"] is None
+    assert isinstance(update_call, ToolCallProgress)
+    assert update_call.status == "completed"
+    assert update_call.raw_output["error"] is None
 
 
 @pytest.mark.asyncio
@@ -60,43 +53,43 @@ async def test_tool_read_file_returns_content(tmp_path: Path):
 
     session_id = "read-session"
     response = await agent.prompt(
-        PromptRequest(sessionId=session_id, prompt=[text_block(f"tool:read_file {target} 2 1")])
+        prompt=[text_block(f"tool:read_file {target} 2 1")], session_id=session_id
     )
 
-    assert response.stopReason == "end_turn"
-    assert conn.sessionUpdate.call_count == 2
+    assert response.stop_reason == "end_turn"
+    assert conn.session_update.call_count == 2
 
-    update_call = conn.sessionUpdate.call_args_list[1][0][0]
-    assert isinstance(update_call.update, ToolCallProgress)
-    assert update_call.update.status == "completed"
-    assert "line2" in update_call.update.rawOutput["content"]
+    update_call = conn.session_update.call_args_list[1].kwargs["update"]
+    assert isinstance(update_call, ToolCallProgress)
+    assert update_call.status == "completed"
+    assert "line2" in update_call.raw_output["content"]
 
 
 @pytest.mark.asyncio
 async def test_tool_run_command_executes(tmp_path: Path):
     conn = AsyncMock(spec=AgentSideConnection)
 
-    async def _allow(_: object):
+    async def _allow(*_: object, **__: object):
         return RequestPermissionResponse(
-            outcome=AllowedOutcome(optionId="allow_once", outcome="selected")
+            outcome=AllowedOutcome(option_id="allow_once", outcome="selected")
         )
 
-    conn.requestPermission = _allow  # type: ignore[attr-defined]
+    conn.request_permission = _allow  # type: ignore[attr-defined]
     agent = make_function_agent(conn)
 
     session_id = "cmd-session"
     response = await agent.prompt(
-        PromptRequest(sessionId=session_id, prompt=[text_block("tool:run_command echo hello")])
+        prompt=[text_block("tool:run_command echo hello")], session_id=session_id
     )
 
-    assert response.stopReason == "end_turn"
-    assert conn.sessionUpdate.call_count >= 2
+    assert response.stop_reason == "end_turn"
+    assert conn.session_update.call_count >= 2
 
-    update_call = conn.sessionUpdate.call_args_list[-1][0][0]
-    assert isinstance(update_call.update, ToolCallProgress)
-    assert update_call.update.status == "completed"
-    assert update_call.update.rawOutput["returncode"] == 0
-    assert update_call.update.rawOutput["content"].strip() == "hello"
+    update_call = conn.session_update.call_args_list[-1].kwargs["update"]
+    assert isinstance(update_call, ToolCallProgress)
+    assert update_call.status == "completed"
+    assert update_call.raw_output["returncode"] == 0
+    assert update_call.raw_output["content"].strip() == "hello"
 
 
 @pytest.mark.asyncio
@@ -129,18 +122,15 @@ async def test_tool_code_search(tmp_path: Path):
 
     session_id = "search-session"
     response = await agent.prompt(
-        PromptRequest(
-            sessionId=session_id,
-            prompt=[text_block(f"tool:code_search hello {tmp_path}")],
-        )
+        prompt=[text_block(f"tool:code_search hello {tmp_path}")], session_id=session_id
     )
 
-    assert response.stopReason == "end_turn"
-    assert conn.sessionUpdate.call_count == 2
-    update_call = conn.sessionUpdate.call_args_list[1][0][0]
-    assert isinstance(update_call.update, ToolCallProgress)
-    assert update_call.update.status == "completed"
-    output = update_call.update.rawOutput["content"]
+    assert response.stop_reason == "end_turn"
+    assert conn.session_update.call_count == 2
+    update_call = conn.session_update.call_args_list[1].kwargs["update"]
+    assert isinstance(update_call, ToolCallProgress)
+    assert update_call.status == "completed"
+    output = update_call.raw_output["content"]
     assert "a.txt" in output or "b.txt" in output
 
 
@@ -165,17 +155,15 @@ def test_list_files_respects_gitignore(tmp_path: Path):
 async def test_file_system_read_write(tmp_path: Path):
     conn = AsyncMock(spec=AgentSideConnection)
     agent = make_function_agent(conn)
-    session = await agent.newSession(NewSessionRequest(cwd=str(tmp_path), mcpServers=[]))
+    session = await agent.new_session(cwd=str(tmp_path), mcp_servers=[])
 
     # write
     content = "hello fs"
-    await agent.writeTextFile(
-        WriteTextFileRequest(sessionId=session.sessionId, path="fs.txt", content=content)
-    )
+    await agent.write_text_file(content=content, path="fs.txt", session_id=session.session_id)
 
     # read
-    response = await agent.readTextFile(
-        ReadTextFileRequest(sessionId=session.sessionId, path="fs.txt", line=0, limit=10)
+    response = await agent.read_text_file(
+        path="fs.txt", session_id=session.session_id, line=0, limit=10
     )
 
     assert response.content == content

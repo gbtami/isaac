@@ -29,7 +29,7 @@ async def read_text_file(
     session_cwds: Dict[str, Path], params: ReadTextFileRequest
 ) -> ReadTextFileResponse:
     """Implement fs/read_text_file with absolute path resolution and 1-based lines."""
-    path = resolve_path_for_session(session_cwds, params.sessionId, params.path)
+    path = resolve_path_for_session(session_cwds, params.session_id, params.path)
     if not path.exists() or not path.is_file():
         return ReadTextFileResponse(content="")
 
@@ -47,7 +47,7 @@ async def write_text_file(
     session_cwds: Dict[str, Path], params: WriteTextFileRequest
 ) -> WriteTextFileResponse:
     """Implement fs/write_text_file honoring the session cwd."""
-    path = resolve_path_for_session(session_cwds, params.sessionId, params.path)
+    path = resolve_path_for_session(session_cwds, params.session_id, params.path)
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(params.content, encoding="utf-8")

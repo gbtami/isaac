@@ -38,7 +38,7 @@ async def create_terminal(
 
     terminal_id = str(uuid.uuid4())
     cwd = (
-        resolve_path_for_session(session_cwds, params.sessionId, params.cwd)
+        resolve_path_for_session(session_cwds, params.session_id, params.cwd)
         if params.cwd
         else Path.cwd()
     )
@@ -56,8 +56,8 @@ async def create_terminal(
         stderr=asyncio.subprocess.PIPE,
         env=env,
     )
-    terminals[terminal_id] = TerminalState(proc=proc, output_limit=params.outputByteLimit)
-    return CreateTerminalResponse(terminalId=terminal_id)
+    terminals[terminal_id] = TerminalState(proc=proc, output_limit=params.output_byte_limit)
+    return CreateTerminalResponse(terminal_id=terminal_id)
 
 
 async def terminal_output(
@@ -65,9 +65,9 @@ async def terminal_output(
     params: TerminalOutputRequest,
 ) -> TerminalOutputResponse:
     """Return incremental stdout/stderr for a terminal."""
-    state = terminals.get(params.terminalId)
+    state = terminals.get(params.terminal_id)
     if not state:
-        return TerminalOutputResponse(output="", truncated=False, exitStatus=None)
+        return TerminalOutputResponse(output="", truncated=False, exit_status=None)
 
     stdout = await read_nonblocking(state.proc.stdout)
     stderr = await read_nonblocking(state.proc.stderr)
@@ -80,7 +80,7 @@ async def terminal_output(
 
     exit_status = build_exit_status(state.proc.returncode)
 
-    return TerminalOutputResponse(output=combined, truncated=truncated, exitStatus=exit_status)
+    return TerminalOutputResponse(output=combined, truncated=truncated, exit_status=exit_status)
 
 
 async def wait_for_terminal_exit(
@@ -88,13 +88,13 @@ async def wait_for_terminal_exit(
     params: WaitForTerminalExitRequest,
 ) -> WaitForTerminalExitResponse:
     """Await process completion for a terminal."""
-    state = terminals.get(params.terminalId)
+    state = terminals.get(params.terminal_id)
     if not state:
-        return WaitForTerminalExitResponse(exitCode=None, signal=None)
+        return WaitForTerminalExitResponse(exit_code=None, signal=None)
     returncode = await state.proc.wait()
     exit_status = build_exit_status(returncode)
     return WaitForTerminalExitResponse(
-        exitCode=exit_status.exitCode if exit_status else None,
+        exit_code=exit_status.exitCode if exit_status else None,
         signal=exit_status.signal if exit_status else None,
     )
 
@@ -104,7 +104,7 @@ async def kill_terminal(
     params: KillTerminalCommandRequest,
 ) -> KillTerminalCommandResponse:
     """Kill a running terminal process."""
-    state = terminals.get(params.terminalId)
+    state = terminals.get(params.terminal_id)
     if state and state.proc.returncode is None:
         state.proc.kill()
     return KillTerminalCommandResponse()
@@ -115,7 +115,7 @@ async def release_terminal(
     params: ReleaseTerminalRequest,
 ) -> ReleaseTerminalResponse:
     """Release terminal resources, terminating if still alive."""
-    state = terminals.pop(params.terminalId, None)
+    state = terminals.pop(params.terminal_id, None)
     if state and state.proc.returncode is None:
         state.proc.terminate()
     return ReleaseTerminalResponse()

@@ -7,8 +7,7 @@ import logging
 import sys
 from collections.abc import Callable
 
-from acp import CancelNotification, ClientSideConnection, PromptRequest, text_block
-from acp import SetSessionModelRequest
+from acp import ClientSideConnection, text_block
 from prompt_toolkit import PromptSession  # type: ignore
 from prompt_toolkit.key_binding import KeyBindings  # type: ignore
 
@@ -42,7 +41,7 @@ async def interactive_loop(
                 f"{state.current_mode}|{state.current_model}{usage_suffix}> "
             )
             if line == CANCEL_TOKEN:
-                await conn.cancel(CancelNotification(sessionId=session_id))
+                await conn.cancel(session_id=session_id)
                 print("[cancelled]")
                 continue
         except EOFError:
@@ -72,12 +71,7 @@ async def interactive_loop(
                 continue
 
         try:
-            await conn.prompt(
-                PromptRequest(
-                    sessionId=session_id,
-                    prompt=[text_block(line)],
-                )
-            )
+            await conn.prompt(prompt=[text_block(line)], session_id=session_id)
         except Exception as exc:  # noqa: BLE001
             logging.error("Prompt failed: %s", exc)
         if state.pending_newline:
@@ -92,7 +86,7 @@ async def _interactive_model_select(
     # Prefer extension method if supported
     choices: list[str] = []
     try:
-        resp = await conn.extMethod("model/list", {"sessionId": session_id})
+        resp = await conn.ext_method("model/list", {"session_id": session_id})
         if isinstance(resp, dict):
             current = resp.get("current")
             models = resp.get("models") or []
@@ -107,12 +101,7 @@ async def _interactive_model_select(
         state.collect_models = True
         state.model_buffer = []
         try:
-            await conn.prompt(
-                PromptRequest(
-                    sessionId=session_id,
-                    prompt=[text_block("/model")],
-                )
-            )
+            await conn.prompt(prompt=[text_block("/model")], session_id=session_id)
         except Exception as exc:  # noqa: BLE001
             logging.error("Failed to fetch models: %s", exc)
             state.collect_models = False
@@ -142,11 +131,11 @@ async def _interactive_model_select(
         try:
             # Use extension method first, fall back to core set_model if needed.
             try:
-                await conn.extMethod("model/set", {"sessionId": session_id, "modelId": selection})
-            except Exception:
-                await conn.setSessionModel(
-                    SetSessionModelRequest(sessionId=session_id, modelId=selection)
+                await conn.ext_method(
+                    "model/set", {"session_id": session_id, "model_id": selection}
                 )
+            except Exception:
+                await conn.set_session_model(model_id=selection, session_id=session_id)
             print(f"[model set to {selection}]")
         except Exception as exc:  # noqa: BLE001
             logging.error("Failed to set model: %s", exc)
@@ -201,11 +190,9 @@ async def _handle_slash(
         selection = parts[1]
         state.current_model = selection
         try:
-            await conn.extMethod("model/set", {"sessionId": session_id, "modelId": selection})
+            await conn.ext_method("model/set", {"session_id": session_id, "model_id": selection})
         except Exception:
-            await conn.setSessionModel(
-                SetSessionModelRequest(sessionId=session_id, modelId=selection)
-            )
+            await conn.set_session_model(model_id=selection, session_id=session_id)
         print(f"[model set to {selection}]")
         return True
     if line.startswith("/thinking"):

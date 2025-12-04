@@ -4,7 +4,7 @@ version = "0.1.0"
 description = "Simple ACP agent"
 requires-python = ">=3.12"
 dependencies = [
-    "agent-client-protocol==0.6.3",
+    "agent-client-protocol==0.7.0",
     "pydantic-ai==1.25.1",
     "prompt-toolkit==3.0.52",
     "python-dotenv",

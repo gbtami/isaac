@@ -4,7 +4,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pytest
-from acp import PromptRequest, text_block
+from acp import text_block
 from acp.schema import AgentMessageChunk, AgentPlanUpdate
 
 from tests.utils import make_function_agent
@@ -17,15 +17,14 @@ async def test_plan_updates_for_plan_prefix():
 
     session_id = "plan-session"
     response = await agent.prompt(
-        PromptRequest(sessionId=session_id, prompt=[text_block("plan:step one;step two")])
+        prompt=[text_block("plan:step one;step two")], session_id=session_id
     )
 
-    conn.sessionUpdate.assert_called_once()
-    notification = conn.sessionUpdate.call_args[0][0]
-    assert notification.sessionId == session_id
-    assert hasattr(notification.update, "entries")
-    assert len(notification.update.entries) == 2
-    assert response.stopReason == "end_turn"
+    conn.session_update.assert_called_once()
+    update = conn.session_update.call_args.kwargs["update"]
+    assert hasattr(update, "entries")
+    assert len(update.entries) == 2
+    assert response.stop_reason == "end_turn"
 
 
 class _PlanningRunner:
@@ -61,9 +60,9 @@ async def test_programmatic_plan_then_execute():
     agent._ai_runner = executor  # type: ignore[attr-defined]
 
     session_id = "handoff"
-    await agent.prompt(PromptRequest(sessionId=session_id, prompt=[text_block("do work")]))
+    await agent.prompt(prompt=[text_block("do work")], session_id=session_id)
 
-    updates = [call.args[0].update for call in conn.sessionUpdate.await_args_list]  # type: ignore[attr-defined]
+    updates = [call.kwargs["update"] for call in conn.session_update.await_args_list]  # type: ignore[attr-defined]
     assert any(isinstance(u, AgentPlanUpdate) for u in updates)
     assert any(
         isinstance(u, AgentMessageChunk)
@@ -86,7 +85,7 @@ async def test_plan_only_prompt_skips_execution():
 
     session_id = "plan-only"
     await agent.prompt(
-        PromptRequest(sessionId=session_id, prompt=[text_block("Just a plan only, no execution.")])
+        prompt=[text_block("Just a plan only, no execution.")], session_id=session_id
     )
 
     assert len(planning_runner.prompts) == 1

@@ -1,7 +1,8 @@
 from __future__ import annotations
 
 import pytest
-from acp import AgentSideConnection, InitializeRequest, PromptRequest, PROTOCOL_VERSION, text_block
+from acp import PROTOCOL_VERSION, text_block
+from acp.agent.connection import AgentSideConnection
 from acp.schema import AgentMessageChunk
 from unittest.mock import AsyncMock
 
@@ -13,10 +14,10 @@ async def test_initialize_includes_tools():
     conn = AsyncMock(spec=AgentSideConnection)
     agent = make_function_agent(conn)
 
-    response = await agent.initialize(InitializeRequest(protocolVersion=PROTOCOL_VERSION))
+    response = await agent.initialize(protocol_version=PROTOCOL_VERSION)
 
-    assert response.protocolVersion == PROTOCOL_VERSION
-    assert response.agentInfo.name == "isaac"
+    assert response.protocol_version == PROTOCOL_VERSION
+    assert response.agent_info.name == "isaac"
 
 
 @pytest.mark.asyncio
@@ -25,19 +26,17 @@ async def test_prompt_echoes_plain_text():
     agent = make_function_agent(conn)
 
     session_id = "test-session"
-    response = await agent.prompt(
-        PromptRequest(sessionId=session_id, prompt=[text_block("hello world")])
-    )
+    response = await agent.prompt(prompt=[text_block("hello world")], session_id=session_id)
 
-    assert conn.sessionUpdate.call_count >= 1
+    assert conn.session_update.call_count >= 1
     messages = [
-        call_args[0][0].update
-        for call_args in conn.sessionUpdate.call_args_list
-        if isinstance(call_args[0][0].update, AgentMessageChunk)
+        call.kwargs["update"]
+        for call in conn.session_update.call_args_list
+        if isinstance(call.kwargs.get("update"), AgentMessageChunk)
     ]
     assert messages, "Expected at least one AgentMessageChunk"
     assert any(getattr(m.content, "text", "") for m in messages)
-    assert response.stopReason == "end_turn"
+    assert response.stop_reason == "end_turn"
 
 
 @pytest.mark.asyncio
@@ -46,14 +45,12 @@ async def test_provider_error_is_sent_to_client():
     agent = make_error_agent(conn)
 
     session_id = "err-session"
-    response = await agent.prompt(
-        PromptRequest(sessionId=session_id, prompt=[text_block("do something")])
-    )
+    response = await agent.prompt(prompt=[text_block("do something")], session_id=session_id)
 
-    assert response.stopReason == "end_turn"
+    assert response.stop_reason == "end_turn"
     updates = [
-        call_args[0][0].update
-        for call_args in conn.sessionUpdate.call_args_list
-        if isinstance(call_args[0][0].update, AgentMessageChunk)
+        call.kwargs["update"]
+        for call in conn.session_update.call_args_list
+        if isinstance(call.kwargs.get("update"), AgentMessageChunk)
     ]
     assert any("Model/provider error" in getattr(u.content, "text", "") for u in updates)
