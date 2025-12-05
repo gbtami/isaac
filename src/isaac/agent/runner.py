@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 from typing import Any, Callable
 
 from pydantic_ai.messages import PartDeltaEvent, PartEndEvent  # type: ignore
@@ -61,8 +62,9 @@ async def run_with_runner(
 
         usage = getattr(result, "usage", None)
         output = getattr(result, "output", None)
-        if isinstance(output, str):
-            return output, usage
+        text = _as_text_output(output)
+        if text is not None:
+            return text, usage
         if isinstance(result, str):
             return result, usage
     except Exception as exc:  # pragma: no cover
@@ -153,3 +155,23 @@ async def stream_with_runner(
         return f"Provider error: {exc}", None
 
     return ("".join(output_parts) or None), usage
+
+
+def _as_text_output(output: Any) -> str | None:
+    """Best-effort conversion of model outputs to text."""
+
+    if output is None:
+        return None
+    if isinstance(output, str):
+        return output
+    # Common structured plan shape (e.g., PlanSteps BaseModel)
+    steps = getattr(output, "steps", None)
+    if isinstance(steps, list) and all(isinstance(s, str) for s in steps):
+        return "\n".join(s for s in steps if s)
+    if isinstance(output, list) and all(isinstance(s, str) for s in output):
+        return "\n".join(s for s in output if s)
+    # Fallback: JSON stringify serializable data.
+    try:
+        return json.dumps(output)
+    except Exception:
+        return str(output)

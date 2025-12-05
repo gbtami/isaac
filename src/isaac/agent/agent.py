@@ -574,14 +574,18 @@ class ACPAgent(Agent):
             )
             return PromptResponse(stop_reason="end_turn")
         # If nothing was streamed (e.g., fallback runner), ensure the response is sent once.
-        plan_update = parse_plan_from_text(response_text or "")
-        if plan_update:
+        exec_plan_update = None
+        if not plan_update and not plan_response:
+            exec_plan_update = parse_plan_from_text(response_text or "")
+        if exec_plan_update:
             logger.info(
                 "Parsed plan from model text for session %s entries=%s",
                 session_id,
-                len(plan_update.entries) if getattr(plan_update, "entries", None) else 0,
+                len(exec_plan_update.entries)
+                if getattr(exec_plan_update, "entries", None)
+                else 0,
             )
-            await self._send_update(session_notification(session_id, plan_update))
+            await self._send_update(session_notification(session_id, exec_plan_update))
         # If nothing was streamed (e.g., fallback runner), ensure the response is sent once.
         if not response_text:
             await _push_chunk(response_text)
