@@ -151,6 +151,7 @@ class ACPAgent(Agent):
         self._session_history: Dict[str, list[SessionNotification]] = {}
         self._session_allowed_commands: Dict[str, set[tuple[str, str]]] = {}
         self._session_mcp_servers: Dict[str, Any] = {}
+        self._session_usage: Dict[str, Any] = {}
         self._session_toolsets: Dict[str, list[Any]] = {}
         self._agent_name = agent_name
         self._agent_title = agent_title
@@ -245,7 +246,6 @@ class ACPAgent(Agent):
         self._session_mcp_servers[session_id] = mcp_servers
         self._persist_session_meta(session_id, cwd_path, mcp_servers, current_mode="ask")
         mode_state = build_mode_state(self._session_modes, session_id, current_mode="ask")
-        await self._send_usage_hint(session_id)
         await self._send_available_commands(session_id)
         return NewSessionResponse(session_id=session_id, modes=mode_state)
 
@@ -285,7 +285,6 @@ class ACPAgent(Agent):
         self._persist_session_meta(session_id, cwd_path, mcp_servers, current_mode=mode)
         for note in history:
             await self._conn.session_update(session_id=note.session_id, update=note.update)
-        await self._send_usage_hint(session_id)
         await self._send_available_commands(session_id)
         return LoadSessionResponse()
 
@@ -345,7 +344,6 @@ class ACPAgent(Agent):
             with contextlib.suppress(Exception):
                 # Persist selection so subsequent runs default to the same model.
                 model_registry.set_current_model(model_id)
-            await self._send_usage_hint(session_id)
         except Exception as exc:  # pragma: no cover - model build errors
             logger.error("Failed to set session model: %s", exc)
             return SetSessionModelResponse()
@@ -373,6 +371,10 @@ class ACPAgent(Agent):
                 return PromptResponse(stop_reason="end_turn")
 
         prompt_text = _extract_prompt_text(prompt)
+
+        if prompt_text.strip() == "/usage":
+            await self._send_update(self._build_usage_note(session_id))
+            return PromptResponse(stop_reason="end_turn")
 
         slash = handle_slash_command(session_id, prompt_text)
         if slash:
@@ -583,21 +585,8 @@ class ACPAgent(Agent):
         # If nothing was streamed (e.g., fallback runner), ensure the response is sent once.
         if not response_text:
             await _push_chunk(response_text)
-        context_limit = model_registry.get_context_limit(
-            self._session_model_ids.get(session_id, "")
-        )
-        combined_usage = usage or plan_usage
-        usage_text = _format_usage(
-            combined_usage,
-            context_limit,
-            self._session_model_ids.get(session_id, ""),
-        )
-        if not usage_text and context_limit:
-            usage_text = "[usage] pct=100"
-        if usage_text:
-            await self._send_update(
-                session_notification(session_id, update_agent_message(text_block(usage_text)))
-            )
+        combined_usage = _normalize_usage(usage) or _normalize_usage(plan_usage)
+        self._session_usage[session_id] = combined_usage
         return PromptResponse(stop_reason="end_turn")
 
     async def cancel(self, session_id: str, **_: Any) -> None:
@@ -1024,15 +1013,15 @@ class ACPAgent(Agent):
     def _load_session_history(self, session_id: str) -> list[SessionNotification]:
         return self._session_store.load_history(session_id)
 
-    async def _send_usage_hint(self, session_id: str) -> None:
-        """Emit a usage marker so the client can show context % immediately."""
+    def _build_usage_note(self, session_id: str) -> SessionNotification:
+        """Build a usage summary for the current session on demand."""
         model_id = self._session_model_ids.get(session_id, "")
         context_limit = model_registry.get_context_limit(model_id)
-        if not context_limit:
-            return
-        usage_text = "[usage] pct=100"
-        await self._send_update(
-            session_notification(session_id, update_agent_message(text_block(usage_text)))
+        usage = _normalize_usage(self._session_usage.get(session_id))
+        summary = _format_usage_summary(usage, context_limit, model_id)
+        return session_notification(
+            session_id,
+            update_agent_message(text_block(summary)),
         )
 
     async def _send_available_commands(self, session_id: str) -> None:
@@ -1049,6 +1038,11 @@ class ACPAgent(Agent):
                 name="model",
                 description="List or switch models.",
                 input=AvailableCommandInput(root=UnstructuredCommandInput(hint="/model <id>")),
+            ),
+            AvailableCommand(
+                name="usage",
+                description="Show token usage for the latest run.",
+                input=AvailableCommandInput(root=UnstructuredCommandInput(hint="/usage")),
             ),
         ]
         update = AvailableCommandsUpdate(
@@ -1125,8 +1119,11 @@ class ACPAgent(Agent):
             return False
 
 
-def _format_usage(usage: Any, context_limit: int | None, model_id: str) -> str:
-    """Build a compact usage marker for the client to parse (percent remaining)."""
+def _format_usage_summary(usage: Any, context_limit: int | None, model_id: str) -> str:
+    """Human-friendly usage summary for on-demand display."""
+
+    if usage is None:
+        return "Usage not available for the last run (provider may not return token data)."
 
     def _get(field: str) -> int | None:
         if hasattr(usage, field):
@@ -1138,12 +1135,46 @@ def _format_usage(usage: Any, context_limit: int | None, model_id: str) -> str:
         return None
 
     input_tokens = _get("input_tokens") or _get("prompt_tokens")
-    if context_limit is None or input_tokens is None:
-        return ""
+    output_tokens = _get("output_tokens") or _get("completion_tokens")
+    total_tokens = _get("total_tokens") or (
+        input_tokens + output_tokens
+        if input_tokens is not None and output_tokens is not None
+        else None
+    )
 
-    remaining = max(0, context_limit - input_tokens)
-    pct_left = max(0.0, remaining / context_limit * 100.0)
-    return f"[usage] pct={pct_left:.0f}"
+    parts: list[str] = []
+    if input_tokens is not None:
+        parts.append(f"input={input_tokens}")
+    if output_tokens is not None:
+        parts.append(f"output={output_tokens}")
+    if total_tokens is not None:
+        parts.append(f"total={total_tokens}")
+
+    remaining_txt = ""
+    if context_limit is not None and input_tokens is not None:
+        remaining = max(0, context_limit - input_tokens)
+        pct_left = max(0.0, remaining / context_limit * 100.0)
+        remaining_txt = f"context remaining ~{pct_left:.0f}% of {context_limit} tokens (model={model_id or 'unknown'})"
+
+    if not parts and not remaining_txt:
+        return "Usage data unavailable for the last run."
+
+    if remaining_txt:
+        parts.append(remaining_txt)
+    return "Usage: " + ", ".join(parts)
+
+
+def _normalize_usage(usage: Any) -> Any:
+    """Resolve usage to a value if providers expose it as a callable."""
+
+    if usage is None:
+        return None
+    if callable(usage):
+        try:
+            return usage()
+        except Exception:
+            return None
+    return usage
 
 
 async def run_acp_agent():
