@@ -80,3 +80,8 @@ venv/
 ENV/
 env.bak/
 venv.bak/
+.mypy_cache/
+.ruff_cache/
+.pytest_cache/
+.uv-cache/
+.*_cache/

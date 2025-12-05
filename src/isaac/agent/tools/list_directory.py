@@ -26,6 +26,8 @@ async def list_files(
     Returns:
         dict: A dictionary containing 'content' (string listing) and 'error' (string or None).
     """
+    max_entries = 500
+    max_chars = 20000
     path = _resolve(cwd, directory)
     if not path.exists():
         return {"content": None, "error": f"Directory '{directory}' does not exist."}
@@ -36,34 +38,45 @@ async def list_files(
     try:
         patterns = _load_gitignore_patterns(path)
         matcher = _build_matcher(patterns)
+        items = []
         if recursive:
-            items = []
             for root, dirs, files in os.walk(path):
                 rel_root = Path(root).relative_to(path)
                 # Prune ignored dirs to avoid descending into them.
                 for d in list(dirs):
                     rel_dir = (rel_root / d) if rel_root != Path(".") else Path(d)
-                    if matcher(rel_dir, is_dir=True):
+                    if _should_skip(rel_dir, is_dir=True) or matcher(rel_dir, is_dir=True):
                         dirs.remove(d)
                 # Add remaining dirs and files
                 for d in dirs:
                     rel_dir = (rel_root / d) if rel_root != Path(".") else Path(d)
-                    if not matcher(rel_dir, is_dir=True):
-                        items.append(f"{rel_dir} [dir]")
+                    if _should_skip(rel_dir, is_dir=True) or matcher(rel_dir, is_dir=True):
+                        continue
+                    items.append(f"{rel_dir} [dir]")
                 for f in files:
                     rel_file = (rel_root / f) if rel_root != Path(".") else Path(f)
-                    if matcher(rel_file, is_dir=False):
+                    if _should_skip(rel_file, is_dir=False) or matcher(rel_file, is_dir=False):
                         continue
                     items.append(f"{rel_file} [file]")
-            result = "\n".join(sorted(items))
         else:
-            items = []
             for item in path.iterdir():
                 rel = Path(item.name)
-                if matcher(rel, is_dir=item.is_dir()):
+                if _should_skip(rel, is_dir=item.is_dir()) or matcher(
+                    rel, is_dir=item.is_dir()
+                ):
                     continue
                 items.append(f"{rel} [{'dir' if item.is_dir() else 'file'}]")
-            result = "\n".join(sorted(items))
+        items = sorted(items)
+        truncated = False
+        if len(items) > max_entries:
+            items = items[:max_entries]
+            truncated = True
+        result = "\n".join(items)
+        if len(result) > max_chars:
+            result = result[:max_chars]
+            truncated = True
+        if truncated:
+            result = f"{result}\n[truncated]"
 
         return {"content": result, "error": None}
     except Exception as e:
@@ -92,3 +105,29 @@ def _build_matcher(patterns: list[str]) -> Callable[[Path, bool], bool]:
         return spec.match_file(rel_str + ("/" if is_dir else ""))
 
     return _match
+
+
+_DEFAULT_IGNORES = {
+    ".git",
+    ".hg",
+    ".svn",
+    ".cache",
+    ".pytest_cache",
+    ".ruff_cache",
+    ".mypy_cache",
+    ".tox",
+    ".nox",
+    ".venv",
+    "venv",
+    "env",
+    "__pycache__",
+    ".uv-cache",
+    "node_modules",
+}
+
+
+def _should_skip(path: Path, is_dir: bool) -> bool:
+    """Avoid descending into common cache/virtualenv folders even without .gitignore."""
+
+    parts = set(path.parts)
+    return any(part in _DEFAULT_IGNORES for part in parts)
