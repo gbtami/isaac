@@ -14,6 +14,7 @@ from acp import (
     ReleaseTerminalResponse,
     RequestError,
     RequestPermissionResponse,
+    RequestPermissionRequest,
     SessionNotification,
     TerminalOutputRequest,
     TerminalOutputResponse,
@@ -32,6 +33,7 @@ from acp.schema import (
     TextContentBlock,
     ToolCallProgress,
     ToolCallStart,
+    SessionNotification,
 )
 
 from isaac.client.client_terminal import ClientTerminalManager
@@ -52,6 +54,8 @@ class ExampleClient(Client):
         self._last_prompt = ""
         self._state = state
         self._terminal_manager = ClientTerminalManager()
+        self._pending_newline = False
+        self._pending_newline = False
 
     async def request_permission(
         self,
@@ -75,6 +79,37 @@ class ExampleClient(Client):
         return RequestPermissionResponse(
             outcome=AllowedOutcome(option_id=selection, outcome="selected")
         )
+
+    async def requestPermission(
+        self, params: RequestPermissionRequest
+    ) -> RequestPermissionResponse:
+        """CamelCase ACP bridge that forwards to `request_permission`."""
+        return await self.request_permission(
+            params.options, session_id=params.sessionId, tool_call=params.toolCall
+        )
+
+    async def extMethod(self, method: str, params: dict[str, Any]) -> dict[str, Any]:  # type: ignore[override]
+        """Handle extension methods from the agent (unused in example client)."""
+        return {}
+
+    async def extNotification(self, method: str, params: dict[str, Any]) -> None:  # type: ignore[override]
+        """Handle extension notifications from the agent (noop for example client)."""
+        return None
+
+    # Provide snake_case aliases to satisfy local tests and structural typing.
+    async def ext_method(self, method: str, params: dict[str, Any]) -> dict[str, Any]:
+        return await self.extMethod(method, params)
+
+    async def ext_notification(self, method: str, params: dict[str, Any]) -> None:
+        await self.extNotification(method, params)
+
+    def on_connect(self, *_: Any, **__: Any) -> None:
+        """No-op connect hook for compatibility with ACP client interface."""
+        return None
+
+    async def sessionUpdate(self, params: SessionNotification) -> None:
+        """CamelCase ACP bridge that forwards to `session_update`."""
+        await self.session_update(session_id=params.sessionId, update=params.update)
 
     async def write_text_file(self, *args: Any, **kwargs: Any):  # type: ignore[override]
         raise RequestError.method_not_found("fs/write_text_file")
@@ -128,6 +163,16 @@ class ExampleClient(Client):
     ) -> KillTerminalCommandResponse:
         req = KillTerminalCommandRequest(session_id=session_id, terminal_id=terminal_id)
         return await self._terminal_manager.kill_terminal(req)
+
+    async def killTerminal(self, params: KillTerminalCommandRequest) -> KillTerminalCommandResponse:
+        """Handle camelCase kill requests from the agent."""
+        return await self.kill_terminal_command(
+            session_id=params.sessionId, terminal_id=params.terminalId
+        )
+
+    async def kill_terminal(self, *args: Any, **kwargs: Any) -> KillTerminalCommandResponse:
+        """Alias for kill_terminal_command to satisfy ACP interface expectations."""
+        return await self.kill_terminal_command(*args, **kwargs)
 
     async def session_update(
         self, session_id: str, update: SessionNotification | Any, **_: Any

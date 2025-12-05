@@ -18,12 +18,23 @@ def register_tools(agent: Any) -> None:
     for name in TOOL_HANDLERS.keys():
 
         def _make_tool(fn_name: str):
-            @agent.tool_plain(name=fn_name)  # type: ignore[misc]
+            handler = TOOL_HANDLERS.get(fn_name)
+
+            if handler:
+                try:
+                    toolset = getattr(agent, "_function_toolset", None)
+                    if toolset is not None:
+                        toolset.add_function(handler, name=fn_name, takes_ctx=False)
+                        return
+                except Exception:
+                    logger.debug("Falling back to decorator registration for %s", fn_name)
+                return agent.tool(name=fn_name)(handler)  # type: ignore[misc]
+
             async def _wrapper(**kwargs: Any) -> Any:
                 logger.info("Pydantic tool invoked: %s args=%s", fn_name, sorted(kwargs))
                 return await run_tool(fn_name, **kwargs)
 
-            return _wrapper
+            return agent.tool(name=fn_name)(_wrapper)  # type: ignore[misc]
 
         _make_tool(name)
 

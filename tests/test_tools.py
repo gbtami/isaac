@@ -3,19 +3,24 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
-from acp import RequestPermissionResponse
+from acp import RequestPermissionResponse, text_block
 from acp.schema import AllowedOutcome
 from unittest.mock import AsyncMock
 
+from isaac.agent.brain.planning_agent import build_planning_agent
+from isaac.agent.runner import register_tools
 from isaac.agent.tools.apply_patch import apply_patch
 from isaac.agent.tools.code_search import code_search
 from isaac.agent.tools.edit_file import edit_file
 from isaac.agent.tools.file_summary import file_summary
 from isaac.agent.tools.list_directory import list_files
 from isaac.agent.tools.read_file import read_file
-from isaac.agent.tools import run_tool
+from isaac.agent.tools import TOOL_HANDLERS, run_tool
 from isaac.agent.tools.run_command import run_command
 from tests.utils import make_function_agent
+from pydantic_ai import Agent as PydanticAgent  # type: ignore
+from pydantic_ai.models.test import TestModel  # type: ignore
+from isaac.agent import ACPAgent
 
 
 @pytest.mark.asyncio
@@ -143,3 +148,40 @@ async def test_allow_always_cached_per_command():
     assert first is True
     assert second is True
     conn.request_permission.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_model_tool_call_requests_permission(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
+    """Ensure ask mode prompts for permission when the model triggers tool_run_command."""
+
+    conn = AsyncMock()
+    conn.session_update = AsyncMock()
+    conn.request_permission = AsyncMock(
+        return_value=RequestPermissionResponse(
+            outcome=AllowedOutcome(option_id="allow_once", outcome="selected")
+        )
+    )
+
+    calls: list[dict[str, object]] = []
+
+    async def fake_run_command(command: str, cwd: str | None = None, timeout: float | None = None):
+        calls.append({"command": command, "cwd": cwd, "timeout": timeout})
+        return {"content": "ok", "error": None, "returncode": 0}
+
+    monkeypatch.setattr("isaac.agent.tools.run_command", fake_run_command)
+    monkeypatch.setitem(TOOL_HANDLERS, "tool_run_command", fake_run_command)
+
+    model = TestModel(call_tools=["tool_run_command"], custom_output_text="done")
+    ai_runner = PydanticAgent(model)
+    register_tools(ai_runner)
+    planning_runner = build_planning_agent(TestModel(call_tools=[]))
+    agent = ACPAgent(conn, ai_runner=ai_runner, planning_runner=planning_runner)
+    session = await agent.new_session(cwd=str(tmp_path), mcp_servers=[])
+
+    response = await agent.prompt(
+        prompt=[text_block("run a command")], session_id=session.session_id
+    )
+
+    conn.request_permission.assert_awaited()
+    assert calls, "Expected run_command to be invoked by the model"
+    assert response.stop_reason == "end_turn"

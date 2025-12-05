@@ -27,6 +27,7 @@ class Tool:
     description: str
     parameters: ToolParameter
 
+
 ToolHandler = Callable[..., Awaitable[dict]]
 
 TOOL_HANDLERS: Dict[str, ToolHandler] = {

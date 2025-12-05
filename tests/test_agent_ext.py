@@ -17,9 +17,7 @@ from isaac.agent import models as model_registry
 def _make_user_chunk(session_id: str, text: str) -> SessionNotification:
     return SessionNotification(
         session_id=session_id,
-        update=UserMessageChunk(
-            session_update="user_message_chunk", content=text_block(text)
-        ),
+        update=UserMessageChunk(session_update="user_message_chunk", content=text_block(text)),
     )
 
 

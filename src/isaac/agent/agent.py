@@ -36,6 +36,7 @@ from acp import (
     ReadTextFileResponse,
     ReleaseTerminalRequest,
     ReleaseTerminalResponse,
+    RequestPermissionRequest,
     RequestPermissionResponse,
     SetSessionModeResponse,
     SetSessionModelResponse,
@@ -151,6 +152,7 @@ class ACPAgent(Agent):
         self._agent_name = agent_name
         self._agent_title = agent_title
         self._agent_version = agent_version
+        self._custom_runners = ai_runner is not None or planning_runner is not None
         self._session_commands_advertised: set[str] = set()
         if ai_runner is None and planning_runner is None:
             self._ai_runner, self._planning_runner = create_default_runners()
@@ -162,7 +164,7 @@ class ACPAgent(Agent):
         self._session_store = SessionStore(Path.home() / ".isaac" / "sessions")
         self._session_last_chunk: Dict[str, str | None] = {}
 
-    def on_connect(self, conn: AgentSideConnection) -> None:
+    def on_connect(self, conn: AgentSideConnection) -> None:  # type: ignore[override]
         """Capture connection when wiring via run_agent/connect_to_agent."""
         self._conn = conn
 
@@ -228,7 +230,10 @@ class ACPAgent(Agent):
         self._cancel_events[session_id] = asyncio.Event()
         toolsets = build_mcp_toolsets(mcp_servers)
         self._session_toolsets[session_id] = toolsets
-        executor, planner = create_default_runners(toolsets)
+        if self._custom_runners:
+            executor, planner = self._ai_runner, self._planning_runner
+        else:
+            executor, planner = create_default_runners(toolsets)
         self._session_models[session_id] = executor
         self._session_planners[session_id] = planner
         self._session_model_ids[session_id] = self._current_model_id()
@@ -260,7 +265,10 @@ class ACPAgent(Agent):
         mcp_servers = mcp_servers or stored_meta.get("mcpServers", [])
         toolsets = build_mcp_toolsets(mcp_servers)
         self._session_toolsets[session_id] = toolsets
-        executor, planner = create_default_runners(toolsets)
+        if self._custom_runners:
+            executor, planner = self._ai_runner, self._planning_runner
+        else:
+            executor, planner = create_default_runners(toolsets)
         self._session_models[session_id] = executor
         self._session_planners[session_id] = planner
         self._session_model_ids[session_id] = self._current_model_id()
@@ -428,6 +436,7 @@ class ACPAgent(Agent):
 
         # --- Execution phase ---
         tool_trackers: Dict[str, ToolCallTracker] = {}
+        denied_tool_calls: set[str] = set()
 
         async def _push_chunk(chunk: str) -> None:
             last = self._session_last_chunk.get(session_id)
@@ -444,24 +453,56 @@ class ACPAgent(Agent):
         async def _handle_runner_event(event: Any) -> bool:
             if isinstance(event, FunctionToolCallEvent):
                 tool_name = getattr(event.part, "tool_name", None) or ""
+                raw_args = getattr(event.part, "args", None)
+                args = raw_args if isinstance(raw_args, dict) else {}
                 tracker = ToolCallTracker(id_factory=lambda: event.tool_call_id)
                 tool_trackers[event.tool_call_id] = tracker
                 logger.info(
                     "LLM requested tool %s session=%s args_keys=%s",
                     tool_name,
                     session_id,
-                    sorted((event.part.args or {}).keys()),
+                    sorted(args.keys()) if isinstance(args, dict) else [],
                 )
                 start = tracker.start(
                     external_id=event.tool_call_id,
                     title=tool_name,
                     status="in_progress",
-                    raw_input={"tool": tool_name, **(event.part.args or {})},
+                    raw_input={"tool": tool_name, **(args if isinstance(args, dict) else {})},
                 )
                 await self._send_update(session_notification(session_id, start))
+                if (
+                    tool_name == "tool_run_command"
+                    and self._session_modes.get(session_id, "ask") == "ask"
+                ):
+                    allowed = await self._request_run_permission(
+                        session_id,
+                        tool_call_id=event.tool_call_id,
+                        command=str(args.get("command") if isinstance(args, dict) else "")
+                        if args
+                        else "",
+                        cwd=args.get("cwd") if isinstance(args, dict) else None,
+                    )
+                    if not allowed:
+                        denied_tool_calls.add(event.tool_call_id)
+                        denied = tracker.progress(
+                            external_id=event.tool_call_id,
+                            status="failed",
+                            raw_output={
+                                "tool": tool_name,
+                                "content": None,
+                                "error": "permission denied",
+                            },
+                            content=[
+                                tool_content(text_block("Command blocked: permission denied"))
+                            ],
+                        )
+                        await self._send_update(session_notification(session_id, denied))
+                        return True
                 return True
 
             if isinstance(event, FunctionToolResultEvent):
+                if event.tool_call_id in denied_tool_calls:
+                    return True
                 tracker = tool_trackers.pop(event.tool_call_id, None) or ToolCallTracker(
                     id_factory=lambda: event.tool_call_id
                 )
@@ -909,7 +950,16 @@ class ACPAgent(Agent):
         self._record_update(note)
         if self._conn is None:
             raise RuntimeError("Connection not established")
-        await self._conn.session_update(session_id=note.session_id, update=note.update)
+        # Support both snake_case (tests) and camelCase (ACP connection).
+        sender = getattr(self._conn, "session_update", None)
+        if sender is None:
+            sender = getattr(self._conn, "sessionUpdate", None)
+            if sender is not None:
+                await sender(note)
+                return
+        if sender is None:
+            raise RuntimeError("Connection missing session_update/sessionUpdate handler")
+        await sender(session_id=note.session_id, update=note.update)
 
     def _record_update(self, note: SessionNotification) -> None:
         """Cache and persist updates for replay after restarts."""
@@ -957,6 +1007,10 @@ class ACPAgent(Agent):
                 return {"error": str(exc)}
         return {"error": f"Unknown ext method: {name}"}
 
+    async def ext_notification(self, method: str, params: dict[str, Any]) -> None:
+        """Handle extension notifications (noop placeholder to satisfy ACP interface)."""
+        logger.info("Received ext notification %s params_keys=%s", method, sorted(params.keys()))
+
     def _persist_session_meta(
         self,
         session_id: str,
@@ -994,16 +1048,12 @@ class ACPAgent(Agent):
             AvailableCommand(
                 name="log",
                 description="Set agent log level (DEBUG, INFO, WARNING, ERROR, CRITICAL).",
-                input=AvailableCommandInput(
-                    root=UnstructuredCommandInput(hint="/log <level>")
-                ),
+                input=AvailableCommandInput(root=UnstructuredCommandInput(hint="/log <level>")),
             ),
             AvailableCommand(
                 name="model",
                 description="List or switch models.",
-                input=AvailableCommandInput(
-                    root=UnstructuredCommandInput(hint="/model <id>")
-                ),
+                input=AvailableCommandInput(root=UnstructuredCommandInput(hint="/model <id>")),
             ),
         ]
         update = AvailableCommandsUpdate(
@@ -1035,15 +1085,24 @@ class ACPAgent(Agent):
                 PermissionOption(option_id="reject_once", name="Reject", kind="reject_once"),
             ]
             tool_call = ToolCall(
-                tool_call_id=tool_call_id,
+                toolCallId=tool_call_id,
                 title="run_command",
                 kind="execute",
-                raw_input={"tool": "tool_run_command", "command": command, "cwd": cwd},
+                rawInput={"tool": "tool_run_command", "command": command, "cwd": cwd},
                 status="pending",
             )
-            resp = await self._conn.request_permission(
-                options=options, session_id=session_id, tool_call=tool_call
-            )
+            requester = getattr(self._conn, "request_permission", None)
+            if requester is None:
+                requester = getattr(self._conn, "requestPermission", None)
+                if requester is not None:
+                    req = RequestPermissionRequest(
+                        options=options, sessionId=session_id, toolCall=tool_call
+                    )
+                    resp = await requester(req)
+                else:
+                    raise RuntimeError("Connection missing request_permission/requestPermission")
+            else:
+                resp = await requester(options=options, session_id=session_id, tool_call=tool_call)
             outcome = getattr(resp, "outcome", None)
             option_id = getattr(outcome, "option_id", "") if outcome else ""
             key = (command.strip(), cwd or "")
