@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import dataclasses
 import logging
 import uuid
 from dataclasses import dataclass
@@ -1084,7 +1085,11 @@ class ACPAgent(Agent):
                 requester = getattr(self._conn, "requestPermission", None)
                 if requester is not None:
                     req = RequestPermissionRequest(
-                        options=options, sessionId=session_id, toolCall=tool_call
+                        options=options,
+                        sessionId=session_id,
+                        toolCall=getattr(tool_call, "model_dump", lambda **_: tool_call)(
+                            by_alias=True
+                        ),
                     )
                     resp = await requester(req)
                 else:
@@ -1092,7 +1097,9 @@ class ACPAgent(Agent):
             else:
                 resp = await requester(options=options, session_id=session_id, tool_call=tool_call)
             outcome = getattr(resp, "outcome", None)
-            option_id = getattr(outcome, "option_id", "") if outcome else ""
+            option_id = ""
+            if outcome is not None:
+                option_id = getattr(outcome, "option_id", "") or getattr(outcome, "optionId", "")
             key = (command.strip(), cwd or "")
             if option_id == "allow_always":
                 self._session_allowed_commands.setdefault(session_id, set()).add(key)

@@ -185,3 +185,29 @@ async def test_model_tool_call_requests_permission(monkeypatch: pytest.MonkeyPat
     conn.request_permission.assert_awaited()
     assert calls, "Expected run_command to be invoked by the model"
     assert response.stop_reason == "end_turn"
+
+
+@pytest.mark.asyncio
+async def test_request_permission_camelcase_path():
+    """Ensure permission is requested via camelCase ACP method (optionId casing)."""
+
+    conn = AsyncMock()
+    conn.session_update = AsyncMock()
+    conn.requestPermission = AsyncMock(  # type: ignore[attr-defined]
+        return_value=RequestPermissionResponse(
+            outcome=AllowedOutcome(option_id="allow_once", outcome="selected")
+        )
+    )
+
+    agent = make_function_agent(conn)
+    conn.request_permission = None  # ensure camelCase path is used
+    session_id = "camel-session"
+    agent._session_modes[session_id] = "ask"
+    agent._session_cwds[session_id] = Path.cwd()
+
+    allowed = await agent._request_run_permission(
+        session_id=session_id, tool_call_id="tc-camel", command="echo hi", cwd=None
+    )
+
+    assert allowed is True
+    conn.requestPermission.assert_awaited()  # type: ignore[attr-defined]
