@@ -16,7 +16,7 @@ from isaac.agent.tools.file_summary import file_summary
 from isaac.agent.tools.list_directory import list_files
 from isaac.agent.tools.read_file import read_file
 from isaac.agent.tools import TOOL_HANDLERS, run_tool
-from isaac.agent.tools.run_command import run_command
+from isaac.agent.tools.run_command import get_run_command_context, run_command
 from tests.utils import make_function_agent
 from pydantic_ai import Agent as PydanticAgent  # type: ignore
 from pydantic_ai.models.test import TestModel  # type: ignore
@@ -165,6 +165,9 @@ async def test_model_tool_call_requests_permission(monkeypatch: pytest.MonkeyPat
     calls: list[dict[str, object]] = []
 
     async def fake_run_command(command: str, cwd: str | None = None, timeout: float | None = None):
+        ctx = get_run_command_context()
+        if ctx and not await ctx.request_permission(command, cwd):
+            return {"content": None, "error": "permission denied", "returncode": -1}
         calls.append({"command": command, "cwd": cwd, "timeout": timeout})
         return {"content": "ok", "error": None, "returncode": 0}
 

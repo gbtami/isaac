@@ -23,7 +23,7 @@ from isaac.client.session_state import SessionUIState
 
 
 async def run_client(program: str, args: Iterable[str], mcp_servers: list[Any]) -> int:
-    logging.basicConfig(level=logging.INFO)
+    _setup_client_logging()
 
     program_path = Path(program)
     spawn_program = program
@@ -104,8 +104,25 @@ async def main(argv: list[str]) -> int:
     return await run_client(args.agent_program, args.agent_args, mcp_servers)
 
 
-if __name__ == "__main__":
-    try:
-        raise SystemExit(asyncio.run(main(sys.argv)))
-    except KeyboardInterrupt:
-        raise SystemExit(130)
+    if __name__ == "__main__":
+        try:
+            raise SystemExit(asyncio.run(main(sys.argv)))
+        except KeyboardInterrupt:
+            raise SystemExit(130)
+
+
+def _setup_client_logging() -> None:
+    """Initialize client logging to a file (mirrors agent logging convention)."""
+
+    log_dir = Path.home() / ".isaac"
+    log_dir.mkdir(exist_ok=True)
+    log_file = log_dir / "acp_client.log"
+
+    for handler in logging.root.handlers[:]:
+        logging.root.removeHandler(handler)
+
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+        handlers=[logging.FileHandler(log_file)],
+    )

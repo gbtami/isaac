@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
+import logging
 from acp import (
     Client,
     CreateTerminalRequest,
@@ -55,6 +56,7 @@ class ExampleClient(Client):
         self._terminal_manager = ClientTerminalManager()
         self._pending_newline = False
         self._pending_newline = False
+        self._logger = logging.getLogger("acp_client")
 
     async def request_permission(
         self,
@@ -64,6 +66,15 @@ class ExampleClient(Client):
         **_: Any,
     ) -> RequestPermissionResponse:
         """Prompt the user for a permission choice (Prompt Turn permission flow)."""
+        self._logger.info(
+            "permission.request session=%s tool=%s options=%s raw=%s",
+            session_id,
+            getattr(tool_call, "title", "") or getattr(tool_call, "toolCallId", ""),
+            [getattr(opt, "option_id", getattr(opt, "optionId", "<id>")) for opt in options],
+            getattr(tool_call, "raw_input", None)
+            or getattr(tool_call, "rawInput", None)
+            or {},
+        )
         try:
             for idx, opt in enumerate(options, start=1):
                 label = getattr(opt, "label", opt.option_id)
@@ -75,6 +86,9 @@ class ExampleClient(Client):
                 selection = options[0].option_id if options else "default"
         except Exception:
             selection = options[0].option_id if options else "default"
+        self._logger.info(
+            "permission.response session=%s selection=%s", session_id, selection
+        )
         return RequestPermissionResponse(
             outcome=AllowedOutcome(option_id=selection, outcome="selected")
         )

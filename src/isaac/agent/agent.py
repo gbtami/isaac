@@ -14,7 +14,6 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
-import dataclasses
 import logging
 import uuid
 from dataclasses import dataclass
@@ -61,15 +60,15 @@ from acp.schema import (
     AvailableCommandInput,
     CurrentModeUpdate,
     UnstructuredCommandInput,
+    ListSessionsResponse,
     ReadTextFileRequest,
     WriteTextFileRequest,
-    ListSessionsResponse,
     Implementation,
     McpCapabilities,
     PromptCapabilities,
     PermissionOption,
-    SessionNotification,
     SessionInfo,
+    SessionNotification,
     ToolCall,
     UserMessageChunk,
 )
@@ -77,6 +76,11 @@ from acp.schema import (
 from isaac.agent.mcp_support import build_mcp_toolsets
 from isaac.agent.session_store import SessionStore
 from isaac.agent.tools import get_tools, run_tool
+from isaac.agent.tools.run_command import (
+    RunCommandContext,
+    reset_run_command_context,
+    set_run_command_context,
+)
 from isaac.agent.fs import read_text_file, write_text_file
 from isaac.agent.agent_terminal import (
     TerminalState,
@@ -425,7 +429,7 @@ class ACPAgent(Agent):
 
         # --- Execution phase ---
         tool_trackers: Dict[str, ToolCallTracker] = {}
-        denied_tool_calls: set[str] = set()
+        run_command_ctx_tokens: Dict[str, Any] = {}
 
         async def _push_chunk(chunk: str) -> None:
             last = self._session_last_chunk.get(session_id)
@@ -459,20 +463,19 @@ class ACPAgent(Agent):
                     raw_input={"tool": tool_name, **(args if isinstance(args, dict) else {})},
                 )
                 await self._send_update(session_notification(session_id, start))
-                if (
-                    tool_name == "run_command"
-                    and self._session_modes.get(session_id, "ask") == "ask"
-                ):
-                    allowed = await self._request_run_permission(
-                        session_id,
-                        tool_call_id=event.tool_call_id,
-                        command=str(args.get("command") if isinstance(args, dict) else "")
-                        if args
-                        else "",
-                        cwd=args.get("cwd") if isinstance(args, dict) else None,
-                    )
+                if tool_name == "run_command":
+                    allowed = True
+                    mode = self._session_modes.get(session_id, "ask")
+                    if mode == "ask":
+                        allowed = await self._request_run_permission(
+                            session_id,
+                            tool_call_id=event.tool_call_id,
+                            command=str(args.get("command") if isinstance(args, dict) else "")
+                            if args
+                            else "",
+                            cwd=args.get("cwd") if isinstance(args, dict) else None,
+                        )
                     if not allowed:
-                        denied_tool_calls.add(event.tool_call_id)
                         denied = tracker.progress(
                             external_id=event.tool_call_id,
                             status="failed",
@@ -487,11 +490,17 @@ class ACPAgent(Agent):
                         )
                         await self._send_update(session_notification(session_id, denied))
                         return True
+
+                    token = set_run_command_context(
+                        RunCommandContext(request_permission=lambda *_: True)
+                    )
+                    run_command_ctx_tokens[event.tool_call_id] = token
                 return True
 
             if isinstance(event, FunctionToolResultEvent):
-                if event.tool_call_id in denied_tool_calls:
-                    return True
+                token = run_command_ctx_tokens.pop(event.tool_call_id, None)
+                if token is not None:
+                    reset_run_command_context(token)
                 tracker = tool_trackers.pop(event.tool_call_id, None) or ToolCallTracker(
                     id_factory=lambda: event.tool_call_id
                 )
@@ -1080,6 +1089,11 @@ class ACPAgent(Agent):
                 rawInput={"tool": "run_command", "command": command, "cwd": cwd},
                 status="pending",
             )
+            from acp.schema import ToolCallUpdate  # type: ignore
+
+            tool_call_update = ToolCallUpdate.model_validate(
+                getattr(tool_call, "model_dump", lambda **_: tool_call)(by_alias=True)
+            )
             requester = getattr(self._conn, "request_permission", None)
             if requester is None:
                 requester = getattr(self._conn, "requestPermission", None)
@@ -1087,15 +1101,15 @@ class ACPAgent(Agent):
                     req = RequestPermissionRequest(
                         options=options,
                         sessionId=session_id,
-                        toolCall=getattr(tool_call, "model_dump", lambda **_: tool_call)(
-                            by_alias=True
-                        ),
+                        toolCall=tool_call_update,
                     )
                     resp = await requester(req)
                 else:
                     raise RuntimeError("Connection missing request_permission/requestPermission")
             else:
-                resp = await requester(options=options, session_id=session_id, tool_call=tool_call)
+                resp = await requester(
+                    options=options, session_id=session_id, tool_call=tool_call_update
+                )
             outcome = getattr(resp, "outcome", None)
             option_id = ""
             if outcome is not None:
