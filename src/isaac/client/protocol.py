@@ -33,7 +33,6 @@ from acp.schema import (
     TextContentBlock,
     ToolCallProgress,
     ToolCallStart,
-    SessionNotification,
 )
 
 from isaac.client.client_terminal import ClientTerminalManager
