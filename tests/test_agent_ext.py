@@ -12,6 +12,7 @@ from acp.schema import AgentMessageChunk, SessionNotification, UserMessageChunk
 
 from isaac.agent.agent import ACPAgent
 from isaac.agent import models as model_registry
+from isaac.agent.brain.history import build_chat_history
 
 
 def _make_user_chunk(session_id: str, text: str) -> SessionNotification:
@@ -111,3 +112,60 @@ async def test_session_load_replays_history(monkeypatch, tmp_path: Path):
     updates = [call.kwargs["update"] for call in conn.session_update.await_args_list]  # type: ignore[attr-defined]
     texts = [getattr(u.content, "text", "") for u in updates if isinstance(u, AgentMessageChunk)]
     assert "world" in " ".join(texts)
+
+
+@pytest.mark.asyncio
+async def test_store_user_prompt_coerces_text_blocks(monkeypatch, tmp_path: Path):
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "xdg"))
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setattr("pathlib.Path.home", lambda: tmp_path)
+    conn = AsyncMock(spec=AgentSideConnection)
+    conn.session_update = AsyncMock()
+    agent = ACPAgent(conn)
+    session = await agent.new_session(cwd=str(tmp_path), mcp_servers=[])
+
+    agent._store_user_prompt(session.session_id, [{"text": "hello world"}])
+
+    chat_history = build_chat_history(agent._session_history.get(session.session_id, []))
+    assert any("hello world" in item["content"] for item in chat_history)
+
+
+class _RecordingRunner:
+    def __init__(self, output: str):
+        self.output = output
+        self.messages: list[dict[str, str]] | None = None
+        self.stream_messages: list[dict[str, str]] | None = None
+
+    async def run(self, prompt_text: str, messages: list[dict[str, str]] | None = None, **_: object):
+        self.messages = messages or []
+        return type("Res", (), {"output": self.output})
+
+    async def run_stream_events(
+        self, prompt_text: str, messages: list[dict[str, str]] | None = None, **_: object
+    ):
+        self.stream_messages = messages or []
+
+        async def _gen():
+            yield "final response"
+
+        return _gen()
+
+
+@pytest.mark.asyncio
+async def test_history_preserved_across_prompts(monkeypatch, tmp_path: Path):
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "xdg"))
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setattr("pathlib.Path.home", lambda: tmp_path)
+
+    conn = AsyncMock(spec=AgentSideConnection)
+    conn.session_update = AsyncMock()
+    planner = _RecordingRunner("Plan:\n- do something")
+    executor = _RecordingRunner("done")
+    agent = ACPAgent(conn, ai_runner=executor, planning_runner=planner)
+    session = await agent.new_session(cwd=str(tmp_path), mcp_servers=[])
+
+    await agent.prompt(prompt=[text_block("remember this line")], session_id=session.session_id)
+    await agent.prompt(prompt=[text_block("what did I say?")], session_id=session.session_id)
+
+    messages = executor.stream_messages or []
+    assert any("remember this line" in m.get("content", "") for m in messages)

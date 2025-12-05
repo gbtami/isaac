@@ -958,12 +958,17 @@ class ACPAgent(Agent):
     def _store_user_prompt(self, session_id: str, prompt_blocks: list[Any]) -> None:
         """Persist user prompt content for session/load replay."""
         for block in prompt_blocks:
+            text = _coerce_user_text(block)
+            if text is None:
+                continue
             try:
-                chunk = UserMessageChunk(content=block)
+                chunk = UserMessageChunk(
+                    session_update="user_message_chunk",
+                    content=text_block(text),
+                )
             except Exception:
                 continue
-            note = SessionNotification(session_id=session_id, update=chunk)
-            self._record_update(note)
+            self._record_update(SessionNotification(session_id=session_id, update=chunk))
 
     def _current_model_id(self) -> str:
         cfg = model_registry.load_models_config()
@@ -1247,6 +1252,28 @@ def _extract_prompt_text(blocks: list[Any]) -> str:
         if uri:
             parts.append(f"[resource:{uri}]")
     return "".join(parts)
+
+
+def _coerce_user_text(block: Any) -> str | None:
+    """Extract a text string from arbitrary user prompt blocks."""
+
+    if block is None:
+        return None
+    if isinstance(block, str):
+        return block
+    # dict payload with text
+    if isinstance(block, dict):
+        if "text" in block and isinstance(block["text"], str):
+            return block["text"]
+    text_val = getattr(block, "text", None)
+    if isinstance(text_val, str):
+        return text_val
+    resource = getattr(block, "resource", None)
+    if resource and hasattr(resource, "text"):
+        text = getattr(resource, "text", None)
+        if isinstance(text, str):
+            return text
+    return None
 
 
 def _is_plan_only_prompt(prompt_text: str) -> bool:

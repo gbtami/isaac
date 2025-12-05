@@ -218,6 +218,23 @@ def test_list_files_respects_gitignore(tmp_path: Path):
     assert ".venv/hidden.txt" not in content
 
 
+def test_list_files_truncates_and_skips_default_ignores(tmp_path: Path):
+    for idx in range(510):
+        (tmp_path / f"file_{idx}.txt").write_text("x", encoding="utf-8")
+    ignored = tmp_path / ".uv-cache"
+    ignored.mkdir()
+    (ignored / "junk.txt").write_text("junk", encoding="utf-8")
+
+    result = asyncio.run(list_files(directory=str(tmp_path), recursive=True))
+
+    assert result["error"] is None
+    content = result.get("content") or ""
+    lines = [ln for ln in content.splitlines() if ln.strip()]
+    assert len(lines) <= 501  # 500 entries + optional truncation marker
+    assert "[truncated]" in content
+    assert ".uv-cache" not in content
+
+
 @pytest.mark.asyncio
 async def test_file_system_read_write(tmp_path: Path):
     conn = AsyncMock(spec=AgentSideConnection)
