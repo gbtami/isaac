@@ -385,7 +385,7 @@ class ACPAgent(Agent):
             return PromptResponse(stop_reason="end_turn")
 
         if prompt_text.startswith("/model"):
-            note = self._handle_model_command(session_id, prompt_text)
+            note = await self._handle_model_command(session_id, prompt_text)
             if note:
                 await self._send_update(note)
             return PromptResponse(stop_reason="end_turn")
@@ -842,7 +842,7 @@ class ACPAgent(Agent):
         )
         await self._send_update(session_notification(session_id, progress))
 
-    def _handle_model_command(self, session_id: str, prompt_text: str):
+    async def _handle_model_command(self, session_id: str, prompt_text: str):
         """Handle `/model` control commands sent as prompt text."""
         parts = prompt_text.split()
         if len(parts) == 1:
@@ -859,10 +859,7 @@ class ACPAgent(Agent):
 
         model_id = parts[1]
         try:
-            model_registry.set_current_model(model_id)
-            executor, planner = model_registry.build_agent_pair(model_id, register_tools)
-            self._ai_runner = executor
-            self._planning_runner = planner
+            await self.set_session_model(model_id, session_id)
             msg = f"Switched to model '{model_id}'."
         except Exception as exc:
             msg = f"Failed to switch model '{model_id}': {exc}"
