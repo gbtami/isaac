@@ -5,13 +5,30 @@ from pathlib import Path
 from unittest.mock import AsyncMock
 
 import pytest
-from acp import text_block, RequestPermissionResponse
+from acp import RequestPermissionResponse, text_block
 from acp.agent.connection import AgentSideConnection
-from acp.schema import ToolCallProgress, ToolCallStart, AllowedOutcome
+from acp.schema import AllowedOutcome, ToolCallProgress, ToolCallStart
+from pydantic_ai import Agent as PydanticAgent  # type: ignore
+from pydantic_ai.models.test import TestModel  # type: ignore
 
+from isaac.agent.runner import register_tools
 from isaac.agent.tools.apply_patch import apply_patch
 from isaac.agent.tools.list_directory import list_files
 from tests.utils import make_function_agent
+
+
+class FixedArgsModel(TestModel):  # type: ignore[misc]
+    """TestModel that returns predetermined tool arguments per tool name."""
+
+    def __init__(self, fixed_args: dict[str, dict[str, object]], **kwargs: object) -> None:
+        super().__init__(**kwargs)
+        self._fixed_args = fixed_args
+
+    def gen_tool_args(self, tool_def: object) -> dict:
+        name = getattr(tool_def, "name", "")
+        if name in self._fixed_args:
+            return self._fixed_args[name]
+        return super().gen_tool_args(tool_def)
 
 
 @pytest.mark.asyncio
@@ -21,24 +38,32 @@ async def test_tool_list_files_sends_progress(tmp_path: Path):
     (tmp_path / "nested" / "file_b.txt").write_text("more")
 
     conn = AsyncMock(spec=AgentSideConnection)
+    conn.session_update = AsyncMock()
     agent = make_function_agent(conn)
+    session = await agent.new_session(cwd=str(tmp_path), mcp_servers=[])
 
-    session_id = "tool-session"
-    response = await agent.prompt(
-        prompt=[text_block(f"tool:list_files {tmp_path}")], session_id=session_id
+    runner = PydanticAgent(
+        FixedArgsModel(
+            fixed_args={"list_files": {"directory": str(tmp_path), "recursive": True}},
+            call_tools=["list_files"],
+            custom_output_text="done",
+        )
     )
+    register_tools(runner)
+    agent._session_models[session.session_id] = runner
+
+    response = await agent.prompt(prompt=[text_block("list files")], session_id=session.session_id)
 
     assert response.stop_reason == "end_turn"
-    assert conn.session_update.call_count == 2
+    tool_updates = [
+        call.kwargs["update"]
+        for call in conn.session_update.call_args_list
+        if isinstance(call.kwargs.get("update"), (ToolCallStart, ToolCallProgress))
+    ]
+    start_call = next(u for u in tool_updates if isinstance(u, ToolCallStart))
+    update_call = next(u for u in tool_updates if isinstance(u, ToolCallProgress))
 
-    start_call = conn.session_update.call_args_list[0].kwargs["update"]
-    update_call = conn.session_update.call_args_list[1].kwargs["update"]
-
-    assert isinstance(start_call, ToolCallStart)
     assert start_call.status == "in_progress"
-    assert getattr(start_call, "session_id", session_id) == session_id
-
-    assert isinstance(update_call, ToolCallProgress)
     assert update_call.status == "completed"
     assert update_call.raw_output["error"] is None
 
@@ -49,47 +74,74 @@ async def test_tool_read_file_returns_content(tmp_path: Path):
     target.write_text("line1\nline2\nline3\n")
 
     conn = AsyncMock(spec=AgentSideConnection)
+    conn.session_update = AsyncMock()
     agent = make_function_agent(conn)
+    session = await agent.new_session(cwd=str(tmp_path), mcp_servers=[])
 
-    session_id = "read-session"
-    response = await agent.prompt(
-        prompt=[text_block(f"tool:read_file {target} 2 1")], session_id=session_id
+    runner = PydanticAgent(
+        FixedArgsModel(
+            fixed_args={
+                "read_file": {
+                    "file_path": str(target),
+                    "start_line": 2,
+                    "num_lines": 1,
+                }
+            },
+            call_tools=["read_file"],
+            custom_output_text="done",
+        )
     )
+    register_tools(runner)
+    agent._session_models[session.session_id] = runner
+
+    response = await agent.prompt(prompt=[text_block("read file")], session_id=session.session_id)
 
     assert response.stop_reason == "end_turn"
-    assert conn.session_update.call_count == 2
-
-    update_call = conn.session_update.call_args_list[1].kwargs["update"]
-    assert isinstance(update_call, ToolCallProgress)
-    assert update_call.status == "completed"
-    assert "line2" in update_call.raw_output["content"]
+    progress = [
+        call.kwargs["update"]
+        for call in conn.session_update.call_args_list
+        if isinstance(call.kwargs.get("update"), ToolCallProgress)
+    ]
+    assert progress, "Expected tool progress"
+    assert progress[-1].status == "completed"
+    assert "line2" in progress[-1].raw_output["content"]
 
 
 @pytest.mark.asyncio
 async def test_tool_run_command_executes(tmp_path: Path):
     conn = AsyncMock(spec=AgentSideConnection)
-
-    async def _allow(*_: object, **__: object):
-        return RequestPermissionResponse(
+    conn.session_update = AsyncMock()
+    conn.request_permission = AsyncMock(
+        return_value=RequestPermissionResponse(
             outcome=AllowedOutcome(option_id="allow_once", outcome="selected")
         )
-
-    conn.request_permission = _allow  # type: ignore[attr-defined]
-    agent = make_function_agent(conn)
-
-    session_id = "cmd-session"
-    response = await agent.prompt(
-        prompt=[text_block("tool:run_command echo hello")], session_id=session_id
     )
+    agent = make_function_agent(conn)
+    session = await agent.new_session(cwd=str(tmp_path), mcp_servers=[])
+
+    runner = PydanticAgent(
+        FixedArgsModel(
+            fixed_args={"run_command": {"command": "echo hello", "cwd": None}},
+            call_tools=["run_command"],
+            custom_output_text="done",
+        )
+    )
+    register_tools(runner)
+    agent._session_models[session.session_id] = runner
+
+    response = await agent.prompt(prompt=[text_block("run command")], session_id=session.session_id)
 
     assert response.stop_reason == "end_turn"
-    assert conn.session_update.call_count >= 2
-
-    update_call = conn.session_update.call_args_list[-1].kwargs["update"]
-    assert isinstance(update_call, ToolCallProgress)
-    assert update_call.status == "completed"
-    assert update_call.raw_output["returncode"] == 0
-    assert update_call.raw_output["content"].strip() == "hello"
+    progress = [
+        call.kwargs["update"]
+        for call in conn.session_update.call_args_list
+        if isinstance(call.kwargs.get("update"), ToolCallProgress)
+    ]
+    assert progress, "Expected tool progress"
+    final = progress[-1]
+    assert final.status == "completed"
+    assert final.raw_output["returncode"] == 0
+    assert final.raw_output["content"].strip() == "hello"
 
 
 @pytest.mark.asyncio
@@ -118,17 +170,32 @@ async def test_tool_code_search(tmp_path: Path):
     file_b.write_text("another file\nworld hello\n")
 
     conn = AsyncMock(spec=AgentSideConnection)
+    conn.session_update = AsyncMock()
     agent = make_function_agent(conn)
+    session = await agent.new_session(cwd=str(tmp_path), mcp_servers=[])
 
-    session_id = "search-session"
+    runner = PydanticAgent(
+        FixedArgsModel(
+            fixed_args={"code_search": {"pattern": "hello", "directory": str(tmp_path)}},
+            call_tools=["code_search"],
+            custom_output_text="done",
+        )
+    )
+    register_tools(runner)
+    agent._session_models[session.session_id] = runner
+
     response = await agent.prompt(
-        prompt=[text_block(f"tool:code_search hello {tmp_path}")], session_id=session_id
+        prompt=[text_block("search hello")], session_id=session.session_id
     )
 
     assert response.stop_reason == "end_turn"
-    assert conn.session_update.call_count == 2
-    update_call = conn.session_update.call_args_list[1].kwargs["update"]
-    assert isinstance(update_call, ToolCallProgress)
+    progress = [
+        call.kwargs["update"]
+        for call in conn.session_update.call_args_list
+        if isinstance(call.kwargs.get("update"), ToolCallProgress)
+    ]
+    assert progress, "Expected tool progress"
+    update_call = progress[-1]
     assert update_call.status == "completed"
     output = update_call.raw_output["content"]
     assert "a.txt" in output or "b.txt" in output

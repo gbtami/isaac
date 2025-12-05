@@ -25,7 +25,7 @@ def test_build_chat_history_from_updates():
                 session_update="tool_call_update",
                 status="completed",
                 tool_call_id="tc1",
-                raw_output={"tool": "tool_run_command", "content": "done"},
+                raw_output={"tool": "run_command", "content": "done"},
                 content=[tool_content(text_block("tool output"))],
             ),
         ),

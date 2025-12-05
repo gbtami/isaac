@@ -189,7 +189,7 @@ class ExampleClient(Client):
             title = getattr(update, "title", "")
             raw_in = getattr(update, "raw_input", {}) or {}
             cmd = None
-            if raw_in.get("tool") == "tool_run_command":
+            if raw_in.get("tool") == "run_command":
                 cmd = raw_in.get("command")
             suffix = f" cmd=`{cmd}`" if cmd else ""
             print_tool("start", f"{title}{suffix}")
@@ -220,7 +220,7 @@ class ExampleClient(Client):
                     inner = getattr(item, "content", None)
                     if hasattr(inner, "text") and getattr(inner, "text", None):
                         payload = str(inner.text)
-                        if raw_out.get("tool") == "tool_edit_file" and raw_out.get("diff"):
+                        if raw_out.get("tool") == "edit_file" and raw_out.get("diff"):
                             print_diff(raw_out["diff"])
                         else:
                             print_agent_text(payload)

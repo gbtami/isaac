@@ -31,21 +31,21 @@ class Tool:
 ToolHandler = Callable[..., Awaitable[dict]]
 
 TOOL_HANDLERS: Dict[str, ToolHandler] = {
-    "tool_list_files": list_files,
-    "tool_read_file": read_file,
-    "tool_run_command": run_command,
-    "tool_edit_file": edit_file,
-    "tool_code_search": code_search,
-    "tool_apply_patch": apply_patch,
-    "tool_file_summary": file_summary,
+    "list_files": list_files,
+    "read_file": read_file,
+    "run_command": run_command,
+    "edit_file": edit_file,
+    "code_search": code_search,
+    "apply_patch": apply_patch,
+    "file_summary": file_summary,
 }
 
 # Tools permitted for planning delegate (read-only, non-destructive)
 READ_ONLY_TOOLS = {
-    "tool_list_files",
-    "tool_read_file",
-    "tool_file_summary",
-    "tool_code_search",
+    "list_files",
+    "read_file",
+    "file_summary",
+    "code_search",
 }
 
 
@@ -53,7 +53,7 @@ def get_tools() -> List[Any]:
     """Return ACP tool descriptions (with graceful fallback when schema lacks Tool)."""
     base_tools = [
         Tool(
-            function="tool_list_files",
+            function="list_files",
             description="List files and directories recursively",
             parameters=ToolParameter(
                 type="object",
@@ -68,7 +68,7 @@ def get_tools() -> List[Any]:
             ),
         ),
         Tool(
-            function="tool_read_file",
+            function="read_file",
             description="Read a file with optional line range",
             parameters=ToolParameter(
                 type="object",
@@ -84,7 +84,7 @@ def get_tools() -> List[Any]:
             ),
         ),
         Tool(
-            function="tool_run_command",
+            function="run_command",
             description="Execute a shell command and return its output",
             parameters=ToolParameter(
                 type="object",
@@ -97,7 +97,7 @@ def get_tools() -> List[Any]:
             ),
         ),
         Tool(
-            function="tool_edit_file",
+            function="edit_file",
             description="Replace the contents of a file",
             parameters=ToolParameter(
                 type="object",
@@ -110,7 +110,7 @@ def get_tools() -> List[Any]:
             ),
         ),
         Tool(
-            function="tool_apply_patch",
+            function="apply_patch",
             description="Apply a unified diff patch to a file",
             parameters=ToolParameter(
                 type="object",
@@ -126,7 +126,7 @@ def get_tools() -> List[Any]:
             ),
         ),
         Tool(
-            function="tool_file_summary",
+            function="file_summary",
             description="Summarize a file (head/tail and line count)",
             parameters=ToolParameter(
                 type="object",
@@ -145,7 +145,7 @@ def get_tools() -> List[Any]:
             ),
         ),
         Tool(
-            function="tool_code_search",
+            function="code_search",
             description="Search for a pattern in files using ripgrep",
             parameters=ToolParameter(
                 type="object",
@@ -202,88 +202,6 @@ async def run_tool(function_name: str, **kwargs: Any) -> dict:
             return await handler(**filtered)
         except Exception:
             return {"content": None, "error": str(exc)}
-
-
-# DSL parsing for "tool:<name> ..." prompts --------------------------
-
-
-def _parse_list_files(args: list[str]) -> dict | None:
-    directory = args[0] if args else "."
-    return {"directory": directory, "recursive": True}
-
-
-def _parse_read_file(args: list[str]) -> dict | None:
-    if not args:
-        return None
-    file_path = args[0]
-    start_line = int(args[1]) if len(args) > 1 else None
-    num_lines = int(args[2]) if len(args) > 2 else None
-    return {"file_path": file_path, "start_line": start_line, "num_lines": num_lines}
-
-
-def _parse_run_command(raw: str) -> dict | None:
-    cmd = raw.strip()
-    if not cmd:
-        return None
-    return {"command": cmd}
-
-
-def _parse_edit_file(args: list[str]) -> dict | None:
-    if not args:
-        return None
-    file_path = args[0]
-    new_content = " ".join(args[1:]) if len(args) > 1 else ""
-    return {"file_path": file_path, "new_content": new_content}
-
-
-def _parse_code_search(args: list[str]) -> dict | None:
-    if not args:
-        return None
-    pattern = args[0]
-    directory = args[1] if len(args) > 1 else "."
-    return {"pattern": pattern, "directory": directory}
-
-
-DSL_PARSERS: Dict[str, Callable[[list[str], str], dict | None]] = {
-    "list_files": lambda args, raw: _parse_list_files(args),
-    "read_file": lambda args, raw: _parse_read_file(args),
-    "run_command": lambda args, raw: _parse_run_command(raw),
-    "edit_file": lambda args, raw: _parse_edit_file(args),
-    "code_search": lambda args, raw: _parse_code_search(args),
-}
-
-DSL_TO_TOOL: Dict[str, str] = {
-    "list_files": "tool_list_files",
-    "read_file": "tool_read_file",
-    "run_command": "tool_run_command",
-    "edit_file": "tool_edit_file",
-    "code_search": "tool_code_search",
-}
-
-
-def parse_tool_request(prompt_text: str) -> dict[str, Any] | None:
-    if not prompt_text.startswith("tool:"):
-        return None
-
-    raw = prompt_text[len("tool:") :].strip()
-    if not raw:
-        return None
-
-    parts = raw.split()
-    if not parts:
-        return None
-
-    dsl_name = parts[0]
-    args = parts[1:]
-    parser = DSL_PARSERS.get(dsl_name)
-    tool_name = DSL_TO_TOOL.get(dsl_name)
-    if not parser or not tool_name:
-        return None
-
-    parsed_args = parser(args, raw[len(dsl_name) :].strip() if raw.startswith(dsl_name) else raw)
-    if parsed_args is None:
-        return None
-    return {"tool_name": tool_name, **parsed_args}
 
 
 def register_readonly_tools(agent: Any) -> None:

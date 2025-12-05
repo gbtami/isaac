@@ -18,7 +18,6 @@ import logging
 import uuid
 from dataclasses import dataclass
 from pathlib import Path
-from types import SimpleNamespace
 from typing import Any, Dict
 
 from acp import (
@@ -47,7 +46,6 @@ from acp import (
     WriteTextFileResponse,
 )
 from acp.agent.connection import AgentSideConnection
-from acp.core import run_agent
 from acp.helpers import (
     session_notification,
     text_block,
@@ -77,7 +75,7 @@ from acp.schema import (
 
 from isaac.agent.mcp_support import build_mcp_toolsets
 from isaac.agent.session_store import SessionStore
-from isaac.agent.tools import get_tools, parse_tool_request, run_tool
+from isaac.agent.tools import get_tools, run_tool
 from isaac.agent.fs import read_text_file, write_text_file
 from isaac.agent.agent_terminal import (
     TerminalState,
@@ -387,16 +385,6 @@ class ACPAgent(Agent):
                 await self._send_update(note)
             return PromptResponse(stop_reason="end_turn")
 
-        tool_request = parse_tool_request(prompt_text)
-        if tool_request:
-            tool_call = SimpleNamespace(
-                toolCallId=str(uuid.uuid4()),
-                function=tool_request.pop("tool_name"),
-                arguments=tool_request,
-            )
-            await self._handle_tool_call(session_id, tool_call)
-            return PromptResponse(stop_reason="end_turn")
-
         if cancel_event.is_set():
             return PromptResponse(stop_reason="cancelled")
 
@@ -471,7 +459,7 @@ class ACPAgent(Agent):
                 )
                 await self._send_update(session_notification(session_id, start))
                 if (
-                    tool_name == "tool_run_command"
+                    tool_name == "run_command"
                     and self._session_modes.get(session_id, "ask") == "ask"
                 ):
                     allowed = await self._request_run_permission(
@@ -615,7 +603,7 @@ class ACPAgent(Agent):
         arguments = getattr(tool_call, "arguments", {}) or {}
         tool_call_id = getattr(tool_call, "toolCallId", str(uuid.uuid4()))
 
-        if function_name == "tool_run_command":
+        if function_name == "run_command":
             await self._execute_run_command_with_terminal(
                 session_id,
                 tool_call_id=tool_call_id,
@@ -708,7 +696,7 @@ class ACPAgent(Agent):
 
         start = tracker.start(
             external_id=tool_call_id,
-            title="tool_run_command",
+            title="run_command",
             status="in_progress",
             raw_input={"tool": "run_command", **arguments},
         )
@@ -1088,7 +1076,7 @@ class ACPAgent(Agent):
                 toolCallId=tool_call_id,
                 title="run_command",
                 kind="execute",
-                rawInput={"tool": "tool_run_command", "command": command, "cwd": cwd},
+                rawInput={"tool": "run_command", "command": command, "cwd": cwd},
                 status="pending",
             )
             requester = getattr(self._conn, "request_permission", None)
@@ -1142,6 +1130,8 @@ def _format_usage(usage: Any, context_limit: int | None, model_id: str) -> str:
 
 async def run_acp_agent():
     """Run the ACP server."""
+    from acp.core import run_agent  # Imported lazily to avoid hard dependency at import time
+
     _setup_acp_logging()
     logger.info("Starting ACP server on stdio")
 

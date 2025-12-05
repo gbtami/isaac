@@ -95,7 +95,7 @@ async def test_file_summary(tmp_path: Path):
 
 @pytest.mark.asyncio
 async def test_run_tool_reports_missing_args():
-    result = await run_tool("tool_edit_file")
+    result = await run_tool("edit_file")
     assert result["error"].startswith("Missing required arguments:")
 
 
@@ -152,7 +152,7 @@ async def test_allow_always_cached_per_command():
 
 @pytest.mark.asyncio
 async def test_model_tool_call_requests_permission(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
-    """Ensure ask mode prompts for permission when the model triggers tool_run_command."""
+    """Ensure ask mode prompts for permission when the model triggers run_command."""
 
     conn = AsyncMock()
     conn.session_update = AsyncMock()
@@ -169,9 +169,9 @@ async def test_model_tool_call_requests_permission(monkeypatch: pytest.MonkeyPat
         return {"content": "ok", "error": None, "returncode": 0}
 
     monkeypatch.setattr("isaac.agent.tools.run_command", fake_run_command)
-    monkeypatch.setitem(TOOL_HANDLERS, "tool_run_command", fake_run_command)
+    monkeypatch.setitem(TOOL_HANDLERS, "run_command", fake_run_command)
 
-    model = TestModel(call_tools=["tool_run_command"], custom_output_text="done")
+    model = TestModel(call_tools=["run_command"], custom_output_text="done")
     ai_runner = PydanticAgent(model)
     register_tools(ai_runner)
     planning_runner = build_planning_agent(TestModel(call_tools=[]))
