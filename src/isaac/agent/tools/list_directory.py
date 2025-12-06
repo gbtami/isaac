@@ -61,9 +61,7 @@ async def list_files(
         else:
             for item in path.iterdir():
                 rel = Path(item.name)
-                if _should_skip(rel, is_dir=item.is_dir()) or matcher(
-                    rel, is_dir=item.is_dir()
-                ):
+                if _should_skip(rel, is_dir=item.is_dir()) or matcher(rel, is_dir=item.is_dir()):
                     continue
                 items.append(f"{rel} [{'dir' if item.is_dir() else 'file'}]")
         items = sorted(items)

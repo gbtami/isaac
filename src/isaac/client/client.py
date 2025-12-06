@@ -103,7 +103,6 @@ async def main(argv: list[str]) -> int:
 
     return await run_client(args.agent_program, args.agent_args, mcp_servers)
 
-
     if __name__ == "__main__":
         try:
             raise SystemExit(asyncio.run(main(sys.argv)))

@@ -52,17 +52,18 @@ async def test_ext_methods_list_and_set(monkeypatch, tmp_path: Path):
         "MODELS_FILE",
         tmp_path / "xdg" / "isaac" / "models.json",
     )
+    fn_model_id = model_registry.FUNCTION_MODEL_ID
     minimal_config = {
-        "current": "function-model",
+        "current": fn_model_id,
         "models": {
-            "function-model": {
+            fn_model_id: {
                 "provider": "function",
                 "model": "function",
                 "description": "In-process function model for deterministic testing",
             },
-            "user-function": {
+            "function:user-function": {
                 "provider": "function",
-                "model": "function",
+                "model": "user-function",
                 "description": "User-visible function model for tests",
             },
         },
@@ -136,7 +137,9 @@ class _RecordingRunner:
         self.messages: list[dict[str, str]] | None = None
         self.stream_messages: list[dict[str, str]] | None = None
 
-    async def run(self, prompt_text: str, messages: list[dict[str, str]] | None = None, **_: object):
+    async def run(
+        self, prompt_text: str, messages: list[dict[str, str]] | None = None, **_: object
+    ):
         self.messages = messages or []
         return type("Res", (), {"output": self.output})
 

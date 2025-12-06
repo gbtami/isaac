@@ -16,7 +16,7 @@ async def test_set_session_model_changes_runner():
     agent = make_function_agent(conn)
     session = await agent.new_session(cwd="/", mcp_servers=[])
 
-    await agent.set_session_model(model_id="function-model", session_id=session.session_id)
+    await agent.set_session_model(model_id="function:function", session_id=session.session_id)
 
     response = await agent.prompt(prompt=[text_block("hello")], session_id=session.session_id)
 

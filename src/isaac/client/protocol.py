@@ -71,9 +71,7 @@ class ExampleClient(Client):
             session_id,
             getattr(tool_call, "title", "") or getattr(tool_call, "toolCallId", ""),
             [getattr(opt, "option_id", getattr(opt, "optionId", "<id>")) for opt in options],
-            getattr(tool_call, "raw_input", None)
-            or getattr(tool_call, "rawInput", None)
-            or {},
+            getattr(tool_call, "raw_input", None) or getattr(tool_call, "rawInput", None) or {},
         )
         try:
             for idx, opt in enumerate(options, start=1):
@@ -86,9 +84,7 @@ class ExampleClient(Client):
                 selection = options[0].option_id if options else "default"
         except Exception:
             selection = options[0].option_id if options else "default"
-        self._logger.info(
-            "permission.response session=%s selection=%s", session_id, selection
-        )
+        self._logger.info("permission.response session=%s selection=%s", session_id, selection)
         return RequestPermissionResponse(
             outcome=AllowedOutcome(option_id=selection, outcome="selected")
         )

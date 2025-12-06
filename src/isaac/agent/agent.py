@@ -581,9 +581,7 @@ class ACPAgent(Agent):
             logger.info(
                 "Parsed plan from model text for session %s entries=%s",
                 session_id,
-                len(exec_plan_update.entries)
-                if getattr(exec_plan_update, "entries", None)
-                else 0,
+                len(exec_plan_update.entries) if getattr(exec_plan_update, "entries", None) else 0,
             )
             await self._send_update(session_notification(session_id, exec_plan_update))
         # If nothing was streamed (e.g., fallback runner), ensure the response is sent once.

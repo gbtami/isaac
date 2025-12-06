@@ -30,8 +30,8 @@ async def test_context_limit_applied_on_first_write(monkeypatch, tmp_path: Path)
     monkeypatch.setattr(model_registry.urllib.request, "urlopen", fake_urlopen)  # type: ignore[attr-defined]
 
     config = model_registry.load_models_config()
-    entry = config["models"]["openai-gpt4o-mini"]
+    entry = config["models"]["openai:gpt-4o-mini"]
     assert entry.get("context_limit") == 128000
     # Ensure file was written with the new field
     on_disk = json.loads(model_registry.MODELS_FILE.read_text())
-    assert on_disk["models"]["openai-gpt4o-mini"]["context_limit"] == 128000
+    assert on_disk["models"]["openai:gpt-4o-mini"]["context_limit"] == 128000

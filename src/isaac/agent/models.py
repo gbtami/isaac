@@ -34,51 +34,52 @@ logger = logging.getLogger("acp_server")
 
 OLLAMA_BASE_URL = "http://localhost:11434/v1"
 
-HIDDEN_MODELS = {"function-model"}
+FUNCTION_MODEL_ID = "function:function"
+HIDDEN_MODELS = {FUNCTION_MODEL_ID}
 DEFAULT_CONFIG = {
-    "current": "function-model",
+    "current": FUNCTION_MODEL_ID,
     "models": {
-        "function-model": {
+        FUNCTION_MODEL_ID: {
             "provider": "function",
             "model": "function",
             "description": "In-process function model for deterministic testing",
         },
-        "openai-gpt4o-mini": {
+        "openai:gpt-4o-mini": {
             "provider": "openai",
             "model": "gpt-4o-mini",
             "description": "OpenAI GPT-4o mini",
         },
-        "anthropic-claude-3-5-sonnet": {
+        "anthropic:claude-3-5-sonnet-20240620": {
             "provider": "anthropic",
             "model": "claude-3-5-sonnet-20240620",
             "description": "Anthropic Claude 3.5 Sonnet",
         },
-        "google-gemini-2.5-flash": {
+        "google:gemini-2.5-flash": {
             "provider": "google",
             "model": "gemini-2.5-flash",
             "description": "Google Gemini 2.5 Flash",
         },
-        "openrouter-x-ai/grok-4.1-fast:free": {
+        "openrouter:x-ai/grok-4.1-fast:free": {
             "provider": "openrouter",
             "model": "x-ai/grok-4.1-fast:free",
             "description": "OpenRouter proxy for x-ai/grok-4.1-fast:free",
         },
-        "openrouter-moonshotai/kimi-k2:free": {
+        "openrouter:moonshotai/kimi-k2:free": {
             "provider": "openrouter",
             "model": "moonshotai/kimi-k2:free",
             "description": "OpenRouter proxy for moonshotai/kimi-k2:free",
         },
-        "openrouter-kwaipilot/kat-coder-pro:free": {
+        "openrouter:kwaipilot/kat-coder-pro:free": {
             "provider": "openrouter",
             "model": "kwaipilot/kat-coder-pro:free",
             "description": "OpenRouter proxy for kwaipilot/kat-coder-pro:free",
         },
-        "ollama-qwen2.5-coder-3b": {
+        "ollama:hhao/qwen2.5-coder-tools:3b": {
             "provider": "ollama",
             "model": "hhao/qwen2.5-coder-tools:3b",
             "description": "Ollama qwen2.5-coder-tools:3b (local)",
         },
-        "ollama-NazareAI-Python-Programmer-3B": {
+        "ollama:0xroyce/NazareAI-Python-Programmer-3B": {
             "provider": "ollama",
             "model": "0xroyce/NazareAI-Python-Programmer-3B",
             "description": "NazareAI-Python-Programmer-3B (local)",
@@ -113,16 +114,16 @@ def load_models_config() -> Dict[str, Any]:
         if key not in config["models"]:
             config["models"][key] = value
             dirty = True
-    # Ensure function-model stays safe for testing (no auto tool calls)
-    fn_model = config["models"].get("function-model", {})
+    # Ensure function model stays safe for testing (no auto tool calls)
+    fn_model = config["models"].get(FUNCTION_MODEL_ID, {})
     if fn_model.get("provider") != "function":
         fn_model["provider"] = "function"
         dirty = True
     if fn_model.get("model") != "function":
         fn_model["model"] = "function"
         dirty = True
-    fn_model.setdefault("description", DEFAULT_CONFIG["models"]["function-model"]["description"])
-    config["models"]["function-model"] = fn_model
+    fn_model.setdefault("description", DEFAULT_CONFIG["models"][FUNCTION_MODEL_ID]["description"])
+    config["models"][FUNCTION_MODEL_ID] = fn_model
 
     config.setdefault("current", DEFAULT_CONFIG["current"])
     if dirty and not created:
@@ -254,7 +255,7 @@ def build_agent_pair(
     load_dotenv()
     config = load_models_config()
     model_entry = (
-        config.get("models", {}).get(model_id) or DEFAULT_CONFIG["models"]["function-model"]
+        config.get("models", {}).get(model_id) or DEFAULT_CONFIG["models"][FUNCTION_MODEL_ID]
     )
 
     model_obj, model_settings = _build_provider_model(model_id, model_entry)
