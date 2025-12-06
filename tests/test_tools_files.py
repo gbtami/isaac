@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 from pathlib import Path
 from unittest.mock import AsyncMock
+from typing import Any
 
 import pytest
 from acp import RequestPermissionResponse, text_block
@@ -232,7 +233,41 @@ def test_list_files_truncates_and_skips_default_ignores(tmp_path: Path):
     lines = [ln for ln in content.splitlines() if ln.strip()]
     assert len(lines) <= 501  # 500 entries + optional truncation marker
     assert "[truncated]" in content
+    assert result.get("truncated") is True
     assert ".uv-cache" not in content
+
+
+@pytest.mark.asyncio
+async def test_tool_output_is_truncated_before_sending(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+):
+    conn = AsyncMock(spec=AgentSideConnection)
+    conn.session_update = AsyncMock()
+    agent = make_function_agent(conn)
+    session = await agent.new_session(cwd=str(tmp_path), mcp_servers=[])
+
+    long_content = "x" * (agent._tool_output_limit + 2000)
+
+    async def fake_run_tool(tool_name: str, **kwargs: Any) -> dict[str, Any]:
+        return {"content": long_content, "error": None}
+
+    monkeypatch.setattr("isaac.agent.agent.run_tool", fake_run_tool)
+
+    await agent._execute_tool(
+        session_id=session.session_id,
+        tool_name="list_files",
+        tool_call_id="tc-big",
+        arguments={},
+    )
+
+    updates = [call.kwargs["update"] for call in conn.session_update.call_args_list]
+    completed = [u for u in updates if getattr(u, "status", "") == "completed"]
+    assert completed, "Expected completed tool update"
+    raw_out = getattr(completed[-1], "raw_output", {}) or {}
+    assert raw_out.get("truncated") is True
+    content = raw_out.get("content") or ""
+    assert len(content) <= agent._tool_output_limit
+    assert content.endswith("[truncated]")
 
 
 @pytest.mark.asyncio

@@ -103,6 +103,11 @@ from pydantic_ai.messages import FunctionToolCallEvent, FunctionToolResultEvent,
 
 logger = logging.getLogger("acp_server")
 
+# Limit the size of tool outputs we send in a single ACP update.
+# 48KB leaves headroom under asyncio's default 64KB StreamReader line limit for
+# JSON framing and protocol metadata, preventing LimitOverrun errors on large outputs.
+TOOL_OUTPUT_LIMIT = 48 * 1024
+
 
 @dataclass
 class SimpleRunResult:
@@ -164,7 +169,8 @@ class ACPAgent(Agent):
             self._ai_runner = ai_runner or SimpleAIRunner()
             self._planning_runner = planning_runner or SimpleAIRunner()
         self._command_timeout_s = 30.0
-        self._terminal_output_limit = 64 * 1024  # 64KB cap for streamed tool output
+        self._tool_output_limit = TOOL_OUTPUT_LIMIT
+        self._terminal_output_limit = TOOL_OUTPUT_LIMIT
         self._session_store = SessionStore(Path.home() / ".isaac" / "sessions")
         self._session_last_chunk: Dict[str, str | None] = {}
 
@@ -663,11 +669,16 @@ class ACPAgent(Agent):
             await self._send_update(session_notification(session_id, progress))
             return
 
-        status = "completed" if not result.get("error") else "failed"
-        summary = result.get("content") or result.get("error") or ""
         # Include tool name for downstream clients to interpret plan tool output.
         result_with_tool = dict(result)
         result_with_tool.setdefault("tool", tool_name)
+        result_with_tool, was_truncated = _truncate_tool_output(
+            result_with_tool, self._tool_output_limit
+        )
+        if was_truncated:
+            result_with_tool["truncated"] = True
+        status = "completed" if not result_with_tool.get("error") else "failed"
+        summary = result_with_tool.get("content") or result_with_tool.get("error") or ""
         logger.info(
             "Tool call done %s session=%s status=%s summary_preview=%s",
             tool_name,
@@ -774,8 +785,9 @@ class ACPAgent(Agent):
                 )
                 chunk = out_resp.output or ""
                 if chunk:
+                    chunk, chunk_truncated = _truncate_text(chunk, self._tool_output_limit)
                     collected.append(chunk)
-                    truncated = truncated or out_resp.truncated
+                    truncated = truncated or out_resp.truncated or chunk_truncated
                     progress = tracker.progress(
                         external_id=tool_call_id,
                         status="in_progress",
@@ -783,7 +795,7 @@ class ACPAgent(Agent):
                             "content": chunk,
                             "error": None,
                             "returncode": exit_code,
-                            "truncated": out_resp.truncated,
+                            "truncated": out_resp.truncated or chunk_truncated,
                         },
                         content=[tool_content(text_block(chunk))],
                     )
@@ -808,13 +820,19 @@ class ACPAgent(Agent):
                     TerminalOutputRequest(session_id=session_id, terminal_id=term_id),
                 )
                 if final_out.output:
-                    collected.append(final_out.output)
-                    truncated = truncated or final_out.truncated
+                    capped_output, chunk_truncated = _truncate_text(
+                        final_out.output, self._tool_output_limit
+                    )
+                    collected.append(capped_output)
+                    truncated = truncated or final_out.truncated or chunk_truncated
                     exit_code = exit_code or (
                         final_out.exit_status.exit_code if final_out.exit_status else None
                     )
 
-        full_output = "".join(collected).rstrip("\n")
+        full_output, capped = _truncate_text(
+            "".join(collected).rstrip("\n"), self._tool_output_limit
+        )
+        truncated = truncated or capped
         status = "failed" if error_msg else "completed"
         if exit_code not in (0, None) and not error_msg:
             status = "failed"
@@ -1220,6 +1238,30 @@ def main_entry():
         return asyncio.run(main())
     except KeyboardInterrupt:
         return 0
+
+
+def _truncate_text(value: str, limit: int) -> tuple[str, bool]:
+    """Clamp tool output strings to avoid exceeding ACP stream line limits."""
+
+    if len(value) <= limit:
+        return value, False
+    suffix = "\n[truncated]"
+    keep = max(0, limit - len(suffix))
+    return f"{value[:keep]}{suffix}", True
+
+
+def _truncate_tool_output(result: dict[str, Any], limit: int) -> tuple[dict[str, Any], bool]:
+    """Return a copy of tool output with oversized text fields truncated."""
+
+    truncated = False
+    trimmed = dict(result)
+    for key in ("content", "error"):
+        val = trimmed.get(key)
+        if isinstance(val, str):
+            new_val, did_truncate = _truncate_text(val, limit)
+            truncated = truncated or did_truncate
+            trimmed[key] = new_val
+    return trimmed, truncated
 
 
 async def _await_with_cancel(coro: Any, cancel_event: asyncio.Event) -> Any | None:

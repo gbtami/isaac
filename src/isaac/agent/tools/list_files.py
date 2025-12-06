@@ -76,7 +76,10 @@ async def list_files(
         if truncated:
             result = f"{result}\n[truncated]"
 
-        return {"content": result, "error": None}
+        response = {"content": result, "error": None}
+        if truncated:
+            response["truncated"] = True
+        return response
     except Exception as e:
         return {"content": None, "error": f"Error listing directory: {str(e)}"}
 
