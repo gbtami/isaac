@@ -333,6 +333,52 @@ class ACPAgent(Agent):
             return SetSessionModelResponse()
         return SetSessionModelResponse()
 
+    async def _handle_model_command(
+        self, session_id: str, prompt_text: str
+    ) -> SessionNotification | None:
+        """Handle /model and /models slash commands on the agent side."""
+        trimmed = prompt_text.strip()
+        if not trimmed.startswith("/model"):
+            return None
+
+        parts = trimmed.split(maxsplit=1)
+        command = parts[0]
+        argument = parts[1].strip() if len(parts) > 1 else ""
+
+        current = self._session_model_ids.get(session_id, self._current_model_id())
+        models = model_registry.list_user_models()
+
+        if command == "/models" or not argument:
+            lines = [f"Current model: {current}"]
+            if models:
+                lines.append("Available models:")
+                for model_id, meta in models.items():
+                    desc = meta.get("description") or ""
+                    prefix = "*" if model_id == current else "-"
+                    line = f"{prefix} {model_id}"
+                    if desc:
+                        line = f"{line} - {desc}"
+                    lines.append(line)
+            else:
+                lines.append("No models configured.")
+            return session_notification(
+                session_id,
+                update_agent_message(text_block("\n".join(lines))),
+            )
+
+        model_id = argument
+        if model_id not in models:
+            message = f"Unknown model id: {model_id}"
+            return session_notification(session_id, update_agent_message(text_block(message)))
+
+        try:
+            await self.set_session_model(model_id, session_id)
+            self._session_model_ids[session_id] = model_id
+            message = f"Model set to {model_id}."
+        except Exception as exc:  # noqa: BLE001
+            message = f"Failed to set model: {exc}"
+        return session_notification(session_id, update_agent_message(text_block(message)))
+
     async def prompt(
         self,
         prompt: list[Any],
@@ -1014,8 +1060,13 @@ class ACPAgent(Agent):
                 input=AvailableCommandInput(root=UnstructuredCommandInput(hint="/log <level>")),
             ),
             AvailableCommand(
+                name="models",
+                description="List available models.",
+                input=AvailableCommandInput(root=UnstructuredCommandInput(hint="/models")),
+            ),
+            AvailableCommand(
                 name="model",
-                description="List or switch models.",
+                description="Switch to a specific model.",
                 input=AvailableCommandInput(root=UnstructuredCommandInput(hint="/model <id>")),
             ),
             AvailableCommand(

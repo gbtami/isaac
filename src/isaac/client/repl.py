@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import asyncio
 import logging
 import sys
 from collections.abc import Callable
@@ -62,7 +61,7 @@ async def interactive_loop(
                 continue
             # Guard against mistyped slash commands from going to the model.
             cmd = line.split()[0]
-            agent_slash = {"/log", "/model"}
+            agent_slash = {"/log", "/model", "/models"}
             if cmd not in agent_slash:
                 print(
                     "Available slash commands: /status, /models, /model <id>, "
@@ -79,84 +78,6 @@ async def interactive_loop(
             state.pending_newline = False
 
 
-async def _interactive_model_select(
-    conn: ClientSideConnection, session_id: str, state: SessionUIState
-) -> None:
-    """Ask the agent for available models and allow user to pick one."""
-    # Prefer extension method if supported
-    choices: list[str] = []
-    try:
-        resp = await conn.ext_method("model/list", {"session_id": session_id})
-        if isinstance(resp, dict):
-            current = resp.get("current")
-            models = resp.get("models") or []
-            if isinstance(current, str):
-                state.current_model = current
-            choices = [m.get("id") for m in models if isinstance(m, dict) and m.get("id")]
-    except Exception:
-        choices = []
-
-    if not choices:
-        # Fallback: ask via prompt and parse response
-        state.collect_models = True
-        state.model_buffer = []
-        try:
-            await conn.prompt(prompt=[text_block("/model")], session_id=session_id)
-        except Exception as exc:  # noqa: BLE001
-            logging.error("Failed to fetch models: %s", exc)
-            state.collect_models = False
-            return
-        state.collect_models = False
-        text = "\n".join(state.model_buffer or [])
-        choices = _parse_models_from_text(text)
-
-    if not choices:
-        print("[no models returned by agent]")
-        return
-
-    print("Available models:")
-    for idx, mid in enumerate(choices, start=1):
-        print(f"{idx}) {mid}")
-    loop = asyncio.get_running_loop()
-    try:
-        raw = await loop.run_in_executor(None, lambda: input("Select model (number): ").strip())
-    except Exception:
-        return
-    if not raw.isdigit():
-        return
-    num = int(raw)
-    if 1 <= num <= len(choices):
-        selection = choices[num - 1]
-        state.current_model = selection
-        try:
-            # Use extension method first, fall back to core set_model if needed.
-            try:
-                await conn.ext_method(
-                    "model/set", {"session_id": session_id, "model_id": selection}
-                )
-            except Exception:
-                await conn.set_session_model(model_id=selection, session_id=session_id)
-            print(f"[model set to {selection}]")
-        except Exception as exc:  # noqa: BLE001
-            logging.error("Failed to set model: %s", exc)
-
-
-def _parse_models_from_text(text: str) -> list[str]:
-    lines = [ln.strip() for ln in text.splitlines() if ln.strip()]
-    model_ids: list[str] = []
-    for line in lines:
-        if line.startswith("-"):
-            part = line.lstrip("-").strip()
-            if part:
-                model_ids.append(part.split()[0])
-        elif ":" in line and line.lower().startswith("current model"):
-            # skip current model line
-            continue
-        elif line and " " not in line and line != "Available":
-            model_ids.append(line)
-    return model_ids
-
-
 async def _handle_slash(
     line: str,
     conn: ClientSideConnection,
@@ -168,7 +89,7 @@ async def _handle_slash(
         print(
             "Available slash commands:\n"
             "/status       - Show current mode, model, and MCP servers\n"
-            "/models       - Fetch available models from the agent and select one\n"
+            "/models       - List available models (handled by the agent)\n"
             "/model <id>   - Set model to the given id\n"
             "/mode <id>    - Set agent mode (ask|yolo)\n"
             "/thinking on|off - Toggle display of model thinking traces\n"
@@ -176,16 +97,13 @@ async def _handle_slash(
             "/exit         - Exit the client\n"
         )
         return True
-    if line == "/models":
-        await _interactive_model_select(conn, session_id, state)
-        return True
     if line == "/status":
         print(render_status_box(state))
         return True
     if line.startswith("/model"):
         parts = line.split()
         if len(parts) == 1:
-            await _interactive_model_select(conn, session_id, state)
+            print("Usage: /model <id> (use /models to list available models)")
             return True
         selection = parts[1]
         state.current_model = selection
