@@ -9,7 +9,7 @@ from .apply_patch import apply_patch
 from .code_search import code_search
 from .edit_file import edit_file
 from .file_summary import file_summary
-from .list_directory import list_files
+from .list_files import list_files
 from .read_file import read_file
 from .run_command import run_command
 

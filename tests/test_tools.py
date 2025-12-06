@@ -13,7 +13,7 @@ from isaac.agent.tools.apply_patch import apply_patch
 from isaac.agent.tools.code_search import code_search
 from isaac.agent.tools.edit_file import edit_file
 from isaac.agent.tools.file_summary import file_summary
-from isaac.agent.tools.list_directory import list_files
+from isaac.agent.tools.list_files import list_files
 from isaac.agent.tools.read_file import read_file
 from isaac.agent.tools import TOOL_HANDLERS, run_tool
 from isaac.agent.tools.run_command import get_run_command_context, run_command

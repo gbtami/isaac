@@ -13,7 +13,7 @@ from pydantic_ai.models.test import TestModel  # type: ignore
 
 from isaac.agent.runner import register_tools
 from isaac.agent.tools.apply_patch import apply_patch
-from isaac.agent.tools.list_directory import list_files
+from isaac.agent.tools.list_files import list_files
 from tests.utils import make_function_agent
 
 
