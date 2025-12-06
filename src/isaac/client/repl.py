@@ -11,7 +11,7 @@ from acp import ClientSideConnection, text_block
 from prompt_toolkit import PromptSession  # type: ignore
 from prompt_toolkit.key_binding import KeyBindings  # type: ignore
 
-from isaac.client.protocol import set_mode
+from isaac.client.acp_client import set_mode
 from isaac.client.session_state import SessionUIState
 from isaac.client.status_box import render_status_box
 from isaac.client.thinking import toggle_thinking

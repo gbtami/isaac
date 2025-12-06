@@ -17,7 +17,7 @@ from acp.core import connect_to_agent
 from acp.schema import ClientCapabilities, FileSystemCapability, Implementation
 
 from isaac.client.mcp_config import load_mcp_config
-from isaac.client.protocol import ExampleClient
+from isaac.client.acp_client import ACPClient
 from isaac.client.repl import interactive_loop
 from isaac.client.session_state import SessionUIState
 
@@ -46,7 +46,7 @@ async def run_client(program: str, args: Iterable[str], mcp_servers: list[Any]) 
 
     state = SessionUIState(current_mode="ask", current_model="unknown", mcp_servers=[])
 
-    client_impl = ExampleClient(state)
+    client_impl = ACPClient(state)
     conn = connect_to_agent(client_impl, proc.stdin, proc.stdout)
 
     await conn.initialize(

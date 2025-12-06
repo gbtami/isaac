@@ -47,7 +47,7 @@ from isaac.client.display import (
 from isaac.client.session_state import SessionUIState
 
 
-class ExampleClient(Client):
+class ACPClient(Client):
     """Minimal ACP client for exercising the protocol endpoints."""
 
     def __init__(self, state: SessionUIState) -> None:
