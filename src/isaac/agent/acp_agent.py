@@ -47,11 +47,8 @@ from acp.helpers import (
 )
 from acp.schema import (
     AgentCapabilities,
-    AvailableCommand,
     AvailableCommandsUpdate,
-    AvailableCommandInput,
     CurrentModeUpdate,
-    UnstructuredCommandInput,
     ListSessionsResponse,
     ReadTextFileRequest,
     WriteTextFileRequest,
@@ -88,7 +85,7 @@ from isaac.agent.prompt_utils import coerce_user_text, extract_prompt_text, is_p
 from isaac.agent.runner import register_tools, run_with_runner, stream_with_runner
 from isaac.agent.session_modes import build_mode_state
 from isaac.agent.session_store import SessionStore
-from isaac.agent.slash import handle_slash_command
+from isaac.agent.slash import available_slash_commands, handle_slash_command
 from isaac.agent.tool_io import await_with_cancel, truncate_text, truncate_tool_output
 from isaac.agent.tools import get_tools, run_tool
 from isaac.agent.tools.run_command import (
@@ -333,52 +330,6 @@ class ACPAgent(Agent):
             return SetSessionModelResponse()
         return SetSessionModelResponse()
 
-    async def _handle_model_command(
-        self, session_id: str, prompt_text: str
-    ) -> SessionNotification | None:
-        """Handle /model and /models slash commands on the agent side."""
-        trimmed = prompt_text.strip()
-        if not trimmed.startswith("/model"):
-            return None
-
-        parts = trimmed.split(maxsplit=1)
-        command = parts[0]
-        argument = parts[1].strip() if len(parts) > 1 else ""
-
-        current = self._session_model_ids.get(session_id, self._current_model_id())
-        models = model_registry.list_user_models()
-
-        if command == "/models" or not argument:
-            lines = [f"Current model: {current}"]
-            if models:
-                lines.append("Available models:")
-                for model_id, meta in models.items():
-                    desc = meta.get("description") or ""
-                    prefix = "*" if model_id == current else "-"
-                    line = f"{prefix} {model_id}"
-                    if desc:
-                        line = f"{line} - {desc}"
-                    lines.append(line)
-            else:
-                lines.append("No models configured.")
-            return session_notification(
-                session_id,
-                update_agent_message(text_block("\n".join(lines))),
-            )
-
-        model_id = argument
-        if model_id not in models:
-            message = f"Unknown model id: {model_id}"
-            return session_notification(session_id, update_agent_message(text_block(message)))
-
-        try:
-            await self.set_session_model(model_id, session_id)
-            self._session_model_ids[session_id] = model_id
-            message = f"Model set to {model_id}."
-        except Exception as exc:  # noqa: BLE001
-            message = f"Failed to set model: {exc}"
-        return session_notification(session_id, update_agent_message(text_block(message)))
-
     async def prompt(
         self,
         prompt: list[Any],
@@ -402,11 +353,7 @@ class ACPAgent(Agent):
 
         prompt_text = extract_prompt_text(prompt)
 
-        if prompt_text.strip() == "/usage":
-            await self._send_update(self._build_usage_note(session_id))
-            return PromptResponse(stop_reason="end_turn")
-
-        slash = handle_slash_command(session_id, prompt_text)
+        slash = await handle_slash_command(self, session_id, prompt_text)
         if slash:
             await self._send_update(slash)
             return PromptResponse(stop_reason="end_turn")
@@ -414,12 +361,6 @@ class ACPAgent(Agent):
         plan_request = parse_plan_request(prompt_text)
         if plan_request:
             await self._send_update(build_plan_notification(session_id, plan_request))
-            return PromptResponse(stop_reason="end_turn")
-
-        if prompt_text.startswith("/model"):
-            note = await self._handle_model_command(session_id, prompt_text)
-            if note:
-                await self._send_update(note)
             return PromptResponse(stop_reason="end_turn")
 
         if cancel_event.is_set():
@@ -1053,28 +994,7 @@ class ACPAgent(Agent):
         """Advertise slash commands using `available_commands_update` per ACP spec."""
         if session_id in self._session_commands_advertised:
             return
-        commands = [
-            AvailableCommand(
-                name="log",
-                description="Set agent log level (DEBUG, INFO, WARNING, ERROR, CRITICAL).",
-                input=AvailableCommandInput(root=UnstructuredCommandInput(hint="/log <level>")),
-            ),
-            AvailableCommand(
-                name="models",
-                description="List available models.",
-                input=AvailableCommandInput(root=UnstructuredCommandInput(hint="/models")),
-            ),
-            AvailableCommand(
-                name="model",
-                description="Switch to a specific model.",
-                input=AvailableCommandInput(root=UnstructuredCommandInput(hint="/model <id>")),
-            ),
-            AvailableCommand(
-                name="usage",
-                description="Show token usage for the latest run.",
-                input=AvailableCommandInput(root=UnstructuredCommandInput(hint="/usage")),
-            ),
-        ]
+        commands = available_slash_commands()
         update = AvailableCommandsUpdate(
             session_update="available_commands_update", available_commands=commands
         )

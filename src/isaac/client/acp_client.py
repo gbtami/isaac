@@ -29,6 +29,7 @@ from acp.schema import (
     AudioContentBlock,
     CurrentModeUpdate,
     EmbeddedResourceContentBlock,
+    AvailableCommandsUpdate,
     ImageContentBlock,
     ResourceContentBlock,
     TextContentBlock,
@@ -191,6 +192,21 @@ class ACPClient(Client):
         if isinstance(update, CurrentModeUpdate):
             self._state.current_mode = update.current_mode_id
             print_mode_update(self._state.current_mode)
+            return
+        if isinstance(update, AvailableCommandsUpdate):
+            cmds = {}
+            for cmd in update.available_commands or []:
+                name = f"/{cmd.name}"
+                desc = cmd.description or ""
+                hint = ""
+                try:
+                    hint = getattr(cmd.input.root, "hint", "") if cmd.input else ""
+                except Exception:
+                    hint = ""
+                if hint and not desc:
+                    desc = hint
+                cmds[name] = desc or hint or ""
+            self._state.available_agent_commands = cmds
             return
         if isinstance(update, ToolCallStart):
             if self._state.pending_newline:

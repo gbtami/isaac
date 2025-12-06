@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 
 @dataclass
@@ -16,3 +16,4 @@ class SessionUIState:
     pending_newline: bool = False
     show_thinking: bool = False
     usage_summary: str | None = None
+    available_agent_commands: dict[str, str] = field(default_factory=dict)
