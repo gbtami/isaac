@@ -77,7 +77,7 @@ from isaac.agent.agent_terminal import (
 from isaac.agent.brain.history import build_chat_history
 from isaac.agent.brain.planner import parse_plan_from_text
 from isaac.agent.constants import TOOL_OUTPUT_LIMIT
-from isaac.agent.default_runners import SimpleAIRunner, create_default_runners
+from isaac.agent.default_runners import create_default_runners
 from isaac.agent.fs import read_text_file, write_text_file
 from isaac.agent.mcp_support import build_mcp_toolsets
 from isaac.agent.planner import build_plan_notification, parse_plan_request
@@ -117,8 +117,8 @@ class ACPAgent(Agent):
         self._terminals: Dict[str, TerminalState] = {}
         self._session_modes: Dict[str, str] = {}
         self._cancel_events: Dict[str, asyncio.Event] = {}
-        self._session_models: Dict[str, Any] = {}
-        self._session_planners: Dict[str, Any] = {}
+        self._session_models: Dict[str, Any | None] = {}
+        self._session_planners: Dict[str, Any | None] = {}
         self._session_model_ids: Dict[str, str] = {}
         self._session_history: Dict[str, list[SessionNotification]] = {}
         self._session_allowed_commands: Dict[str, set[tuple[str, str]]] = {}
@@ -130,16 +130,15 @@ class ACPAgent(Agent):
         self._agent_version = agent_version
         self._custom_runners = ai_runner is not None or planning_runner is not None
         self._session_commands_advertised: set[str] = set()
-        if ai_runner is None and planning_runner is None:
-            self._ai_runner, self._planning_runner = create_default_runners()
-        else:
-            self._ai_runner = ai_runner or SimpleAIRunner()
-            self._planning_runner = planning_runner or SimpleAIRunner()
+        self._ai_runner = ai_runner
+        self._planning_runner = planning_runner
         self._command_timeout_s = 30.0
         self._tool_output_limit = TOOL_OUTPUT_LIMIT
         self._terminal_output_limit = TOOL_OUTPUT_LIMIT
         self._session_store = SessionStore(Path.home() / ".isaac" / "sessions")
         self._session_last_chunk: Dict[str, str | None] = {}
+        self._session_model_errors: Dict[str, str] = {}
+        self._session_model_error_notified: set[str] = set()
 
     def on_connect(self, conn: AgentSideConnection) -> None:  # type: ignore[override]
         """Capture connection when wiring via run_agent/connect_to_agent."""
@@ -215,13 +214,7 @@ class ACPAgent(Agent):
         self._cancel_events[session_id] = asyncio.Event()
         toolsets = build_mcp_toolsets(mcp_servers)
         self._session_toolsets[session_id] = toolsets
-        if self._custom_runners:
-            executor, planner = self._ai_runner, self._planning_runner
-        else:
-            executor, planner = create_default_runners(toolsets)
-        self._session_models[session_id] = executor
-        self._session_planners[session_id] = planner
-        self._session_model_ids[session_id] = self._current_model_id()
+        await self._init_session_runners(session_id, toolsets)
         self._session_history[session_id] = []
         self._session_allowed_commands[session_id] = set()
         self._session_mcp_servers[session_id] = mcp_servers
@@ -249,13 +242,7 @@ class ACPAgent(Agent):
         mcp_servers = mcp_servers or stored_meta.get("mcpServers", [])
         toolsets = build_mcp_toolsets(mcp_servers)
         self._session_toolsets[session_id] = toolsets
-        if self._custom_runners:
-            executor, planner = self._ai_runner, self._planning_runner
-        else:
-            executor, planner = create_default_runners(toolsets)
-        self._session_models[session_id] = executor
-        self._session_planners[session_id] = planner
-        self._session_model_ids[session_id] = self._current_model_id()
+        await self._init_session_runners(session_id, toolsets)
         self._session_history.setdefault(session_id, [])
         self._session_allowed_commands.setdefault(session_id, set())
         self._session_mcp_servers[session_id] = mcp_servers
@@ -322,12 +309,18 @@ class ACPAgent(Agent):
             self._session_models[session_id] = executor
             self._session_planners[session_id] = planner
             self._session_model_ids[session_id] = model_id
+            self._session_model_errors.pop(session_id, None)
             with contextlib.suppress(Exception):
-                # Persist selection so subsequent runs default to the same model.
                 model_registry.set_current_model(model_id)
         except Exception as exc:  # pragma: no cover - model build errors
             logger.error("Failed to set session model: %s", exc)
-            return SetSessionModelResponse()
+            await self._send_update(
+                session_notification(
+                    session_id,
+                    update_agent_message(text_block(f"Model load failed: {exc}")),
+                )
+            )
+            raise
         return SetSessionModelResponse()
 
     async def prompt(
@@ -344,6 +337,9 @@ class ACPAgent(Agent):
         history = build_chat_history(self._session_history.get(session_id, []))
         # Reset last text chunk tracking for this prompt turn.
         self._session_last_chunk[session_id] = None
+        model_error = self._session_model_errors.get(session_id)
+        if model_error:
+            return await self._respond_model_error(session_id, model_error)
 
         for block in prompt:
             tool_call = getattr(block, "toolCall", None)
@@ -366,8 +362,14 @@ class ACPAgent(Agent):
         if cancel_event.is_set():
             return PromptResponse(stop_reason="cancelled")
 
-        runner = self._session_models.get(session_id, self._ai_runner)
-        planner = self._session_planners.get(session_id, self._planning_runner)
+        runner = self._session_models.get(session_id) or self._ai_runner
+        planner = (
+            self._session_planners.get(session_id) or self._planning_runner or self._ai_runner
+        )
+        if runner is None or planner is None:
+            return await self._respond_model_error(
+                session_id, self._session_model_errors.get(session_id)
+            )
 
         # --- Planning phase (programmatic hand-off) ---
         plan_only = is_plan_only_prompt(prompt_text)
@@ -931,6 +933,35 @@ class ACPAgent(Agent):
         cfg = model_registry.load_models_config()
         return cfg.get("current", "test")
 
+    async def _init_session_runners(
+        self, session_id: str, toolsets: list[Any] | None = None
+    ) -> None:
+        """Initialize runners for a session or surface build failures."""
+        try:
+            if self._custom_runners:
+                executor = self._ai_runner
+                planner = self._planning_runner or self._ai_runner
+            else:
+                executor, planner = create_default_runners(toolsets)
+            self._session_models[session_id] = executor
+            self._session_planners[session_id] = planner
+            self._session_model_ids[session_id] = self._current_model_id()
+            self._session_model_errors.pop(session_id, None)
+            self._session_model_error_notified.discard(session_id)
+        except Exception as exc:
+            msg = f"Model load failed: {exc}"
+            logger.error("Failed to build model for session %s: %s", session_id, exc)
+            self._session_models[session_id] = None
+            self._session_planners[session_id] = None
+            self._session_model_errors[session_id] = msg
+            self._session_model_error_notified.add(session_id)
+            await self._send_update(
+                session_notification(
+                    session_id,
+                    update_agent_message(text_block(msg)),
+                )
+            )
+
     async def ext_method(self, name: str, payload: dict[str, Any]) -> dict[str, Any]:
         """Handle extension methods for model listing/selection."""
         if name == "model/list":
@@ -989,6 +1020,20 @@ class ACPAgent(Agent):
             session_id,
             update_agent_message(text_block(summary)),
         )
+
+    async def _respond_model_error(self, session_id: str, message: str | None) -> PromptResponse:
+        """Emit a model error message (once) and end the prompt turn."""
+        msg = message or "Model unavailable for this session."
+        if session_id not in self._session_model_error_notified:
+            await self._send_update(
+                session_notification(
+                    session_id,
+                    update_agent_message(text_block(msg)),
+                )
+            )
+            self._session_model_error_notified.add(session_id)
+        # ACP stop_reason is a closed set; use refusal to signal “can’t proceed”.
+        return PromptResponse(stop_reason="refusal")
 
     async def _send_available_commands(self, session_id: str) -> None:
         """Advertise slash commands using `available_commands_update` per ACP spec."""

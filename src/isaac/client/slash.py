@@ -88,12 +88,21 @@ async def _handle_model(
         print("Usage: /model <id> (use /models to list available models)")
         return True
     selection = argument.split()[0]
-    state.current_model = selection
     try:
-        await conn.ext_method("model/set", {"session_id": session_id, "model_id": selection})
-    except Exception:
-        await conn.set_session_model(model_id=selection, session_id=session_id)
-    print(f"[model set to {selection}]")
+        resp = await conn.ext_method("model/set", {"session_id": session_id, "model_id": selection})
+        if isinstance(resp, dict) and resp.get("error"):
+            print(f"[failed to set model: {resp['error']}]")
+            return True
+        state.current_model = selection
+        print(f"[model set to {selection}]")
+        return True
+    except Exception as exc:
+        try:
+            await conn.set_session_model(model_id=selection, session_id=session_id)
+            state.current_model = selection
+            print(f"[model set to {selection}]")
+        except Exception as inner_exc:  # noqa: BLE001
+            print(f"[failed to set model: {inner_exc or exc}]")
     return True
 
 

@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-import json
 from typing import Any, Callable
 
 from pydantic_ai.messages import PartDeltaEvent, PartEndEvent  # type: ignore
@@ -43,34 +42,18 @@ def register_tools(agent: Any) -> None:
 async def run_with_runner(
     runner: Any, prompt_text: str, *, history: Any | None = None
 ) -> tuple[str, Any | None]:
-    run_method: Callable[[str], Any] | None = getattr(runner, "run", None)
-    if not callable(run_method):
-        return f"Echo: {prompt_text}", None
+    async def _noop_on_text(_: str) -> None:
+        return None
 
-    usage = None
-    try:
-        result = None
-        if history is not None:
-            try:
-                result = run_method(prompt_text, messages=history)
-            except TypeError:
-                result = None
-        if result is None:
-            result = run_method(prompt_text)
-        if asyncio.iscoroutine(result):
-            result = await result
-
-        usage = getattr(result, "usage", None)
-        output = getattr(result, "output", None)
-        text = _as_text_output(output)
-        if text is not None:
-            return text, usage
-        if isinstance(result, str):
-            return result, usage
-    except Exception as exc:  # pragma: no cover
-        return f"Provider error: {exc}", None
-
-    return f"Echo: {prompt_text}", usage
+    text, usage = await stream_with_runner(
+        runner,
+        prompt_text,
+        _noop_on_text,
+        history=history,
+    )
+    if text is None:
+        return f"Echo: {prompt_text}", usage
+    return text, usage
 
 
 async def stream_with_runner(
@@ -81,7 +64,7 @@ async def stream_with_runner(
     *,
     history: Any | None = None,
     on_event: Callable[[Any], asyncio.Future | bool | None] | None = None,
-) -> str | None:
+) -> tuple[str | None, Any | None]:
     """Stream responses using the runner's streaming API.
 
     `on_event` lets callers react to tool call events (used to emit ACP tool updates).
@@ -89,19 +72,15 @@ async def stream_with_runner(
     stream_logger = logging.getLogger("acp_server")
     stream_logger.info("LLM stream start prompt_preview=%s", prompt_text[:200])
     cancel_event = cancel_event or asyncio.Event()
-    stream_method: Callable[[str], Any] = getattr(runner, "run_stream_events")
 
     output_parts: list[str] = []
     usage = None
     try:
         event_iter = None
         if history is not None:
-            try:
-                event_iter = stream_method(prompt_text, messages=history)
-            except TypeError:
-                event_iter = None
+            event_iter = runner.run_stream_events(prompt_text, message_history=history)
         if event_iter is None:
-            event_iter = stream_method(prompt_text)
+            event_iter = runner.run_stream_events(prompt_text)
         if asyncio.iscoroutine(event_iter):
             event_iter = await event_iter
         async for event in event_iter:
@@ -155,23 +134,3 @@ async def stream_with_runner(
         return f"Provider error: {exc}", None
 
     return ("".join(output_parts) or None), usage
-
-
-def _as_text_output(output: Any) -> str | None:
-    """Best-effort conversion of model outputs to text."""
-
-    if output is None:
-        return None
-    if isinstance(output, str):
-        return output
-    # Common structured plan shape (e.g., PlanSteps BaseModel)
-    steps = getattr(output, "steps", None)
-    if isinstance(steps, list) and all(isinstance(s, str) for s in steps):
-        return "\n".join(s for s in steps if s)
-    if isinstance(output, list) and all(isinstance(s, str) for s in output):
-        return "\n".join(s for s in output if s)
-    # Fallback: JSON stringify serializable data.
-    try:
-        return json.dumps(output)
-    except Exception:
-        return str(output)

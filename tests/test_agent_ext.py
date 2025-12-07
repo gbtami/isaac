@@ -134,22 +134,19 @@ async def test_store_user_prompt_coerces_text_blocks(monkeypatch, tmp_path: Path
 class _RecordingRunner:
     def __init__(self, output: str):
         self.output = output
-        self.messages: list[dict[str, str]] | None = None
         self.stream_messages: list[dict[str, str]] | None = None
 
-    async def run(
-        self, prompt_text: str, messages: list[dict[str, str]] | None = None, **_: object
-    ):
-        self.messages = messages or []
-        return type("Res", (), {"output": self.output})
-
     async def run_stream_events(
-        self, prompt_text: str, messages: list[dict[str, str]] | None = None, **_: object
+        self,
+        prompt_text: str,
+        messages: list[dict[str, str]] | None = None,
+        message_history: list[dict[str, str]] | None = None,
+        **_: object,
     ):
-        self.stream_messages = messages or []
+        self.stream_messages = (message_history if message_history is not None else messages) or []
 
         async def _gen():
-            yield "final response"
+            yield self.output
 
         return _gen()
 

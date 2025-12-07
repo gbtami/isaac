@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pytest
@@ -32,16 +31,20 @@ class _PlanningRunner:
         self.prompts: list[str] = []
         self.content = content
 
-    async def run(self, prompt: str, messages=None):
+    async def run_stream_events(self, prompt: str, messages=None, message_history=None):
         self.prompts.append(prompt)
-        return SimpleNamespace(output=self.content)
+
+        async def _gen():
+            yield self.content
+
+        return _gen()
 
 
 class _StreamingExecutor:
     def __init__(self):
         self.prompts: list[str] = []
 
-    async def run_stream_events(self, prompt: str, messages=None):
+    async def run_stream_events(self, prompt: str, messages=None, message_history=None):
         self.prompts.append(prompt)
 
         async def _gen():

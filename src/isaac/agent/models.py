@@ -254,9 +254,10 @@ def build_agent_pair(
 
     load_dotenv()
     config = load_models_config()
-    model_entry = (
-        config.get("models", {}).get(model_id) or DEFAULT_CONFIG["models"][FUNCTION_MODEL_ID]
-    )
+    models_cfg = config.get("models", {})
+    if model_id not in models_cfg:
+        raise ValueError(f"Unknown model id: {model_id}")
+    model_entry = models_cfg.get(model_id, {})
 
     model_obj, model_settings = _build_provider_model(model_id, model_entry)
     planner_obj, planner_settings = _build_provider_model(model_id, model_entry)
