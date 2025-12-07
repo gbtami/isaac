@@ -59,20 +59,10 @@ DEFAULT_CONFIG = {
             "model": "gemini-2.5-flash",
             "description": "Google Gemini 2.5 Flash",
         },
-        "openrouter:x-ai/grok-4.1-fast:free": {
+        "openrouter:openai/gpt-oss-120b": {
             "provider": "openrouter",
-            "model": "x-ai/grok-4.1-fast:free",
-            "description": "OpenRouter proxy for x-ai/grok-4.1-fast:free",
-        },
-        "openrouter:moonshotai/kimi-k2:free": {
-            "provider": "openrouter",
-            "model": "moonshotai/kimi-k2:free",
-            "description": "OpenRouter proxy for moonshotai/kimi-k2:free",
-        },
-        "openrouter:kwaipilot/kat-coder-pro:free": {
-            "provider": "openrouter",
-            "model": "kwaipilot/kat-coder-pro:free",
-            "description": "OpenRouter proxy for kwaipilot/kat-coder-pro:free",
+            "model": "openai/gpt-oss-120b",
+            "description": "OpenRouter proxy for openai/gpt-oss-120b",
         },
         "ollama:hhao/qwen2.5-coder-tools:3b": {
             "provider": "ollama",

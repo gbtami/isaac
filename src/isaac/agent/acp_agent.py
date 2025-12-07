@@ -82,7 +82,7 @@ from isaac.agent.fs import read_text_file, write_text_file
 from isaac.agent.mcp_support import build_mcp_toolsets
 from isaac.agent.planner import build_plan_notification, parse_plan_request
 from isaac.agent.prompt_utils import coerce_user_text, extract_prompt_text, is_plan_only_prompt
-from isaac.agent.runner import register_tools, run_with_runner, stream_with_runner
+from isaac.agent.runner import register_tools, stream_with_runner
 from isaac.agent.session_modes import build_mode_state
 from isaac.agent.session_store import SessionStore
 from isaac.agent.slash import available_slash_commands, handle_slash_command
@@ -373,9 +373,21 @@ class ACPAgent(Agent):
 
         # --- Planning phase (programmatic hand-off) ---
         plan_only = is_plan_only_prompt(prompt_text)
-        plan_response, plan_usage = await run_with_runner(planner, prompt_text, history=history)
-        if plan_response.startswith("Provider error:"):
-            msg = plan_response.removeprefix("Provider error:").strip()
+        plan_chunks: list[str] = []
+
+        async def _plan_chunk(chunk: str) -> None:
+            plan_chunks.append(chunk)
+
+        plan_response, plan_usage = await stream_with_runner(
+            planner,
+            prompt_text,
+            _plan_chunk,
+            cancel_event,
+            history=history,
+        )
+        combined_plan_text = plan_response or "".join(plan_chunks)
+        if combined_plan_text.startswith("Provider error:"):
+            msg = combined_plan_text.removeprefix("Provider error:").strip()
             await self._send_update(
                 session_notification(
                     session_id,
@@ -384,11 +396,11 @@ class ACPAgent(Agent):
                     ),
                 )
             )
-            return PromptResponse(stop_reason="end_turn")
+            combined_plan_text = ""
 
-        plan_update = parse_plan_from_text(plan_response or "")
-        if not plan_update and plan_response:
-            entries = [plan_entry(plan_response)]
+        plan_update = parse_plan_from_text(combined_plan_text or "")
+        if not plan_update and combined_plan_text:
+            entries = [plan_entry(combined_plan_text)]
             plan_update = update_plan(entries)
         if plan_update:
             logger.info(

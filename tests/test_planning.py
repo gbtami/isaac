@@ -31,7 +31,9 @@ class _PlanningRunner:
         self.prompts: list[str] = []
         self.content = content
 
-    async def run_stream_events(self, prompt: str, messages=None, message_history=None):
+    async def run_stream_events(
+        self, prompt: str, message_history: list[dict[str, str]] | None = None, **_: object
+    ):
         self.prompts.append(prompt)
 
         async def _gen():
@@ -44,7 +46,9 @@ class _StreamingExecutor:
     def __init__(self):
         self.prompts: list[str] = []
 
-    async def run_stream_events(self, prompt: str, messages=None, message_history=None):
+    async def run_stream_events(
+        self, prompt: str, message_history: list[dict[str, str]] | None = None, **_: object
+    ):
         self.prompts.append(prompt)
 
         async def _gen():

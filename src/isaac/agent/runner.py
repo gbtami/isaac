@@ -3,11 +3,11 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 from typing import Any, Callable
 
 from pydantic_ai.messages import PartDeltaEvent, PartEndEvent  # type: ignore
 from pydantic_ai.run import AgentRunResultEvent  # type: ignore
-import logging
 
 from isaac.agent.tools import TOOL_HANDLERS, run_tool
 
@@ -39,23 +39,6 @@ def register_tools(agent: Any) -> None:
         _make_tool(name)
 
 
-async def run_with_runner(
-    runner: Any, prompt_text: str, *, history: Any | None = None
-) -> tuple[str, Any | None]:
-    async def _noop_on_text(_: str) -> None:
-        return None
-
-    text, usage = await stream_with_runner(
-        runner,
-        prompt_text,
-        _noop_on_text,
-        history=history,
-    )
-    if text is None:
-        return f"Echo: {prompt_text}", usage
-    return text, usage
-
-
 async def stream_with_runner(
     runner: Any,
     prompt_text: str,
@@ -85,7 +68,7 @@ async def stream_with_runner(
             event_iter = await event_iter
         async for event in event_iter:
             if cancel_event.is_set():
-                return None
+                return None, usage
 
             handled = False
             if on_event is not None:
