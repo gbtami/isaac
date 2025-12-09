@@ -50,7 +50,6 @@ READ_ONLY_TOOLS = {
 }
 
 TOOL_REQUIRED_ARGS: Dict[str, list[str]] = {
-    "list_files": ["directory"],
     "read_file": ["file_path"],
     "run_command": ["command"],
     "edit_file": ["file_path", "new_content"],
@@ -65,7 +64,7 @@ def get_tools() -> List[Any]:
     base_tools = [
         Tool(
             function="list_files",
-            description="List files and directories recursively",
+            description="List files and directories (defaults to current directory; set directory if you need a different root).",
             parameters=ToolParameter(
                 type="object",
                 properties={
@@ -75,7 +74,7 @@ def get_tools() -> List[Any]:
                     },
                     "recursive": {"type": "boolean", "description": "Whether to list recursively"},
                 },
-                required=["directory"],
+                required=[],
             ),
         ),
         Tool(
