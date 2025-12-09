@@ -26,7 +26,7 @@ from pydantic_ai.providers.ollama import OllamaProvider  # type: ignore
 from pydantic_ai.providers.openai import OpenAIProvider  # type: ignore
 from pydantic_ai.providers.openrouter import OpenRouterProvider  # type: ignore
 
-from isaac.agent.brain.prompt import SYSTEM_PROMPT
+from isaac.agent.brain.prompt import SINGLE_AGENT_SYSTEM_PROMPT, SYSTEM_PROMPT
 from isaac.agent.brain.planning_agent import build_planning_agent
 from isaac.agent.tools import register_readonly_tools
 
@@ -58,6 +58,11 @@ DEFAULT_CONFIG = {
             "provider": "google",
             "model": "gemini-2.5-flash",
             "description": "Google Gemini 2.5 Flash",
+        },
+        "google:gemini-2.5-flash-lite": {
+            "provider": "google",
+            "model": "gemini-2.5-flash-lite",
+            "description": "Google Gemini 2.5 Flash lite",
         },
         "openrouter:openai/gpt-oss-120b": {
             "provider": "openrouter",
@@ -265,3 +270,31 @@ def build_agent_pair(
     planner = build_planning_agent(planner_obj, planner_settings)
     register_readonly_tools(planner)
     return executor, planner
+
+
+def build_single_agent(
+    model_id: str,
+    register_tools: Callable[[Any], None],
+    *,
+    toolsets: list[Any] | None = None,
+) -> Any:
+    """Build a single agent that plans then executes within one run."""
+
+    load_dotenv()
+    config = load_models_config()
+    models_cfg = config.get("models", {})
+    if model_id not in models_cfg:
+        raise ValueError(f"Unknown model id: {model_id}")
+    model_entry = models_cfg.get(model_id, {})
+
+    model_obj, model_settings = _build_provider_model(model_id, model_entry)
+    logger.info("MODEL (single-agent): %s", model_obj.model_name)
+
+    agent = PydanticAgent(
+        model_obj,
+        toolsets=toolsets or (),
+        system_prompt=SINGLE_AGENT_SYSTEM_PROMPT,
+        model_settings=model_settings,
+    )
+    register_tools(agent)
+    return agent

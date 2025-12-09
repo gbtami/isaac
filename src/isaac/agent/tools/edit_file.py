@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import difflib
 from pathlib import Path
-from typing import Optional
+from typing import Any, Optional
+
+from pydantic_ai import RunContext
 
 
 def _resolve(base: Optional[str], target: str) -> Path:
@@ -13,7 +15,12 @@ def _resolve(base: Optional[str], target: str) -> Path:
 
 
 async def edit_file(
-    file_path: str, new_content: str, create: bool = True, cwd: Optional[str] = None, **_: object
+    ctx: RunContext[Any] = None,
+    file_path: str = "",
+    new_content: str = "",
+    create: bool = True,
+    cwd: Optional[str] = None,
+    **_: object,
 ) -> dict:
     """Overwrite a file with new content.
 

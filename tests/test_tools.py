@@ -191,19 +191,18 @@ async def test_model_tool_call_requests_permission(monkeypatch: pytest.MonkeyPat
 
 
 @pytest.mark.asyncio
-async def test_request_permission_camelcase_path():
-    """Ensure permission is requested via camelCase ACP method (optionId casing)."""
+async def test_request_permission_path():
+    """Ensure permission is requested via the ACP request_permission hook."""
 
     conn = AsyncMock()
     conn.session_update = AsyncMock()
-    conn.requestPermission = AsyncMock(  # type: ignore[attr-defined]
+    conn.request_permission = AsyncMock(
         return_value=RequestPermissionResponse(
             outcome=AllowedOutcome(option_id="allow_once", outcome="selected")
         )
     )
 
     agent = make_function_agent(conn)
-    conn.request_permission = None  # ensure camelCase path is used
     session_id = "camel-session"
     agent._session_modes[session_id] = "ask"
     agent._session_cwds[session_id] = Path.cwd()
@@ -213,4 +212,4 @@ async def test_request_permission_camelcase_path():
     )
 
     assert allowed is True
-    conn.requestPermission.assert_awaited()  # type: ignore[attr-defined]
+    conn.request_permission.assert_awaited()

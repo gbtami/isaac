@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Optional
+from typing import Any, Optional
+
+from pydantic_ai import RunContext
 
 
 def _resolve(base: Optional[str], target: str) -> Path:
@@ -14,7 +16,8 @@ def _resolve(base: Optional[str], target: str) -> Path:
 
 
 async def file_summary(
-    file_path: str,
+    ctx: RunContext[Any] = None,
+    file_path: str = "",
     head_lines: Optional[int] = 20,
     tail_lines: Optional[int] = 20,
     cwd: Optional[str] = None,

@@ -1,6 +1,8 @@
 import os
 from pathlib import Path
-from typing import Callable, Optional
+from typing import Any, Callable, Optional
+
+from pydantic_ai import RunContext
 
 import pathspec  # type: ignore
 
@@ -13,6 +15,7 @@ def _resolve(base: Optional[str], target: str) -> Path:
 
 
 async def list_files(
+    ctx: RunContext[Any] = None,
     directory: str = ".",
     recursive: bool = True,
     cwd: Optional[str] = None,

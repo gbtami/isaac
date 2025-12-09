@@ -28,7 +28,6 @@ from acp import (
     ReadTextFileResponse,
     ReleaseTerminalRequest,
     ReleaseTerminalResponse,
-    RequestPermissionRequest,
     RequestPermissionResponse,
     SetSessionModeResponse,
     SetSessionModelResponse,
@@ -39,12 +38,7 @@ from acp import (
     WriteTextFileResponse,
 )
 from acp.agent.connection import AgentSideConnection
-from acp.helpers import (
-    session_notification,
-    text_block,
-    tool_content,
-    update_agent_message,
-)
+from acp.helpers import session_notification, text_block, tool_content, update_agent_message
 from acp.schema import (
     AgentCapabilities,
     AvailableCommandsUpdate,
@@ -62,9 +56,6 @@ from acp.schema import (
     UserMessageChunk,
 )
 from acp.contrib.tool_calls import ToolCallTracker
-from acp.helpers import plan_entry, update_plan
-from pydantic_ai.messages import FunctionToolCallEvent, FunctionToolResultEvent, RetryPromptPart
-
 from isaac.agent import models as model_registry
 from isaac.agent.agent_terminal import (
     TerminalState,
@@ -75,24 +66,22 @@ from isaac.agent.agent_terminal import (
     wait_for_terminal_exit,
 )
 from isaac.agent.brain.history import build_chat_history
-from isaac.agent.brain.planner import parse_plan_from_text
+from isaac.agent.brain.prompt_strategies import (
+    PromptStrategyManager,
+    StrategyEnv,
+)
 from isaac.agent.constants import TOOL_OUTPUT_LIMIT
 from isaac.agent.default_runners import create_default_runners
 from isaac.agent.fs import read_text_file, write_text_file
 from isaac.agent.mcp_support import build_mcp_toolsets
 from isaac.agent.planner import build_plan_notification, parse_plan_request
-from isaac.agent.prompt_utils import coerce_user_text, extract_prompt_text, is_plan_only_prompt
-from isaac.agent.runner import register_tools, stream_with_runner
+from isaac.agent.prompt_utils import coerce_user_text, extract_prompt_text
+from isaac.agent.runner import register_tools
 from isaac.agent.session_modes import build_mode_state
 from isaac.agent.session_store import SessionStore
 from isaac.agent.slash import available_slash_commands, handle_slash_command
 from isaac.agent.tool_io import await_with_cancel, truncate_text, truncate_tool_output
 from isaac.agent.tools import get_tools, run_tool
-from isaac.agent.tools.run_command import (
-    RunCommandContext,
-    reset_run_command_context,
-    set_run_command_context,
-)
 from isaac.agent.usage import format_usage_summary, normalize_usage
 
 logger = logging.getLogger("acp_server")
@@ -125,6 +114,8 @@ class ACPAgent(Agent):
         self._session_mcp_servers: Dict[str, Any] = {}
         self._session_usage: Dict[str, Any] = {}
         self._session_toolsets: Dict[str, list[Any]] = {}
+        self._session_single_models: Dict[str, Any | None] = {}
+        self._session_prompt_strategies: Dict[str, str] = {}
         self._agent_name = agent_name
         self._agent_title = agent_title
         self._agent_version = agent_version
@@ -139,10 +130,37 @@ class ACPAgent(Agent):
         self._session_last_chunk: Dict[str, str | None] = {}
         self._session_model_errors: Dict[str, str] = {}
         self._session_model_error_notified: set[str] = set()
+        self._delegate_tool_enabled: set[str] = set()
+        self._default_prompt_strategy = "handoff"
+        self._strategy_manager = self._build_strategy_manager()
 
     def on_connect(self, conn: AgentSideConnection) -> None:  # type: ignore[override]
         """Capture connection when wiring via run_agent/connect_to_agent."""
         self._conn = conn
+
+    def _build_strategy_manager(self) -> PromptStrategyManager:
+        env = StrategyEnv(
+            session_modes=self._session_modes,
+            session_last_chunk=self._session_last_chunk,
+            session_strategies=self._session_prompt_strategies,
+            delegate_tool_enabled=self._delegate_tool_enabled,
+            default_strategy=self._default_prompt_strategy,
+            send_update=self._send_update,
+            request_run_permission=lambda session_id,
+            tool_call_id,
+            command,
+            cwd: self._request_run_permission(  # type: ignore[arg-type]
+                session_id=session_id,
+                tool_call_id=tool_call_id,
+                command=command,
+                cwd=cwd,
+            ),
+            refresh_history=lambda session_id: build_chat_history(
+                self._session_history.get(session_id, [])
+            ),
+            set_usage=lambda session_id, usage: self._session_usage.__setitem__(session_id, usage),
+        )
+        return PromptStrategyManager(env)
 
     async def initialize(
         self,
@@ -189,12 +207,9 @@ class ACPAgent(Agent):
         """Return a permission outcome, following Prompt Turn guidance for gated tools."""
         if self._conn is None:
             raise RuntimeError("Connection not established")
-        # Support both snake_case (tests) and camelCase (ACP connection).
         requester = getattr(self._conn, "request_permission", None)
         if requester is None:
-            requester = getattr(self._conn, "requestPermission", None)
-        if requester is None:
-            raise RuntimeError("Connection missing request_permission/requestPermission handler")
+            raise RuntimeError("Connection missing request_permission handler")
         return await requester(options=options, session_id=session_id, tool_call=tool_call)
 
     async def new_session(
@@ -215,10 +230,18 @@ class ACPAgent(Agent):
         toolsets = build_mcp_toolsets(mcp_servers)
         self._session_toolsets[session_id] = toolsets
         await self._init_session_runners(session_id, toolsets)
+        self._delegate_tool_enabled.discard(session_id)
         self._session_history[session_id] = []
         self._session_allowed_commands[session_id] = set()
         self._session_mcp_servers[session_id] = mcp_servers
-        self._persist_session_meta(session_id, cwd_path, mcp_servers, current_mode="ask")
+        self._session_prompt_strategies[session_id] = self._default_prompt_strategy
+        self._persist_session_meta(
+            session_id,
+            cwd_path,
+            mcp_servers,
+            current_mode="ask",
+            prompt_strategy=self._default_prompt_strategy,
+        )
         mode_state = build_mode_state(self._session_modes, session_id, current_mode="ask")
         await self._send_available_commands(session_id)
         return NewSessionResponse(session_id=session_id, modes=mode_state)
@@ -243,14 +266,29 @@ class ACPAgent(Agent):
         toolsets = build_mcp_toolsets(mcp_servers)
         self._session_toolsets[session_id] = toolsets
         await self._init_session_runners(session_id, toolsets)
+        self._delegate_tool_enabled.discard(session_id)
         self._session_history.setdefault(session_id, [])
         self._session_allowed_commands.setdefault(session_id, set())
         self._session_mcp_servers[session_id] = mcp_servers
         mode = stored_meta.get("mode") or self._session_modes.get(session_id, "ask")
         self._session_modes[session_id] = mode
+        strategy = (
+            stored_meta.get("strategy")
+            or self._session_prompt_strategies.get(session_id)
+            or self._default_prompt_strategy
+        )
+        if not self._strategy_manager.is_valid_strategy(strategy):
+            strategy = self._default_prompt_strategy
+        self._session_prompt_strategies[session_id] = strategy
         history = self._load_session_history(session_id)
         self._session_history[session_id].extend(history)
-        self._persist_session_meta(session_id, cwd_path, mcp_servers, current_mode=mode)
+        self._persist_session_meta(
+            session_id,
+            cwd_path,
+            mcp_servers,
+            current_mode=mode,
+            prompt_strategy=strategy,
+        )
         for note in history:
             await self._conn.session_update(session_id=note.session_id, update=note.update)  # type: ignore[arg-type]
         await self._send_available_commands(session_id)
@@ -291,6 +329,9 @@ class ACPAgent(Agent):
             self._session_cwds.get(session_id, Path.cwd()),
             self._session_mcp_servers.get(session_id, []),
             current_mode=mode_id,
+            prompt_strategy=self._session_prompt_strategies.get(
+                session_id, self._default_prompt_strategy
+            ),
         )
         return SetSessionModeResponse()
 
@@ -306,10 +347,21 @@ class ACPAgent(Agent):
                 register_tools,
                 toolsets=toolsets,
             )
+            try:
+                single_agent = model_registry.build_single_agent(
+                    model_id, register_tools, toolsets=toolsets
+                )
+            except Exception as exc:  # noqa: BLE001
+                logger.warning(
+                    "Using executor as fallback single-agent runner after build error: %s", exc
+                )
+                single_agent = executor
             self._session_models[session_id] = executor
             self._session_planners[session_id] = planner
+            self._session_single_models[session_id] = single_agent
             self._session_model_ids[session_id] = model_id
             self._session_model_errors.pop(session_id, None)
+            self._delegate_tool_enabled.discard(session_id)
             with contextlib.suppress(Exception):
                 model_registry.set_current_model(model_id)
         except Exception as exc:  # pragma: no cover - model build errors
@@ -322,6 +374,30 @@ class ACPAgent(Agent):
             )
             raise
         return SetSessionModelResponse()
+
+    def _current_prompt_strategy_id(self, session_id: str) -> str:
+        return self._strategy_manager.current_strategy_id(session_id)
+
+    def describe_prompt_strategies(self, session_id: str) -> str:
+        """Return a human-readable list of available prompt strategies."""
+
+        return self._strategy_manager.describe(session_id)
+
+    async def set_session_prompt_strategy(self, strategy_id: str, session_id: str) -> str:
+        """Update prompt handling strategy for the session."""
+
+        normalized = (strategy_id or "").strip().lower()
+        if not normalized:
+            return "Usage: /strategy <id> (use /strategies to list options)"
+        message = self._strategy_manager.set_strategy(normalized, session_id)
+        self._persist_session_meta(
+            session_id,
+            self._session_cwds.get(session_id, Path.cwd()),
+            self._session_mcp_servers.get(session_id, []),
+            current_mode=self._session_modes.get(session_id, "ask"),
+            prompt_strategy=self._current_prompt_strategy_id(session_id),
+        )
+        return message
 
     async def prompt(
         self,
@@ -363,218 +439,22 @@ class ACPAgent(Agent):
             return PromptResponse(stop_reason="cancelled")
 
         runner = self._session_models.get(session_id) or self._ai_runner
-        planner = (
-            self._session_planners.get(session_id) or self._planning_runner or self._ai_runner
-        )
+        planner = self._session_planners.get(session_id) or self._planning_runner or self._ai_runner
+        single_runner = self._session_single_models.get(session_id) or runner
         if runner is None or planner is None:
             return await self._respond_model_error(
                 session_id, self._session_model_errors.get(session_id)
             )
 
-        # --- Planning phase (programmatic hand-off) ---
-        plan_only = is_plan_only_prompt(prompt_text)
-        plan_chunks: list[str] = []
-
-        async def _plan_chunk(chunk: str) -> None:
-            plan_chunks.append(chunk)
-
-        plan_response, plan_usage = await stream_with_runner(
-            planner,
+        return await self._strategy_manager.run(
+            session_id,
             prompt_text,
-            _plan_chunk,
-            cancel_event,
             history=history,
+            cancel_event=cancel_event,
+            runner=runner,
+            planner=planner,
+            single_runner=single_runner,
         )
-        combined_plan_text = plan_response or "".join(plan_chunks)
-        if combined_plan_text.startswith("Provider error:"):
-            msg = combined_plan_text.removeprefix("Provider error:").strip()
-            await self._send_update(
-                session_notification(
-                    session_id,
-                    update_agent_message(
-                        text_block(f"Model/provider error during planning: {msg}")
-                    ),
-                )
-            )
-            combined_plan_text = ""
-
-        plan_update = parse_plan_from_text(combined_plan_text or "")
-        if not plan_update and combined_plan_text:
-            entries = [plan_entry(combined_plan_text)]
-            plan_update = update_plan(entries)
-        if plan_update:
-            logger.info(
-                "Planning phase produced %s steps for session %s",
-                len(plan_update.entries) if getattr(plan_update, "entries", None) else 0,
-                session_id,
-            )
-            await self._send_update(session_notification(session_id, plan_update))
-            # refresh history so execution sees the plan
-            history = build_chat_history(self._session_history.get(session_id, []))
-        if plan_only:
-            return PromptResponse(stop_reason="end_turn")
-
-        # --- Execution phase ---
-        tool_trackers: Dict[str, ToolCallTracker] = {}
-        run_command_ctx_tokens: Dict[str, Any] = {}
-
-        async def _push_chunk(chunk: str) -> None:
-            last = self._session_last_chunk.get(session_id)
-            if chunk == last:
-                return
-            self._session_last_chunk[session_id] = chunk
-            await self._send_update(
-                session_notification(
-                    session_id,
-                    update_agent_message(text_block(chunk)),
-                )
-            )
-
-        async def _handle_runner_event(event: Any) -> bool:
-            if isinstance(event, FunctionToolCallEvent):
-                tool_name = getattr(event.part, "tool_name", None) or ""
-                raw_args = getattr(event.part, "args", None)
-                args = raw_args if isinstance(raw_args, dict) else {}
-                tracker = ToolCallTracker(id_factory=lambda: event.tool_call_id)
-                tool_trackers[event.tool_call_id] = tracker
-                logger.info(
-                    "LLM requested tool %s session=%s args_keys=%s",
-                    tool_name,
-                    session_id,
-                    sorted(args.keys()) if isinstance(args, dict) else [],
-                )
-                start = tracker.start(
-                    external_id=event.tool_call_id,
-                    title=tool_name,
-                    status="in_progress",
-                    raw_input={"tool": tool_name, **(args if isinstance(args, dict) else {})},
-                )
-                await self._send_update(session_notification(session_id, start))
-                if tool_name == "run_command":
-                    allowed = True
-                    mode = self._session_modes.get(session_id, "ask")
-                    if mode == "ask":
-                        allowed = await self._request_run_permission(
-                            session_id,
-                            tool_call_id=event.tool_call_id,
-                            command=str(args.get("command") if isinstance(args, dict) else "")
-                            if args
-                            else "",
-                            cwd=args.get("cwd") if isinstance(args, dict) else None,
-                        )
-                    if not allowed:
-                        denied = tracker.progress(
-                            external_id=event.tool_call_id,
-                            status="failed",
-                            raw_output={
-                                "tool": tool_name,
-                                "content": None,
-                                "error": "permission denied",
-                            },
-                            content=[
-                                tool_content(text_block("Command blocked: permission denied"))
-                            ],
-                        )
-                        await self._send_update(session_notification(session_id, denied))
-                        return True
-
-                    token = set_run_command_context(
-                        RunCommandContext(request_permission=lambda *_: True)
-                    )
-                    run_command_ctx_tokens[event.tool_call_id] = token
-                return True
-
-            if isinstance(event, FunctionToolResultEvent):
-                token = run_command_ctx_tokens.pop(event.tool_call_id, None)
-                if token is not None:
-                    reset_run_command_context(token)
-                tracker = tool_trackers.pop(event.tool_call_id, None) or ToolCallTracker(
-                    id_factory=lambda: event.tool_call_id
-                )
-                result_part = event.result
-                tool_name = getattr(result_part, "tool_name", None) or ""
-                content = getattr(result_part, "content", None)
-                raw_output: dict[str, Any] = {}
-                if isinstance(content, dict):
-                    raw_output.update(content)
-                else:
-                    raw_output["content"] = content
-                raw_output.setdefault("tool", tool_name)
-                status = "completed"
-                if isinstance(result_part, RetryPromptPart):
-                    raw_output["error"] = result_part.model_response()
-                    status = "failed"
-                else:
-                    raw_output.setdefault("error", None)
-                summary = raw_output.get("error") or raw_output.get("content") or ""
-                logger.info(
-                    "LLM tool result %s session=%s status=%s preview=%s",
-                    tool_name,
-                    session_id,
-                    status,
-                    str(summary)[:160].replace("\n", "\\n"),
-                )
-                progress = tracker.progress(
-                    external_id=event.tool_call_id,
-                    status=status,
-                    raw_output=raw_output,
-                    content=[tool_content(text_block(str(summary)))] if summary else None,
-                )
-                await self._send_update(session_notification(session_id, progress))
-                return True
-
-            return False
-
-        executor_prompt = prompt_text
-        plan_lines = [getattr(e, "content", "") for e in getattr(plan_update, "entries", []) or []]
-        if plan_lines:
-            plan_block = "\n".join(f"- {line}" for line in plan_lines if line)
-            executor_prompt = (
-                f"{prompt_text}\n\nPlan:\n{plan_block}\n\n"
-                "Execute this plan now. Use tools to make progress and report results."
-            )
-        elif plan_response:
-            executor_prompt = (
-                f"{prompt_text}\n\nPlan:\n{plan_response}\n\n"
-                "Execute this plan now. Use tools to make progress and report results."
-            )
-
-        response_text, usage = await stream_with_runner(
-            runner,
-            executor_prompt,
-            _push_chunk,
-            cancel_event,
-            history=history,
-            on_event=_handle_runner_event,
-        )
-        if response_text is None:
-            return PromptResponse(stop_reason="cancelled")
-        if response_text.startswith("Provider error:"):
-            msg = response_text.removeprefix("Provider error:").strip()
-            await self._send_update(
-                session_notification(
-                    session_id,
-                    update_agent_message(text_block(f"Model/provider error: {msg}")),
-                )
-            )
-            return PromptResponse(stop_reason="end_turn")
-        # If nothing was streamed (e.g., fallback runner), ensure the response is sent once.
-        exec_plan_update = None
-        if not plan_update and not plan_response:
-            exec_plan_update = parse_plan_from_text(response_text or "")
-        if exec_plan_update:
-            logger.info(
-                "Parsed plan from model text for session %s entries=%s",
-                session_id,
-                len(exec_plan_update.entries) if getattr(exec_plan_update, "entries", None) else 0,
-            )
-            await self._send_update(session_notification(session_id, exec_plan_update))
-        # If nothing was streamed (e.g., fallback runner), ensure the response is sent once.
-        if not response_text:
-            await _push_chunk(response_text)
-        combined_usage = normalize_usage(usage) or normalize_usage(plan_usage)
-        self._session_usage[session_id] = combined_usage
-        return PromptResponse(stop_reason="end_turn")
 
     async def cancel(self, session_id: str, **_: Any) -> None:
         """Stop in-flight prompt/tool work for a session (Prompt Turn cancellation)."""
@@ -909,15 +789,9 @@ class ACPAgent(Agent):
         self._record_update(note)
         if self._conn is None:
             raise RuntimeError("Connection not established")
-        # Support both snake_case (tests) and camelCase (ACP connection).
         sender = getattr(self._conn, "session_update", None)
         if sender is None:
-            sender = getattr(self._conn, "sessionUpdate", None)
-            if sender is not None:
-                await sender(note)
-                return
-        if sender is None:
-            raise RuntimeError("Connection missing session_update/sessionUpdate handler")
+            raise RuntimeError("Connection missing session_update handler")
         await sender(session_id=note.session_id, update=note.update)
 
     def _record_update(self, note: SessionNotification) -> None:
@@ -953,10 +827,19 @@ class ACPAgent(Agent):
             if self._custom_runners:
                 executor = self._ai_runner
                 planner = self._planning_runner or self._ai_runner
+                single_agent = self._ai_runner
             else:
                 executor, planner = create_default_runners(toolsets)
+                try:
+                    single_agent = model_registry.build_single_agent(
+                        self._current_model_id(), register_tools, toolsets=toolsets
+                    )
+                except Exception as exc:
+                    logger.warning("Falling back to executor for single-agent runner: %s", exc)
+                    single_agent = executor
             self._session_models[session_id] = executor
             self._session_planners[session_id] = planner
+            self._session_single_models[session_id] = single_agent
             self._session_model_ids[session_id] = self._current_model_id()
             self._session_model_errors.pop(session_id, None)
             self._session_model_error_notified.discard(session_id)
@@ -965,6 +848,7 @@ class ACPAgent(Agent):
             logger.error("Failed to build model for session %s: %s", session_id, exc)
             self._session_models[session_id] = None
             self._session_planners[session_id] = None
+            self._session_single_models[session_id] = None
             self._session_model_errors[session_id] = msg
             self._session_model_error_notified.add(session_id)
             await self._send_update(
@@ -1011,9 +895,13 @@ class ACPAgent(Agent):
         mcp_servers: list[Any] | None,
         *,
         current_mode: str,
+        prompt_strategy: str | None = None,
     ) -> None:
+        strategy = prompt_strategy or self._session_prompt_strategies.get(
+            session_id, self._default_prompt_strategy
+        )
         self._session_store.persist_meta(
-            session_id, cwd, mcp_servers or [], current_mode=current_mode
+            session_id, cwd, mcp_servers or [], current_mode=current_mode, strategy=strategy
         )
 
     def _load_session_meta(self, session_id: str) -> dict[str, Any]:
@@ -1094,20 +982,10 @@ class ACPAgent(Agent):
             )
             requester = getattr(self._conn, "request_permission", None)
             if requester is None:
-                requester = getattr(self._conn, "requestPermission", None)
-                if requester is not None:
-                    req = RequestPermissionRequest(
-                        options=options,
-                        sessionId=session_id,
-                        toolCall=tool_call_update,
-                    )
-                    resp = await requester(req)
-                else:
-                    raise RuntimeError("Connection missing request_permission/requestPermission")
-            else:
-                resp = await requester(
-                    options=options, session_id=session_id, tool_call=tool_call_update
-                )
+                raise RuntimeError("Connection missing request_permission handler")
+            resp = await requester(
+                options=options, session_id=session_id, tool_call=tool_call_update
+            )
             outcome = getattr(resp, "outcome", None)
             option_id = ""
             if outcome is not None:

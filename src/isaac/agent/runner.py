@@ -3,8 +3,11 @@
 from __future__ import annotations
 
 import asyncio
+import inspect
 import logging
 from typing import Any, Callable
+
+from pydantic_ai import RunContext
 
 from pydantic_ai.messages import PartDeltaEvent, PartEndEvent  # type: ignore
 from pydantic_ai.run import AgentRunResultEvent  # type: ignore
@@ -21,18 +24,27 @@ def register_tools(agent: Any) -> None:
             handler = TOOL_HANDLERS.get(fn_name)
 
             if handler:
-                try:
-                    toolset = getattr(agent, "_function_toolset", None)
-                    if toolset is not None:
-                        toolset.add_function(handler, name=fn_name, takes_ctx=False)
-                        return
-                except Exception:
-                    logger.debug("Falling back to decorator registration for %s", fn_name)
-                return agent.tool(name=fn_name)(handler)  # type: ignore[misc]
 
-            async def _wrapper(**kwargs: Any) -> Any:
+                async def _adapter(ctx: RunContext[Any] = None, **kwargs: Any) -> Any:
+                    sig = inspect.signature(handler)
+                    allowed_keys = set(sig.parameters.keys())
+                    call_kwargs = {k: v for k, v in kwargs.items() if k in allowed_keys}
+                    for name, param in sig.parameters.items():
+                        if name in call_kwargs:
+                            continue
+                        if name == "ctx":
+                            call_kwargs[name] = ctx
+                        elif param.default is not inspect._empty:
+                            call_kwargs[name] = param.default
+                        else:
+                            call_kwargs[name] = None
+                    return await handler(**call_kwargs)
+
+                return agent.tool(name=fn_name)(_adapter)  # type: ignore[misc]
+
+            async def _wrapper(ctx: RunContext[Any] = None, **kwargs: Any) -> Any:
                 logger.info("Pydantic tool invoked: %s args=%s", fn_name, sorted(kwargs))
-                return await run_tool(fn_name, **kwargs)
+                return await run_tool(fn_name, ctx=ctx, **kwargs)
 
             return agent.tool(name=fn_name)(_wrapper)  # type: ignore[misc]
 
@@ -72,11 +84,14 @@ async def stream_with_runner(
 
             handled = False
             if on_event is not None:
-                try:
+                if asyncio.iscoroutinefunction(on_event):
                     handled = bool(await on_event(event))
-                except TypeError:
-                    # Support non-awaitable callbacks
-                    handled = bool(on_event(event))
+                else:
+                    maybe = on_event(event)
+                    if inspect.isawaitable(maybe):
+                        handled = bool(await maybe)
+                    else:
+                        handled = bool(maybe)
 
             if handled:
                 continue

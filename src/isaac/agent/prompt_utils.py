@@ -1,4 +1,4 @@
-"""Utilities for working with prompt blocks and plan-only hints."""
+"""Utilities for working with prompt blocks."""
 
 from __future__ import annotations
 
@@ -42,19 +42,3 @@ def coerce_user_text(block: Any) -> str | None:
         if isinstance(text, str):
             return text
     return None
-
-
-def is_plan_only_prompt(prompt_text: str) -> bool:
-    """Heuristic to avoid executing when the user explicitly asked for a plan only."""
-
-    lowered = prompt_text.lower()
-    if lowered.startswith("plan:"):
-        return True
-    plan_only_markers = [
-        "plan only",
-        "only a plan",
-        "just a plan",
-        "just planning",
-        "planning only",
-    ]
-    return any(marker in lowered for marker in plan_only_markers)

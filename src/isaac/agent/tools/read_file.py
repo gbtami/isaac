@@ -1,5 +1,7 @@
-from typing import Optional
+from typing import Any, Optional
+
 from pathlib import Path
+from pydantic_ai import RunContext
 
 
 def _resolve(base: Optional[str], target: str) -> Path:
@@ -10,7 +12,8 @@ def _resolve(base: Optional[str], target: str) -> Path:
 
 
 async def read_file(
-    file_path: str,
+    ctx: RunContext[Any] = None,
+    file_path: str = "",
     start_line: Optional[int] = None,
     num_lines: Optional[int] = None,
     cwd: Optional[str] = None,

@@ -5,7 +5,9 @@ from __future__ import annotations
 import asyncio
 import tempfile
 from pathlib import Path
-from typing import Optional
+from typing import Any, Optional
+
+from pydantic_ai import RunContext
 
 
 def _resolve(base: Optional[str], target: str) -> Path:
@@ -16,7 +18,11 @@ def _resolve(base: Optional[str], target: str) -> Path:
 
 
 async def apply_patch(
-    file_path: str, patch: str, strip: Optional[int] = None, cwd: Optional[str] = None
+    ctx: RunContext[Any] = None,
+    file_path: str = "",
+    patch: str = "",
+    strip: Optional[int] = None,
+    cwd: Optional[str] = None,
 ) -> dict:
     """Apply a unified diff patch to a file using the `patch` command."""
     path = _resolve(cwd, file_path)

@@ -1,7 +1,9 @@
 import asyncio
 import contextvars
 from dataclasses import dataclass
-from typing import Awaitable, Callable, Optional
+from typing import Any, Awaitable, Callable, Optional
+
+from pydantic_ai import RunContext
 
 
 @dataclass
@@ -35,9 +37,15 @@ def get_run_command_context() -> RunCommandContext | None:
 
 
 async def run_command(
-    command: str, cwd: Optional[str] = None, timeout: Optional[float] = None
+    ctx: RunContext[Any] = None,
+    command: str = "",
+    cwd: Optional[str] = None,
+    timeout: Optional[float] = None,
 ) -> dict:
     """Execute a shell command and capture its output."""
+    if command == "" and isinstance(ctx, str):
+        command = ctx
+        ctx = None
     ctx = get_run_command_context()
     if ctx:
         allowed = await ctx.request_permission(command, cwd)

@@ -24,6 +24,11 @@ This project uses `uv` for environment and project management.
 - Types: `uv run mypy src tests`
 - Tests: `uv run pytest`
 
+## Tooling (pydantic-ai)
+- All tool functions must take `RunContext[...]` as the first argument; registration uses the public `Agent.tool` decorator (no private attributes).
+- `register_tools` in `src/isaac/agent/runner.py` wraps handlers so they bind `ctx` automatically and filter unexpected args.
+- Required tool args are enforced in `run_tool`; missing args return an error instead of calling the handler.
+
 ## Code Structure (responsibilities)
 - `src/isaac/agent/` — ACP agent implementation (session lifecycle, prompt handling, tool calls, filesystem/terminal endpoints, slash commands, model registry). Key files:
   - `acp_agent.py`: ACP-facing agent; wiring for sessions, prompts, tools, slash commands, and notifications.

@@ -48,6 +48,16 @@ READ_ONLY_TOOLS = {
     "code_search",
 }
 
+TOOL_REQUIRED_ARGS: Dict[str, list[str]] = {
+    "list_files": ["directory"],
+    "read_file": ["file_path"],
+    "run_command": ["command"],
+    "edit_file": ["file_path", "new_content"],
+    "apply_patch": ["file_path", "patch"],
+    "code_search": ["pattern", "directory"],
+    "file_summary": ["file_path"],
+}
+
 
 def get_tools() -> List[Any]:
     """Return ACP tool descriptions (with graceful fallback when schema lacks Tool)."""
@@ -167,10 +177,19 @@ def get_tools() -> List[Any]:
     return base_tools
 
 
-async def run_tool(function_name: str, **kwargs: Any) -> dict:
+async def run_tool(function_name: str, ctx: Any | None = None, **kwargs: Any) -> dict:
     handler = TOOL_HANDLERS.get(function_name)
     if not handler:
         return {"content": None, "error": f"Unknown tool function: {function_name}"}
+    required = TOOL_REQUIRED_ARGS.get(function_name, [])
+    missing_required = [
+        name for name in required if name not in kwargs or kwargs[name] in ("", None)
+    ]
+    if missing_required:
+        return {
+            "content": None,
+            "error": f"Missing required arguments: {', '.join(missing_required)}",
+        }
     try:
         import inspect
 
@@ -191,14 +210,18 @@ async def run_tool(function_name: str, **kwargs: Any) -> dict:
     except Exception:  # pragma: no cover - best effort validation
         pass
     try:
-        return await handler(**kwargs)
+        call_kwargs = dict(kwargs)
+        sig = inspect.signature(handler)
+        if "ctx" in sig.parameters:
+            call_kwargs["ctx"] = ctx
+        return await handler(**call_kwargs)
     except Exception as exc:
         # Drop unexpected args (e.g., from LLM hallucinations) and retry once
         try:
             import inspect
 
             sig = inspect.signature(handler)
-            filtered = {k: v for k, v in kwargs.items() if k in sig.parameters}
+            filtered = {k: v for k, v in {**kwargs, "ctx": ctx}.items() if k in sig.parameters}
             return await handler(**filtered)
         except Exception:
             return {"content": None, "error": str(exc)}
@@ -211,8 +234,8 @@ def register_readonly_tools(agent: Any) -> None:
 
         def _make_tool(fn_name: str):
             @agent.tool_plain(name=fn_name)  # type: ignore[misc]
-            async def _wrapper(**kwargs: Any) -> Any:
-                return await run_tool(fn_name, **kwargs)
+            async def _wrapper(ctx: Any | None = None, **kwargs: Any) -> Any:
+                return await run_tool(fn_name, ctx=ctx, **kwargs)
 
             return _wrapper
 
