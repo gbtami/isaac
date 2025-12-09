@@ -816,8 +816,7 @@ class ACPAgent(Agent):
             self._record_update(SessionNotification(session_id=session_id, update=chunk))
 
     def _current_model_id(self) -> str:
-        cfg = model_registry.load_models_config()
-        return cfg.get("current", "test")
+        return model_registry.current_model_id()
 
     async def _init_session_runners(
         self, session_id: str, toolsets: list[Any] | None = None

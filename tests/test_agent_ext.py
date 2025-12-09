@@ -86,8 +86,7 @@ async def test_ext_methods_list_and_set(monkeypatch, tmp_path: Path):
         {"session_id": session.session_id, "model_id": target_id},
     )
     assert resp.get("current") == target_id
-    cfg = model_registry.load_models_config()
-    assert cfg.get("current") == target_id
+    assert model_registry.current_model_id() == target_id
 
 
 @pytest.mark.asyncio

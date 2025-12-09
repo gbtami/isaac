@@ -11,7 +11,6 @@ from isaac.agent.runner import register_tools
 def create_default_runners(toolsets: list[Any] | None = None) -> Tuple[Any, Any]:
     """Build executor/planner runners or let exceptions surface."""
 
-    config = model_registry.load_models_config()
-    current = config.get("current", "test")
+    current = model_registry.current_model_id()
     # Let build_agent_pair raise if misconfigured; callers surface the failure.
     return model_registry.build_agent_pair(current, register_tools, toolsets=toolsets or [])

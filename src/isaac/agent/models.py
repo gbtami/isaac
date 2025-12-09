@@ -10,6 +10,7 @@ import json
 import logging
 import os
 import urllib.request
+import configparser
 from pathlib import Path
 from typing import Any, Callable, Dict
 
@@ -38,8 +39,10 @@ OLLAMA_BASE_URL = "http://localhost:11434/v1"
 
 FUNCTION_MODEL_ID = "function:function"
 HIDDEN_MODELS = {FUNCTION_MODEL_ID}
+DEFAULT_MODEL_PROVIDER = "function"
+DEFAULT_MODEL_NAME = "function"
+DEFAULT_MODEL_ID = f"{DEFAULT_MODEL_PROVIDER}:{DEFAULT_MODEL_NAME}"
 DEFAULT_CONFIG = {
-    "current": FUNCTION_MODEL_ID,
     "models": {
         FUNCTION_MODEL_ID: {
             "provider": "function",
@@ -93,44 +96,40 @@ CONFIG_DIR = Path(os.getenv("XDG_CONFIG_HOME") or (Path.home() / ".config")) / "
 CONFIG_DIR.mkdir(parents=True, exist_ok=True)
 
 MODELS_FILE = CONFIG_DIR / "models.json"
+SETTINGS_FILE = CONFIG_DIR / "isaac.ini"
 MODELS_DEV_URL = "https://models.dev/api.json"
 
 
 def load_models_config() -> Dict[str, Any]:
-    created = False
     if not MODELS_FILE.exists():
-        # Deep copy to avoid mutating defaults
         config = json.loads(json.dumps(DEFAULT_CONFIG))
         _apply_context_limits(config)
         MODELS_FILE.write_text(json.dumps(config, indent=2), encoding="utf-8")
-        created = True
     else:
         try:
             config = json.loads(MODELS_FILE.read_text(encoding="utf-8"))
         except Exception:
             config = json.loads(json.dumps(DEFAULT_CONFIG))
-    dirty = False
+
     # Backfill missing defaults
+    config.setdefault("models", {})
     for key, value in DEFAULT_CONFIG["models"].items():
-        config.setdefault("models", {})
-        if key not in config["models"]:
-            config["models"][key] = value
-            dirty = True
+        config["models"].setdefault(key, value)
+
     # Ensure function model stays safe for testing (no auto tool calls)
     fn_model = config["models"].get(FUNCTION_MODEL_ID, {})
-    if fn_model.get("provider") != "function":
-        fn_model["provider"] = "function"
-        dirty = True
-    if fn_model.get("model") != "function":
-        fn_model["model"] = "function"
-        dirty = True
+    fn_model["provider"] = "function"
+    fn_model["model"] = "function"
     fn_model.setdefault("description", DEFAULT_CONFIG["models"][FUNCTION_MODEL_ID]["description"])
     config["models"][FUNCTION_MODEL_ID] = fn_model
 
-    config.setdefault("current", DEFAULT_CONFIG["current"])
-    if dirty and not created:
-        save_models_config(config)
     return config
+
+
+def current_model_id() -> str:
+    """Return the persisted current model id."""
+
+    return _load_current_model()
 
 
 def save_models_config(config: Dict[str, Any]) -> None:
@@ -147,13 +146,38 @@ def list_user_models() -> Dict[str, Any]:
 
 
 def set_current_model(model_id: str) -> str:
-    config = load_models_config()
-    models_cfg = config.get("models", {})
+    models_cfg = list_models()
     if model_id not in models_cfg:
         raise ValueError(f"Unknown model id: {model_id}")
-    config["current"] = model_id
-    save_models_config(config)
+    _save_current_model(model_id)
     return model_id
+
+
+def _load_current_model() -> str:
+    """Read the persisted current model selection from ini (or default)."""
+
+    parser = configparser.ConfigParser()
+    if SETTINGS_FILE.exists():
+        try:
+            parser.read(SETTINGS_FILE)
+            current = parser.get("models", "current_model", fallback=None)
+            if current:
+                return current
+        except Exception:  # pragma: no cover - best effort load
+            pass
+    return DEFAULT_MODEL_ID
+
+
+def _save_current_model(model_id: str) -> None:
+    """Persist the current model selection separately from models.json."""
+
+    parser = configparser.ConfigParser()
+    parser["models"] = {"current_model": model_id}
+    try:
+        with SETTINGS_FILE.open("w", encoding="utf-8") as f:
+            parser.write(f)
+    except Exception:  # pragma: no cover - best effort persistence
+        pass
 
 
 def get_context_limit(model_id: str) -> int | None:
