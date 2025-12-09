@@ -17,11 +17,13 @@ from dotenv import load_dotenv
 from pydantic_ai import Agent as PydanticAgent  # type: ignore
 from pydantic_ai.models.anthropic import AnthropicModel, AnthropicModelSettings  # type: ignore
 from pydantic_ai.models.google import GoogleModel, GoogleModelSettings  # type: ignore
+from pydantic_ai.models.mistral import MistralModel  # type: ignore
 from pydantic_ai.models.openai import OpenAIChatModel  # type: ignore
 from pydantic_ai.models.openrouter import OpenRouterModel, OpenRouterModelSettings  # type: ignore
 from pydantic_ai.models.test import TestModel  # type: ignore
 from pydantic_ai.providers.anthropic import AnthropicProvider  # type: ignore
 from pydantic_ai.providers.google import GoogleProvider  # type: ignore
+from pydantic_ai.providers.mistral import MistralProvider  # type: ignore
 from pydantic_ai.providers.ollama import OllamaProvider  # type: ignore
 from pydantic_ai.providers.openai import OpenAIProvider  # type: ignore
 from pydantic_ai.providers.openrouter import OpenRouterProvider  # type: ignore
@@ -68,6 +70,11 @@ DEFAULT_CONFIG = {
             "provider": "openrouter",
             "model": "openai/gpt-oss-120b",
             "description": "OpenRouter proxy for openai/gpt-oss-120b",
+        },
+        "mistral:devstral-medium-latest": {
+            "provider": "mistral",
+            "model": "devstral-medium-latest",
+            "description": "Mistral DevStral Medium (latest)",
         },
         "ollama:hhao/qwen2.5-coder-tools:3b": {
             "provider": "ollama",
@@ -211,6 +218,13 @@ def _build_provider_model(model_id: str, model_entry: Dict[str, Any]) -> Any:
             anthropic_thinking={"type": "enabled", "budget_tokens": 512}
         )
         return AnthropicModel(model_spec, provider=provider_obj), settings
+
+    if provider == "mistral":
+        key = api_key or os.getenv("MISTRAL_API_KEY")
+        if not key:
+            raise RuntimeError("MISTRAL_API_KEY is required for mistral models")
+        provider_obj = MistralProvider(api_key=key)
+        return MistralModel(model_spec, provider=provider_obj), None
 
     if provider == "google":
         key = api_key or os.getenv("GOOGLE_API_KEY")
