@@ -21,27 +21,6 @@ def register_tools(agent: Any) -> None:
     for name in TOOL_HANDLERS.keys():
 
         def _make_tool(fn_name: str):
-            handler = TOOL_HANDLERS.get(fn_name)
-
-            if handler:
-
-                async def _adapter(ctx: RunContext[Any] = None, **kwargs: Any) -> Any:
-                    sig = inspect.signature(handler)
-                    allowed_keys = set(sig.parameters.keys())
-                    call_kwargs = {k: v for k, v in kwargs.items() if k in allowed_keys}
-                    for name, param in sig.parameters.items():
-                        if name in call_kwargs:
-                            continue
-                        if name == "ctx":
-                            call_kwargs[name] = ctx
-                        elif param.default is not inspect._empty:
-                            call_kwargs[name] = param.default
-                        else:
-                            call_kwargs[name] = None
-                    return await handler(**call_kwargs)
-
-                return agent.tool(name=fn_name)(_adapter)  # type: ignore[misc]
-
             async def _wrapper(ctx: RunContext[Any] = None, **kwargs: Any) -> Any:
                 logger.info("Pydantic tool invoked: %s args=%s", fn_name, sorted(kwargs))
                 return await run_tool(fn_name, ctx=ctx, **kwargs)

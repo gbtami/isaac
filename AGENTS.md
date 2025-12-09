@@ -31,15 +31,19 @@ This project uses `uv` for environment and project management.
 
 ## Code Structure (responsibilities)
 - `src/isaac/agent/` — ACP agent implementation (session lifecycle, prompt handling, tool calls, filesystem/terminal endpoints, slash commands, model registry). Key files:
-  - `acp_agent.py`: ACP-facing agent; wiring for sessions, prompts, tools, slash commands, and notifications.
-  - `slash.py`: Server-side slash command registry/handlers (`/log`, `/model`, `/models`, `/usage`).
-  - `models.py`: Model registry/config loader, builds executor/planner agents.
+  - `acp_agent.py`: ACP-facing agent; wiring for sessions, prompts, tools, slash commands, notifications, and prompt strategy manager.
+  - `brain/prompt_strategies.py`: Pluggable prompt strategies (handoff/delegation/single/plan-only) plus the manager used by `ACPAgent`.
+  - `brain/planning_agent.py`: Planner model builder for plan-first flows.
+  - `brain/planner.py`: Plan parsing utilities for converting model text to ACP plan updates.
+  - `models.py`: Model registry/config loader; builds executor/planner agents and single-agent runner.
   - `default_runners.py`: Safe fallback runners when model config fails.
-  - `tools/`: Local tool implementations plus registry (`TOOL_HANDLERS`).
-  - `runner.py`: Registers tools with pydantic-ai models and runs prompts with streaming events.
+  - `tools/`: Local tool implementations plus registry (`TOOL_HANDLERS`, `TOOL_REQUIRED_ARGS`).
+  - `runner.py`: Registers tools with pydantic-ai models and streams prompts/events to ACP updates.
+  - `prompt_utils.py`: Helpers for extracting user text blocks.
+  - `slash.py`: Server-side slash command registry/handlers (`/log`, `/model`, `/models`, `/usage`, `/strategy`).
 - `src/isaac/client/` — ACP client REPL example. Key files:
   - `repl.py`: Interactive loop and prompt submission; delegates slash commands to `client/slash.py`.
   - `slash.py`: Client-side slash command registry/handlers (local-only commands) and help rendering; forwards unknown/agent commands.
   - `acp_client.py`: ACP client implementation; handles session updates (mode changes, available commands, tool updates, agent messages).
-  - `session_state.py`: Shared REPL/UI state.
-  - `display.py`, `status_box.py`, `thinking.py`: Rendering helpers.
+  - `session_state.py`: Shared REPL/UI state including current prompt strategy.
+  - `status_box.py`, `display.py`, `thinking.py`: Rendering helpers for status, text, and thinking traces.

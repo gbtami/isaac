@@ -29,7 +29,11 @@ async def edit_file(
         new_content: Complete replacement content for the file.
         create: Whether to create the file if it does not exist.
     """
+    if not file_path:
+        return {"content": None, "error": "Missing required arguments: file_path", "returncode": -1}
     path = _resolve(cwd, file_path)
+    if path.exists() and path.is_dir():
+        return {"content": None, "error": f"Path '{file_path}' is a directory", "returncode": -1}
     old_text = ""
     if path.exists():
         try:

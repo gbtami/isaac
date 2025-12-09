@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import inspect
 from dataclasses import dataclass
 from typing import Any, Awaitable, Callable, Dict, List
 
@@ -95,12 +96,18 @@ def get_tools() -> List[Any]:
         ),
         Tool(
             function="run_command",
-            description="Execute a shell command and return its output",
+            description="Execute a shell command and return its output (include the full command string).",
             parameters=ToolParameter(
                 type="object",
                 properties={
-                    "command": {"type": "string", "description": "Command to run"},
-                    "cwd": {"type": "string", "description": "Working directory"},
+                    "command": {
+                        "type": "string",
+                        "description": "Command to run (do not leave blank).",
+                    },
+                    "cwd": {
+                        "type": "string",
+                        "description": "Working directory (optional; defaults to session cwd)",
+                    },
                     "timeout": {"type": "number", "description": "Timeout in seconds"},
                 },
                 required=["command"],
@@ -108,13 +115,22 @@ def get_tools() -> List[Any]:
         ),
         Tool(
             function="edit_file",
-            description="Replace the contents of a file",
+            description="Replace the contents of a file (requires a file_path and new_content; file_path must not be a directory).",
             parameters=ToolParameter(
                 type="object",
                 properties={
-                    "file_path": {"type": "string", "description": "Path to the file to edit"},
-                    "new_content": {"type": "string", "description": "New content to write"},
-                    "create": {"type": "boolean", "description": "Create file if missing"},
+                    "file_path": {
+                        "type": "string",
+                        "description": "Path to the file to edit (relative paths are allowed).",
+                    },
+                    "new_content": {
+                        "type": "string",
+                        "description": "New content to write into the file.",
+                    },
+                    "create": {
+                        "type": "boolean",
+                        "description": "Create the file if it does not exist (default: true).",
+                    },
                 },
                 required=["file_path", "new_content"],
             ),
@@ -181,45 +197,38 @@ async def run_tool(function_name: str, ctx: Any | None = None, **kwargs: Any) ->
     handler = TOOL_HANDLERS.get(function_name)
     if not handler:
         return {"content": None, "error": f"Unknown tool function: {function_name}"}
-    required = TOOL_REQUIRED_ARGS.get(function_name, [])
-    missing_required = [
-        name for name in required if name not in kwargs or kwargs[name] in ("", None)
-    ]
-    if missing_required:
-        return {
-            "content": None,
-            "error": f"Missing required arguments: {', '.join(missing_required)}",
-        }
+    provided_keys = set(kwargs.keys())
+    call_kwargs = dict(kwargs)
     try:
-        import inspect
-
-        sig = inspect.signature(handler)
-        missing = [
-            name
-            for name, param in sig.parameters.items()
-            if param.default is inspect._empty
-            and param.kind
-            in (inspect.Parameter.POSITIONAL_OR_KEYWORD, inspect.Parameter.KEYWORD_ONLY)
-            and name not in kwargs
-        ]
-        if missing:
-            return {
-                "content": None,
-                "error": f"Missing required arguments: {', '.join(missing)}",
-            }
-    except Exception:  # pragma: no cover - best effort validation
-        pass
-    try:
-        call_kwargs = dict(kwargs)
         sig = inspect.signature(handler)
         if "ctx" in sig.parameters:
+            call_kwargs.setdefault("ctx", ctx)
+        for name, param in sig.parameters.items():
+            if name in call_kwargs:
+                continue
+            if param.default is not inspect._empty:
+                call_kwargs[name] = param.default
+            elif name != "ctx":
+                call_kwargs[name] = "" if param.annotation is str or name == "command" else None
+    except Exception:  # pragma: no cover - best effort filling
+        if "ctx" not in call_kwargs:
             call_kwargs["ctx"] = ctx
-        return await handler(**call_kwargs)
+    required = TOOL_REQUIRED_ARGS.get(function_name, [])
+    if function_name != "run_command":
+        missing_required = [
+            name for name in required if name not in provided_keys or kwargs.get(name) in ("", None)
+        ]
+        if missing_required:
+            return {
+                "content": None,
+                "error": f"Missing required arguments: {', '.join(missing_required)}",
+            }
+    try:
+        filtered_kwargs = {k: v for k, v in call_kwargs.items() if k in sig.parameters}
+        return await handler(**filtered_kwargs)
     except Exception as exc:
         # Drop unexpected args (e.g., from LLM hallucinations) and retry once
         try:
-            import inspect
-
             sig = inspect.signature(handler)
             filtered = {k: v for k, v in {**kwargs, "ctx": ctx}.items() if k in sig.parameters}
             return await handler(**filtered)

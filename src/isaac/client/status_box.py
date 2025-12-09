@@ -9,6 +9,7 @@ def render_status_box(state: SessionUIState) -> str:
     lines: list[str] = []
     lines.append(f"Mode: {state.current_mode or 'unknown'}")
     lines.append(f"Model: {state.current_model or 'unknown'}")
+    lines.append(f"Strategy: {state.prompt_strategy or 'handoff'}")
     if state.mcp_servers:
         for srv in state.mcp_servers:
             lines.append(f"MCP: {srv}")
