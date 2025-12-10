@@ -237,6 +237,7 @@ def _set_log_level(level: str) -> str:
     logging.getLogger().setLevel(target_level)
     for name in (
         "acp_server",
+        "isaac.llm",
         "pydantic_ai",
         "pydantic_ai.providers",
         "httpx",

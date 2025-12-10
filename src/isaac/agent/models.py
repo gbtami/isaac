@@ -262,6 +262,7 @@ def _build_provider_model(model_id: str, model_entry: Dict[str, Any]) -> Any:
         return OpenRouterModel(model_spec, provider=provider_obj), settings
 
     if provider == "ollama":
+        # Force JSON mode so local models emit parseable tool payloads.
         provider_obj = OllamaProvider(base_url=OLLAMA_BASE_URL)
         return OpenAIChatModel(model_spec, provider=provider_obj), None
 

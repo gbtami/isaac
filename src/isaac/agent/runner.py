@@ -44,7 +44,9 @@ async def stream_with_runner(
     `on_event` lets callers react to tool call events (used to emit ACP tool updates).
     """
     stream_logger = logging.getLogger("acp_server")
+    llm_logger = logging.getLogger("isaac.llm")
     stream_logger.info("LLM stream start prompt_preview=%s", prompt_text[:200])
+    llm_logger.info("SEND prompt\n%s", prompt_text)
     cancel_event = cancel_event or asyncio.Event()
 
     output_parts: list[str] = []
@@ -78,6 +80,7 @@ async def stream_with_runner(
             if isinstance(event, str):
                 output_parts.append(event)
                 stream_logger.info("LLM text chunk=%s", event[:200].replace("\n", "\\n"))
+                llm_logger.info("RECV text chunk\n%s", event)
                 await on_text(event)
                 continue
             if isinstance(event, PartDeltaEvent):
@@ -85,6 +88,7 @@ async def stream_with_runner(
                 if delta:
                     output_parts.append(delta)
                     stream_logger.info("LLM delta=%s", delta[:200].replace("\n", "\\n"))
+                    llm_logger.info("RECV delta\n%s", delta)
                     await on_text(delta)
             elif isinstance(event, PartEndEvent):
                 kind = getattr(event.part, "part_kind", "")
@@ -98,6 +102,7 @@ async def stream_with_runner(
                 if part and not output_parts:
                     output_parts.append(part)
                     stream_logger.info("LLM part_end=%s", str(part)[:200].replace("\n", "\\n"))
+                    llm_logger.info("RECV part_end\n%s", part)
                     await on_text(part)
             elif isinstance(event, AgentRunResultEvent):
                 result = getattr(event, "result", None)
@@ -105,9 +110,11 @@ async def stream_with_runner(
                     full = getattr(result, "output")
                     usage = getattr(result, "usage", None)
                     stream_logger.info("LLM final output=%s", str(full)[:200].replace("\n", "\\n"))
+                    llm_logger.info("RECV final output\n%s", full)
                     return str(full), usage
     except Exception as exc:  # pragma: no cover - provider errors
         stream_logger.warning("LLM stream error: %s", exc)
+        llm_logger.warning("LLM stream error: %s", exc)
         return f"Provider error: {exc}", None
 
     return ("".join(output_parts) or None), usage
