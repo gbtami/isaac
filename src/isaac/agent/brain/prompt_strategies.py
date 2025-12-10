@@ -41,6 +41,7 @@ class PromptContext:
     planner: Any
     single_runner: Any | None
     strategy_has_planning: bool
+    store_model_messages: Callable[[Any], None]
 
 
 @dataclass
@@ -145,6 +146,7 @@ class PromptStrategyManager:
         runner: Any,
         planner: Any,
         single_runner: Any | None,
+        store_model_messages: Callable[[Any], None],
     ) -> Any:
         strategy_id = self.current_strategy_id(session_id)
         strategy = self._strategies.get(strategy_id) or self._strategies[self.env.default_strategy]
@@ -157,6 +159,7 @@ class PromptStrategyManager:
             planner=planner,
             single_runner=single_runner,
             strategy_has_planning=strategy.has_planning,
+            store_model_messages=store_model_messages,
         )
         return await strategy.handler(ctx)
 
@@ -178,6 +181,7 @@ class PromptStrategyManager:
             executor_prompt,
             history=history,
             cancel_event=ctx.cancel_event,
+            store_model_messages=ctx.store_model_messages,
             plan_update=plan_update,
             plan_response=plan_text,
             plan_usage=plan_usage,
@@ -206,6 +210,7 @@ class PromptStrategyManager:
             executor_prompt,
             history=ctx.history,
             cancel_event=ctx.cancel_event,
+            store_model_messages=ctx.store_model_messages,
             plan_result_hook=_plan_hook,
             allow_plan_parse=ctx.strategy_has_planning,
         )
@@ -227,6 +232,7 @@ class PromptStrategyManager:
             executor_prompt,
             history=ctx.history,
             cancel_event=ctx.cancel_event,
+            store_model_messages=ctx.store_model_messages,
             allow_plan_parse=ctx.strategy_has_planning,
         )
 
@@ -253,6 +259,7 @@ class PromptStrategyManager:
             _plan_chunk,
             ctx.cancel_event,
             history=ctx.history,
+            store_messages=ctx.store_model_messages,
         )
         combined_plan_text = plan_response or "".join(plan_chunks)
         if combined_plan_text.startswith("Provider error:"):
@@ -283,9 +290,9 @@ class PromptStrategyManager:
         plan_lines = [getattr(e, "content", "") for e in getattr(plan_update, "entries", []) or []]
         if plan_lines:
             plan_block = "\n".join(f"- {line}" for line in plan_lines if line)
-            return (f"{prompt_text}\n\nPlan:\n{plan_block}\n\n{EXECUTOR_PROMPT}")
+            return f"{prompt_text}\n\nPlan:\n{plan_block}\n\n{EXECUTOR_PROMPT}"
         if plan_response:
-            return (f"{prompt_text}\n\nPlan:\n{plan_response}\n\n{EXECUTOR_PROMPT}")
+            return f"{prompt_text}\n\nPlan:\n{plan_response}\n\n{EXECUTOR_PROMPT}"
         return prompt_text
 
     def _make_chunk_sender(self, session_id: str) -> Callable[[str], Awaitable[None]]:
@@ -407,6 +414,7 @@ class PromptStrategyManager:
         *,
         history: Any,
         cancel_event: asyncio.Event,
+        store_model_messages: Callable[[Any], None],
         plan_update: Any | None = None,
         plan_response: str | None = None,
         plan_usage: Any | None = None,
@@ -427,6 +435,7 @@ class PromptStrategyManager:
             cancel_event,
             history=history,
             on_event=handler,
+            store_messages=store_model_messages,
         )
         if response_text is None:
             return self._prompt_cancel()

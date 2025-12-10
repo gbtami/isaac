@@ -16,6 +16,8 @@ from pydantic_ai.run import AgentRunResultEvent  # type: ignore
 
 from isaac.agent.tools import TOOL_HANDLERS, run_tool
 
+HISTORY_LOG_MAX = 8000
+
 
 def register_tools(agent: Any) -> None:
     logger = logging.getLogger("acp_server")
@@ -40,6 +42,7 @@ async def stream_with_runner(
     *,
     history: Any | None = None,
     on_event: Callable[[Any], asyncio.Future | bool | None] | None = None,
+    store_messages: Callable[[Any], None] | None = None,
 ) -> tuple[str | None, Any | None]:
     """Stream responses using the runner's streaming API.
 
@@ -72,14 +75,60 @@ async def stream_with_runner(
                 cleaned.append({"role": role, "content": content_str})
         return cleaned if cleaned else None
 
+    def _inject_system_prompt(
+        raw_history: list[dict[str, str]] | None, runner_obj: Any
+    ) -> list[dict[str, str]] | None:
+        """Ensure the system prompt is present when passing history to the model.
+
+        pydantic-ai skips generating the system prompt when message_history is provided;
+        we add it explicitly if missing to preserve behavior across turns.
+        """
+
+        if not raw_history:
+            return raw_history
+        has_system = any(msg.get("role") == "system" for msg in raw_history)
+        if has_system:
+            return raw_history
+        # Prefer stored system prompts on the pydantic-ai Agent.
+        sys_prompt = None
+        try:
+            prompts = getattr(runner_obj, "_system_prompts", None)
+            if prompts:
+                sys_prompt = "\n".join([p for p in prompts if p])
+        except Exception:
+            pass
+        if not sys_prompt:
+            sys_prompt = getattr(runner_obj, "system_prompt", None)
+        if callable(sys_prompt):
+            try:
+                sys_prompt = sys_prompt()
+            except Exception:
+                sys_prompt = None
+        if not sys_prompt:
+            return raw_history
+        return [{"role": "system", "content": str(sys_prompt)}] + raw_history
+
+    def _convert_to_model_messages(raw_history: list[dict[str, str]] | None) -> list[Any] | None:
+        """Pass through sanitized history; pydantic-ai accepts role/content dicts."""
+
+        return raw_history
+
     try:
         event_iter = None
         if history is not None:
             try:
-                llm_logger.info("HISTORY %s", json.dumps(history)[:2000])
+                llm_logger.info("HISTORY %s", json.dumps(history)[:HISTORY_LOG_MAX])
             except Exception:
-                llm_logger.info("HISTORY %s", str(history)[:2000])
-            safe_history = _sanitize_history(history)
+                llm_logger.info("HISTORY %s", str(history)[:HISTORY_LOG_MAX])
+            if isinstance(history, list) and history and not isinstance(history[0], dict):
+                safe_history = history
+            else:
+                sanitized = _inject_system_prompt(_sanitize_history(history), runner)
+                safe_history = _convert_to_model_messages(sanitized)
+            try:
+                llm_logger.info("HISTORY_SANITIZED %s", json.dumps(safe_history)[:HISTORY_LOG_MAX])
+            except Exception:
+                llm_logger.info("HISTORY_SANITIZED %s", str(safe_history)[:HISTORY_LOG_MAX])
             event_iter = runner.run_stream_events(prompt_text, message_history=safe_history)
         if event_iter is None:
             event_iter = runner.run_stream_events(prompt_text)
@@ -137,6 +186,23 @@ async def stream_with_runner(
                     usage = getattr(result, "usage", None)
                     stream_logger.info("LLM final output=%s", str(full)[:200].replace("\n", "\\n"))
                     llm_logger.info("RECV final output\n%s", full)
+                    try:
+                        getter = getattr(result, "all_messages", None)
+                        if callable(getter):
+                            msgs = getter()
+                            llm_logger.info("MODEL_MESSAGES %s", str(msgs)[:HISTORY_LOG_MAX])
+                            if store_messages is not None:
+                                try:
+                                    store_messages(msgs)
+                                except Exception:
+                                    pass
+                    except Exception:
+                        pass
+                    if not output_parts:
+                        try:
+                            await on_text(str(full))
+                        except Exception:
+                            pass
                     return str(full), usage
     except (ai_exc.ModelRetry, ai_exc.UnexpectedModelBehavior) as exc:
         msg = str(exc)

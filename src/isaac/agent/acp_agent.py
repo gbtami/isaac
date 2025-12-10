@@ -87,6 +87,31 @@ from isaac.agent.usage import format_usage_summary, normalize_usage
 logger = logging.getLogger("acp_server")
 
 
+def _describe_model_messages(msgs: Any) -> list[str]:
+    roles: list[str] = []
+    for msg in msgs or []:
+        name = msg.__class__.__name__
+        if name == "ModelRequest":
+            parts = getattr(msg, "parts", [])
+            if parts:
+                part0 = parts[0].__class__.__name__
+                if "SystemPromptPart" in part0:
+                    roles.append("system")
+                elif "UserPromptPart" in part0:
+                    roles.append("user")
+                elif "ToolReturnPart" in part0:
+                    roles.append("tool_return")
+                else:
+                    roles.append(part0)
+            else:
+                roles.append("request")
+        elif name == "ModelResponse":
+            roles.append("assistant")
+        else:
+            roles.append(name)
+    return roles
+
+
 class ACPAgent(Agent):
     """Implements ACP session, prompt, tool, filesystem, and terminal flows."""
 
@@ -116,6 +141,7 @@ class ACPAgent(Agent):
         self._session_toolsets: Dict[str, list[Any]] = {}
         self._session_single_models: Dict[str, Any | None] = {}
         self._session_prompt_strategies: Dict[str, str] = {}
+        self._session_model_messages: Dict[str, list[Any]] = {}
         self._agent_name = agent_name
         self._agent_title = agent_title
         self._agent_version = agent_version
@@ -232,6 +258,7 @@ class ACPAgent(Agent):
         await self._init_session_runners(session_id, toolsets)
         self._delegate_tool_enabled.discard(session_id)
         self._session_history[session_id] = []
+        self._session_model_messages[session_id] = []
         self._session_allowed_commands[session_id] = set()
         self._session_mcp_servers[session_id] = mcp_servers
         self._session_prompt_strategies[session_id] = self._default_prompt_strategy
@@ -409,10 +436,22 @@ class ACPAgent(Agent):
         logger.info("Received prompt request for session: %s", session_id)
         cancel_event = self._cancel_events.setdefault(session_id, asyncio.Event())
         cancel_event.clear()
-        self._store_user_prompt(session_id, prompt)
-        history = build_chat_history(self._session_history.get(session_id, []))
+        raw_history = self._session_history.get(session_id, [])
+        history = self._session_model_messages.get(session_id) or build_chat_history(raw_history)
         # Reset last text chunk tracking for this prompt turn.
         self._session_last_chunk[session_id] = None
+        if raw_history and self._session_model_messages.get(session_id):
+            try:
+                msg_roles = _describe_model_messages(self._session_model_messages[session_id])
+                constructed_roles = [m.get("role", "") for m in build_chat_history(raw_history)]
+                logger.debug(
+                    "History comparison session=%s constructed_roles=%s model_message_roles=%s",
+                    session_id,
+                    constructed_roles,
+                    msg_roles,
+                )
+            except Exception:
+                logger.debug("History comparison failed for session=%s", session_id)
         model_error = self._session_model_errors.get(session_id)
         if model_error:
             return await self._respond_model_error(session_id, model_error)
@@ -424,6 +463,8 @@ class ACPAgent(Agent):
                 return PromptResponse(stop_reason="end_turn")
 
         prompt_text = extract_prompt_text(prompt)
+        # Persist the user prompt after capturing history so the current turn is not duplicated.
+        self._store_user_prompt(session_id, prompt)
 
         slash = await handle_slash_command(self, session_id, prompt_text)
         if slash:
@@ -446,6 +487,12 @@ class ACPAgent(Agent):
                 session_id, self._session_model_errors.get(session_id)
             )
 
+        def _store_model_messages(msgs: Any) -> None:
+            try:
+                self._session_model_messages[session_id] = list(msgs or [])
+            except Exception:
+                self._session_model_messages[session_id] = []
+
         return await self._strategy_manager.run(
             session_id,
             prompt_text,
@@ -454,6 +501,7 @@ class ACPAgent(Agent):
             runner=runner,
             planner=planner,
             single_runner=single_runner,
+            store_model_messages=_store_model_messages,
         )
 
     async def cancel(self, session_id: str, **_: Any) -> None:

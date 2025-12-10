@@ -35,6 +35,61 @@ def test_build_chat_history_from_updates():
 
     assert history == [
         {"role": "user", "content": "hi"},
-        {"role": "assistant", "content": "hello"},
-        {"role": "assistant", "content": "tool output"},
+        {"role": "assistant", "content": "hello\ntool output"},
+    ]
+
+
+def test_build_chat_history_merges_streamed_chunks():
+    updates = [
+        session_notification(
+            "s1",
+            UserMessageChunk(
+                session_update="user_message_chunk",
+                content=text_block("hi"),
+            ),
+        ),
+        session_notification("s1", update_agent_message(text_block("Hel"))),
+        session_notification("s1", update_agent_message(text_block("lo"))),
+        session_notification("s1", update_agent_message(text_block(", world!"))),
+    ]
+
+    history = build_chat_history(updates)
+
+    assert history == [
+        {"role": "user", "content": "hi"},
+        {"role": "assistant", "content": "Hello, world!"},
+    ]
+
+
+def test_build_chat_history_skips_slash_commands():
+    updates = [
+        session_notification(
+            "s1",
+            UserMessageChunk(
+                session_update="user_message_chunk",
+                content=text_block("/strategy single"),
+            ),
+        ),
+        session_notification(
+            "s1",
+            update_agent_message(text_block("Prompt strategy set to single.")),
+        ),
+        session_notification(
+            "s1",
+            UserMessageChunk(
+                session_update="user_message_chunk",
+                content=text_block("next prompt"),
+            ),
+        ),
+        session_notification(
+            "s1",
+            update_agent_message(text_block("assistant reply")),
+        ),
+    ]
+
+    history = build_chat_history(updates)
+
+    assert history == [
+        {"role": "user", "content": "next prompt"},
+        {"role": "assistant", "content": "assistant reply"},
     ]
