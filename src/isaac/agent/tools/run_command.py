@@ -50,7 +50,7 @@ async def run_command(
     if ctx:
         allowed = await ctx.request_permission(command, cwd)
         if not allowed:
-            return {"content": None, "error": "permission denied", "returncode": -1}
+            return {"content": "", "error": "permission denied", "returncode": -1}
 
     try:
         proc = await asyncio.create_subprocess_shell(
@@ -65,12 +65,12 @@ async def run_command(
             proc.kill()
             await proc.communicate()
             return {
-                "content": None,
+                "content": "",
                 "error": f"Command timed out after {timeout}s",
                 "returncode": -1,
             }
     except Exception as exc:
-        return {"content": None, "error": str(exc), "returncode": -1}
+        return {"content": "", "error": str(exc), "returncode": -1}
 
     stdout_text = stdout.decode().rstrip("\n") if stdout else ""
     stderr_text = stderr.decode().rstrip("\n") if stderr else ""

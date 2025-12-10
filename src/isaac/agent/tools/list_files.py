@@ -33,10 +33,10 @@ async def list_files(
     max_chars = 20000
     path = _resolve(cwd, directory)
     if not path.exists():
-        return {"content": None, "error": f"Directory '{directory}' does not exist."}
+        return {"content": "", "error": f"Directory '{directory}' does not exist."}
 
     if not path.is_dir():
-        return {"content": None, "error": f"'{directory}' is not a directory."}
+        return {"content": "", "error": f"'{directory}' is not a directory."}
 
     try:
         patterns = _load_gitignore_patterns(path)
@@ -84,7 +84,7 @@ async def list_files(
             response["truncated"] = True
         return response
     except Exception as e:
-        return {"content": None, "error": f"Error listing directory: {str(e)}"}
+        return {"content": "", "error": f"Error listing directory: {str(e)}"}
 
 
 def _load_gitignore_patterns(root: Path) -> list[str]:

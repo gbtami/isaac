@@ -16,8 +16,8 @@ def _resolve(base: Optional[str], target: str) -> Path:
 
 async def edit_file(
     ctx: RunContext[Any] = None,
-    file_path: str = "",
-    new_content: str = "",
+    path: str = "",
+    content: str = "",
     create: bool = True,
     cwd: Optional[str] = None,
     **_: object,
@@ -25,46 +25,46 @@ async def edit_file(
     """Overwrite a file with new content.
 
     Args:
-        file_path: Path to the file to edit.
-        new_content: Complete replacement content for the file.
+        path: Path to the file to edit.
+        content: Complete replacement content for the file.
         create: Whether to create the file if it does not exist.
     """
-    if not file_path:
-        return {"content": None, "error": "Missing required arguments: file_path", "returncode": -1}
-    path = _resolve(cwd, file_path)
-    if path.exists() and path.is_dir():
-        return {"content": None, "error": f"Path '{file_path}' is a directory", "returncode": -1}
+    if not path:
+        return {"content": None, "error": "Missing required arguments: path", "returncode": -1}
+    resolved = _resolve(cwd, path)
+    if resolved.exists() and resolved.is_dir():
+        return {"content": None, "error": f"Path '{path}' is a directory", "returncode": -1}
     old_text = ""
-    if path.exists():
+    if resolved.exists():
         try:
-            old_text = path.read_text(encoding="utf-8")
+            old_text = resolved.read_text(encoding="utf-8")
         except Exception:
             old_text = ""
 
-    if not path.exists() and not create:
-        return {"content": None, "error": f"File '{file_path}' does not exist", "returncode": -1}
+    if not resolved.exists() and not create:
+        return {"content": "", "error": f"File '{path}' does not exist", "returncode": -1}
 
     try:
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(new_content, encoding="utf-8")
+        resolved.parent.mkdir(parents=True, exist_ok=True)
+        resolved.write_text(content, encoding="utf-8")
         old_lines = old_text.splitlines(keepends=True)
-        new_lines = new_content.splitlines(keepends=True)
+        new_lines = content.splitlines(keepends=True)
         diff = "".join(
             difflib.unified_diff(
                 old_lines,
                 new_lines,
-                fromfile=file_path,
-                tofile=file_path,
+                fromfile=path,
+                tofile=path,
                 lineterm="",
             )
         )
-        summary = f"Wrote {len(new_content)} bytes to {file_path}"
-        content = f"{summary}\n{diff}" if diff else summary
+        summary = f"Wrote {len(content)} bytes to {path}"
+        result_content = f"{summary}\n{diff}" if diff else summary
         return {
-            "content": content,
+            "content": result_content,
             "diff": diff,
             "error": None,
             "returncode": 0,
         }
     except Exception as exc:  # pragma: no cover - unexpected filesystem errors
-        return {"content": None, "error": str(exc), "returncode": -1}
+        return {"content": "", "error": str(exc), "returncode": -1}

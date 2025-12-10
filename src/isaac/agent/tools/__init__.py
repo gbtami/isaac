@@ -50,12 +50,12 @@ READ_ONLY_TOOLS = {
 }
 
 TOOL_REQUIRED_ARGS: Dict[str, list[str]] = {
-    "read_file": ["file_path"],
+    "read_file": ["path"],
     "run_command": ["command"],
-    "edit_file": ["file_path", "new_content"],
-    "apply_patch": ["file_path", "patch"],
+    "edit_file": ["path", "content"],
+    "apply_patch": ["path", "patch"],
     "code_search": ["pattern", "directory"],
-    "file_summary": ["file_path"],
+    "file_summary": ["path"],
 }
 
 
@@ -83,14 +83,14 @@ def get_tools() -> List[Any]:
             parameters=ToolParameter(
                 type="object",
                 properties={
-                    "file_path": {"type": "string", "description": "Path to the file to read"},
-                    "start_line": {
+                    "path": {"type": "string", "description": "Path to the file to read"},
+                    "start": {
                         "type": "integer",
                         "description": "Starting line number (1-based)",
                     },
-                    "num_lines": {"type": "integer", "description": "Number of lines to read"},
+                    "lines": {"type": "integer", "description": "Number of lines to read"},
                 },
-                required=["file_path"],
+                required=["path"],
             ),
         ),
         Tool(
@@ -114,15 +114,15 @@ def get_tools() -> List[Any]:
         ),
         Tool(
             function="edit_file",
-            description="Replace the contents of a file (requires a file_path and new_content; file_path must not be a directory).",
+            description="Replace the contents of a file (requires a path and content; path must not be a directory).",
             parameters=ToolParameter(
                 type="object",
                 properties={
-                    "file_path": {
+                    "path": {
                         "type": "string",
                         "description": "Path to the file to edit (relative paths are allowed).",
                     },
-                    "new_content": {
+                    "content": {
                         "type": "string",
                         "description": "New content to write into the file.",
                     },
@@ -131,7 +131,7 @@ def get_tools() -> List[Any]:
                         "description": "Create the file if it does not exist (default: true).",
                     },
                 },
-                required=["file_path", "new_content"],
+                required=["path", "content"],
             ),
         ),
         Tool(
@@ -140,14 +140,14 @@ def get_tools() -> List[Any]:
             parameters=ToolParameter(
                 type="object",
                 properties={
-                    "file_path": {"type": "string", "description": "Path to the file to patch"},
+                    "path": {"type": "string", "description": "Path to the file to patch"},
                     "patch": {"type": "string", "description": "Unified diff patch text"},
                     "strip": {
                         "type": "integer",
                         "description": "Strip leading path components (patch -p)",
                     },
                 },
-                required=["file_path", "patch"],
+                required=["path", "patch"],
             ),
         ),
         Tool(
@@ -156,7 +156,7 @@ def get_tools() -> List[Any]:
             parameters=ToolParameter(
                 type="object",
                 properties={
-                    "file_path": {"type": "string", "description": "Path to summarize"},
+                    "path": {"type": "string", "description": "Path to summarize"},
                     "head_lines": {
                         "type": "integer",
                         "description": "Number of head lines to include",
@@ -166,7 +166,7 @@ def get_tools() -> List[Any]:
                         "description": "Number of tail lines to include",
                     },
                 },
-                required=["file_path"],
+                required=["path"],
             ),
         ),
         Tool(
@@ -224,15 +224,19 @@ async def run_tool(function_name: str, ctx: Any | None = None, **kwargs: Any) ->
             }
     try:
         filtered_kwargs = {k: v for k, v in call_kwargs.items() if k in sig.parameters}
-        return await handler(**filtered_kwargs)
+        result = await handler(**filtered_kwargs)
     except Exception as exc:
         # Drop unexpected args (e.g., from LLM hallucinations) and retry once
         try:
             sig = inspect.signature(handler)
             filtered = {k: v for k, v in {**kwargs, "ctx": ctx}.items() if k in sig.parameters}
-            return await handler(**filtered)
+            result = await handler(**filtered)
         except Exception:
             return {"content": None, "error": str(exc)}
+    if isinstance(result, dict):
+        if result.get("content") is None:
+            result["content"] = ""
+    return result
 
 
 def register_readonly_tools(agent: Any) -> None:

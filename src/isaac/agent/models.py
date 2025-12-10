@@ -91,7 +91,6 @@ CONFIG_DIR = Path(os.getenv("XDG_CONFIG_HOME") or (Path.home() / ".config")) / "
 CONFIG_DIR.mkdir(parents=True, exist_ok=True)
 
 MODELS_FILE = CONFIG_DIR / "models.json"
-SETTINGS_FILE = CONFIG_DIR / "isaac.ini"
 MODELS_DEV_URL = "https://models.dev/api.json"
 
 
@@ -151,10 +150,11 @@ def set_current_model(model_id: str) -> str:
 def _load_current_model() -> str:
     """Read the persisted current model selection from ini (or default)."""
 
+    settings_file = MODELS_FILE.parent / "isaac.ini"
     parser = configparser.ConfigParser()
-    if SETTINGS_FILE.exists():
+    if settings_file.exists():
         try:
-            parser.read(SETTINGS_FILE)
+            parser.read(settings_file)
             current = parser.get("models", "current_model", fallback=None)
             if current:
                 return current
@@ -166,10 +166,11 @@ def _load_current_model() -> str:
 def _save_current_model(model_id: str) -> None:
     """Persist the current model selection separately from models.json."""
 
+    settings_file = MODELS_FILE.parent / "isaac.ini"
     parser = configparser.ConfigParser()
     parser["models"] = {"current_model": model_id}
     try:
-        with SETTINGS_FILE.open("w", encoding="utf-8") as f:
+        with settings_file.open("w", encoding="utf-8") as f:
             parser.write(f)
     except Exception:  # pragma: no cover - best effort persistence
         pass

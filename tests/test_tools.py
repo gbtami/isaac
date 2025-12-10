@@ -38,7 +38,7 @@ async def test_read_file_with_range(tmp_path: Path):
     target = tmp_path / "sample.txt"
     target.write_text("line1\nline2\nline3\n")
 
-    result = await read_file(file_path=str(target), start_line=2, num_lines=1)
+    result = await read_file(path=str(target), start=2, lines=1)
     assert result["error"] is None
     assert "line2" in result["content"]
 
@@ -46,7 +46,7 @@ async def test_read_file_with_range(tmp_path: Path):
 @pytest.mark.asyncio
 async def test_edit_file(tmp_path: Path):
     target = tmp_path / "edit.txt"
-    result = await edit_file(file_path=str(target), new_content="new", create=True)
+    result = await edit_file(path=str(target), content="new", create=True)
     assert result["error"] is None
     assert target.read_text() == "new"
     assert "diff" in result
@@ -63,7 +63,7 @@ async def test_apply_patch(tmp_path: Path):
 -one
 +two
 """
-    result = await apply_patch(file_path=str(target), patch=patch, strip=1)
+    result = await apply_patch(path=str(target), patch=patch, strip=1)
     assert result["error"] is None
     assert "two" in target.read_text()
 
@@ -88,7 +88,7 @@ async def test_run_command():
 async def test_file_summary(tmp_path: Path):
     target = tmp_path / "sum.txt"
     target.write_text("a\nb\nc\n")
-    result = await file_summary(file_path=str(target), head_lines=1, tail_lines=1)
+    result = await file_summary(path=str(target), head_lines=1, tail_lines=1)
     assert result["error"] is None
     assert "Lines: 3" in result["content"]
 

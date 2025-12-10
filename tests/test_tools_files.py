@@ -83,9 +83,9 @@ async def test_tool_read_file_returns_content(tmp_path: Path):
         FixedArgsModel(
             fixed_args={
                 "read_file": {
-                    "file_path": str(target),
-                    "start_line": 2,
-                    "num_lines": 1,
+                    "path": str(target),
+                    "start": 2,
+                    "lines": 1,
                 }
             },
             call_tools=["read_file"],
@@ -157,7 +157,7 @@ async def test_tool_apply_patch(tmp_path: Path):
 +new content
 """
     # Call tool directly to avoid DSL limitations
-    result = await apply_patch(file_path=str(target), patch=patch, strip=1)
+    result = await apply_patch(path=str(target), patch=patch, strip=1)
     assert result["error"] is None
     assert (result["content"] or "").strip()
     assert target.read_text() == "new content\n"

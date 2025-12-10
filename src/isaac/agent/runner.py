@@ -5,9 +5,11 @@ from __future__ import annotations
 import asyncio
 import inspect
 import logging
+import json
 from typing import Any, Callable
 
 from pydantic_ai import RunContext
+from pydantic_ai import exceptions as ai_exc  # type: ignore
 
 from pydantic_ai.messages import PartDeltaEvent, PartEndEvent  # type: ignore
 from pydantic_ai.run import AgentRunResultEvent  # type: ignore
@@ -51,10 +53,34 @@ async def stream_with_runner(
 
     output_parts: list[str] = []
     usage = None
+
+    def _sanitize_history(raw_history: Any) -> Any:
+        """Drop invalid/empty history messages to avoid provider 400s."""
+
+        cleaned = []
+        if isinstance(raw_history, list):
+            for msg in raw_history:
+                if not isinstance(msg, dict):
+                    continue
+                role = msg.get("role")
+                content = msg.get("content")
+                if not role or content is None:
+                    continue
+                content_str = str(content).strip()
+                if content_str == "":
+                    continue
+                cleaned.append({"role": role, "content": content_str})
+        return cleaned if cleaned else None
+
     try:
         event_iter = None
         if history is not None:
-            event_iter = runner.run_stream_events(prompt_text, message_history=history)
+            try:
+                llm_logger.info("HISTORY %s", json.dumps(history)[:2000])
+            except Exception:
+                llm_logger.info("HISTORY %s", str(history)[:2000])
+            safe_history = _sanitize_history(history)
+            event_iter = runner.run_stream_events(prompt_text, message_history=safe_history)
         if event_iter is None:
             event_iter = runner.run_stream_events(prompt_text)
         if asyncio.iscoroutine(event_iter):
@@ -112,9 +138,16 @@ async def stream_with_runner(
                     stream_logger.info("LLM final output=%s", str(full)[:200].replace("\n", "\\n"))
                     llm_logger.info("RECV final output\n%s", full)
                     return str(full), usage
+    except (ai_exc.ModelRetry, ai_exc.UnexpectedModelBehavior) as exc:
+        msg = str(exc)
+        stream_logger.warning("LLM validation failure: %s", msg)
+        llm_logger.warning("LLM validation failure: %s", msg)
+        friendly = "Model output failed validation; please retry or adjust the request."
+        return friendly, usage
     except Exception as exc:  # pragma: no cover - provider errors
-        stream_logger.warning("LLM stream error: %s", exc)
-        llm_logger.warning("LLM stream error: %s", exc)
-        return f"Provider error: {exc}", None
+        msg = str(exc)
+        stream_logger.warning("LLM stream error: %s", msg)
+        llm_logger.warning("LLM stream error: %s", msg)
+        return f"Provider error: {msg}", None
 
     return ("".join(output_parts) or None), usage

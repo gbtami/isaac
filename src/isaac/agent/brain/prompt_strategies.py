@@ -19,6 +19,7 @@ from acp.schema import SessionNotification
 from pydantic_ai.messages import FunctionToolCallEvent, FunctionToolResultEvent, RetryPromptPart
 
 from isaac.agent.brain.planner import parse_plan_from_text
+from isaac.agent.brain.prompt import EXECUTOR_PROMPT
 from isaac.agent.runner import stream_with_runner
 from isaac.agent.tools.run_command import (
     RunCommandContext,
@@ -282,15 +283,9 @@ class PromptStrategyManager:
         plan_lines = [getattr(e, "content", "") for e in getattr(plan_update, "entries", []) or []]
         if plan_lines:
             plan_block = "\n".join(f"- {line}" for line in plan_lines if line)
-            return (
-                f"{prompt_text}\n\nPlan:\n{plan_block}\n\n"
-                "Execute this plan now. Use tools to make progress and report results."
-            )
+            return (f"{prompt_text}\n\nPlan:\n{plan_block}\n\n{EXECUTOR_PROMPT}")
         if plan_response:
-            return (
-                f"{prompt_text}\n\nPlan:\n{plan_response}\n\n"
-                "Execute this plan now. Use tools to make progress and report results."
-            )
+            return (f"{prompt_text}\n\nPlan:\n{plan_response}\n\n{EXECUTOR_PROMPT}")
         return prompt_text
 
     def _make_chunk_sender(self, session_id: str) -> Callable[[str], Awaitable[None]]:

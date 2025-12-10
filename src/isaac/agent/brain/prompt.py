@@ -32,3 +32,9 @@ You are Isaac in single-agent mode.
 - Keep responses concise, cite key files/lines, and highlight risks or alternatives.
 - Ask before destructive actions; keep output plain text/markdown and avoid filler.
 """
+
+EXECUTOR_PROMPT = """
+Execute this plan now. Use tools to make progress and report results.
+When calling a tool, always use the exact argument names in the schema.
+For file operations, always use {"path": "<filepath>"} as the argument.
+"""
