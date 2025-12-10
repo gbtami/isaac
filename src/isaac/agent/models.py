@@ -79,15 +79,10 @@ DEFAULT_CONFIG = {
             "model": "devstral-medium-latest",
             "description": "Mistral DevStral Medium (latest)",
         },
-        "ollama:hhao/qwen2.5-coder-tools:3b": {
+        "ollama:ministral-3:3b": {
             "provider": "ollama",
-            "model": "hhao/qwen2.5-coder-tools:3b",
-            "description": "Ollama qwen2.5-coder-tools:3b (local)",
-        },
-        "ollama:0xroyce/NazareAI-Python-Programmer-3B": {
-            "provider": "ollama",
-            "model": "0xroyce/NazareAI-Python-Programmer-3B",
-            "description": "NazareAI-Python-Programmer-3B (local)",
+            "model": "ministral-3:3b",
+            "description": "Ollama ministral-3:3b (local)",
         },
     },
 }
