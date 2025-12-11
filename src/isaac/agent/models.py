@@ -15,14 +15,19 @@ from pathlib import Path
 from typing import Any, Callable, Dict
 
 from dotenv import load_dotenv
+
 from pydantic_ai import Agent as PydanticAgent  # type: ignore
+
 from pydantic_ai.models.anthropic import AnthropicModel, AnthropicModelSettings  # type: ignore
+from pydantic_ai.models.cerebras import CerebrasModel  # type: ignore
 from pydantic_ai.models.google import GoogleModel, GoogleModelSettings  # type: ignore
 from pydantic_ai.models.mistral import MistralModel  # type: ignore
 from pydantic_ai.models.openai import OpenAIChatModel  # type: ignore
 from pydantic_ai.models.openrouter import OpenRouterModel, OpenRouterModelSettings  # type: ignore
 from pydantic_ai.models.test import TestModel  # type: ignore
+
 from pydantic_ai.providers.anthropic import AnthropicProvider  # type: ignore
+from pydantic_ai.providers.cerebras import CerebrasProvider  # type: ignore
 from pydantic_ai.providers.google import GoogleProvider  # type: ignore
 from pydantic_ai.providers.mistral import MistralProvider  # type: ignore
 from pydantic_ai.providers.ollama import OllamaProvider  # type: ignore
@@ -73,6 +78,11 @@ DEFAULT_CONFIG = {
             "provider": "openrouter",
             "model": "openai/gpt-oss-120b",
             "description": "OpenRouter proxy for openai/gpt-oss-120b",
+        },
+        "cerebras:openai/gpt-oss-120b": {
+            "provider": "cerebras",
+            "model": "openai/gpt-oss-120b",
+            "description": "Cerebras proxy for openai/gpt-oss-120b",
         },
         "mistral:devstral-medium-latest": {
             "provider": "mistral",
@@ -245,6 +255,13 @@ def _build_provider_model(model_id: str, model_entry: Dict[str, Any]) -> Any:
             raise RuntimeError("MISTRAL_API_KEY is required for mistral models")
         provider_obj = MistralProvider(api_key=key)
         return MistralModel(model_spec, provider=provider_obj), None
+
+    if provider == "cerebras":
+        key = api_key or os.getenv("CEREBRAS_API_KEY")
+        if not key:
+            raise RuntimeError("CEREBRAS_API_KEY is required for cerebras models")
+        provider_obj = CerebrasProvider(api_key=key)
+        return CerebrasModel(model_spec, provider=provider_obj), None
 
     if provider == "google":
         key = api_key or os.getenv("GOOGLE_API_KEY")
