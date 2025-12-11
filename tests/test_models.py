@@ -19,7 +19,11 @@ def _raise_model_error(*_: object, **__: object) -> tuple[object, object]:
 
 
 @pytest.mark.asyncio
-async def test_set_session_model_changes_runner():
+async def test_set_session_model_changes_runner(monkeypatch, tmp_path: Path):
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "xdg"))
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setattr(model_registry, "MODELS_FILE", tmp_path / "xdg" / "isaac" / "models.json")
+    model_registry.MODELS_FILE.parent.mkdir(parents=True, exist_ok=True)
     conn = AsyncMock(spec=AgentSideConnection)
     agent = make_function_agent(conn)
     session = await agent.new_session(cwd="/", mcp_servers=[])
