@@ -33,6 +33,9 @@ async def interactive_loop(
 
     while True:
         try:
+            if state.pending_newline:
+                print()
+                state.pending_newline = False
             usage_suffix = f" [{state.usage_summary}]" if state.usage_summary else ""
             line = await session.prompt_async(
                 f"{state.current_mode}|{state.current_model}{usage_suffix}> "

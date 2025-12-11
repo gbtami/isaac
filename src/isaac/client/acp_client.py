@@ -66,12 +66,17 @@ class ACPClient(Client):
         **_: Any,
     ) -> RequestPermissionResponse:
         """Prompt the user for a permission choice (Prompt Turn permission flow)."""
+        raw_input = getattr(tool_call, "raw_input", None) or {}
+        if raw_input.get("tool") == "run_command" and raw_input.get("command"):
+            cwd = raw_input.get("cwd")
+            location = f" (cwd={cwd})" if cwd else ""
+            print(f"[permission] run_command: {raw_input['command']}{location}")
         self._logger.info(
             "permission.request session=%s tool=%s options=%s raw=%s",
             session_id,
             getattr(tool_call, "title", "") or getattr(tool_call, "tool_call_id", ""),
             [getattr(opt, "option_id", "<id>") for opt in options],
-            getattr(tool_call, "raw_input", None) or {},
+            raw_input,
         )
         try:
             for idx, opt in enumerate(options, start=1):
@@ -168,9 +173,17 @@ class ACPClient(Client):
             print_mode_update(self._state.current_mode)
             return
         if isinstance(update, AvailableCommandsUpdate):
+            try:
+                from isaac.client.slash import SLASH_HANDLERS
+
+                local_slashes = set(SLASH_HANDLERS.keys())
+            except Exception:
+                local_slashes = set()
             cmds = {}
             for cmd in update.available_commands or []:
                 name = f"/{cmd.name}"
+                if name in local_slashes:
+                    continue
                 desc = cmd.description or ""
                 hint = ""
                 try:

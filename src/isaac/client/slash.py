@@ -57,6 +57,8 @@ def _handle_help(
         print(f"{entry.hint:<16} - {entry.description}")
     if _state.available_agent_commands:
         for name, desc in sorted(_state.available_agent_commands.items()):
+            if name in SLASH_HANDLERS:
+                continue
             label = desc or "Handled by agent"
             print(f"{name:<16} - {label}")
     return True
@@ -195,7 +197,16 @@ async def handle_slash_command(
 
     entry = SLASH_HANDLERS.get(command)
     if entry is None:
-        return False
+        # Forward to agent only if it advertised the command; otherwise, surface guidance.
+        if command in state.available_agent_commands:
+            return False
+        # Fall back to local help to show available commands.
+        help_entry = SLASH_HANDLERS.get("/help")
+        if help_entry:
+            result = help_entry.handler(conn, session_id, state, permission_reset, "")
+            return bool(await result) if asyncio.iscoroutine(result) else bool(result)
+        print("Unknown slash command. Try /help.")
+        return True
 
     try:
         result = entry.handler(conn, session_id, state, permission_reset, argument)

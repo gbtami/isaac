@@ -172,7 +172,7 @@ def _handle_strategies(
 
 @register_slash_command(
     "/strategy",
-    description="Set the prompt strategy (handoff|delegation|single).",
+    description="Set the prompt strategy (handoff|delegation|single|plan_only).",
     hint="/strategy <id>",
 )
 async def _handle_strategy(
