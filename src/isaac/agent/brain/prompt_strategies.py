@@ -170,7 +170,6 @@ class PromptStrategyManager:
         history = ctx.history
         if plan_update:
             await self.env.send_update(session_notification(ctx.session_id, plan_update))
-            history = self.env.refresh_history(ctx.session_id)
 
         executor_prompt = self._prepare_executor_prompt(
             ctx.prompt_text, plan_update=plan_update, plan_response=plan_text
