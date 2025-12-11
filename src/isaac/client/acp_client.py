@@ -15,7 +15,6 @@ from acp import (
     ReleaseTerminalResponse,
     RequestError,
     RequestPermissionResponse,
-    RequestPermissionRequest,
     SessionNotification,
     TerminalOutputRequest,
     TerminalOutputResponse,
@@ -90,14 +89,6 @@ class ACPClient(Client):
             outcome=AllowedOutcome(option_id=selection, outcome="selected")
         )
 
-    async def requestPermission(
-        self, params: RequestPermissionRequest
-    ) -> RequestPermissionResponse:
-        """CamelCase ACP bridge that forwards to `request_permission`."""
-        return await self.request_permission(
-            params.options, session_id=params.sessionId, tool_call=params.toolCall
-        )
-
     async def extMethod(self, method: str, params: dict[str, Any]) -> dict[str, Any]:  # type: ignore[override]
         """Handle extension methods from the agent (unused in example client)."""
         return {}
@@ -116,10 +107,6 @@ class ACPClient(Client):
     def on_connect(self, *_: Any, **__: Any) -> None:
         """No-op connect hook for compatibility with ACP client interface."""
         return None
-
-    async def sessionUpdate(self, params: SessionNotification) -> None:
-        """CamelCase ACP bridge that forwards to `session_update`."""
-        await self.session_update(session_id=params.sessionId, update=params.update)
 
     async def write_text_file(self, *args: Any, **kwargs: Any):  # type: ignore[override]
         raise RequestError.method_not_found("fs/write_text_file")
@@ -173,12 +160,6 @@ class ACPClient(Client):
     ) -> KillTerminalCommandResponse:
         req = KillTerminalCommandRequest(session_id=session_id, terminal_id=terminal_id)
         return await self._terminal_manager.kill_terminal(req)
-
-    async def killTerminal(self, params: KillTerminalCommandRequest) -> KillTerminalCommandResponse:
-        """Handle camelCase kill requests from the agent."""
-        return await self.kill_terminal_command(
-            session_id=params.sessionId, terminal_id=params.terminalId
-        )
 
     async def kill_terminal(self, *args: Any, **kwargs: Any) -> KillTerminalCommandResponse:
         """Alias for kill_terminal_command to satisfy ACP interface expectations."""

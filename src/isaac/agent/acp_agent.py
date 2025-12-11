@@ -38,7 +38,13 @@ from acp import (
     WriteTextFileResponse,
 )
 from acp.agent.connection import AgentSideConnection
-from acp.helpers import session_notification, text_block, tool_content, update_agent_message
+from acp.helpers import (
+    ContentBlock,
+    session_notification,
+    text_block,
+    tool_content,
+    update_agent_message,
+)
 from acp.schema import (
     AgentCapabilities,
     AvailableCommandsUpdate,
@@ -428,7 +434,7 @@ class ACPAgent(Agent):
 
     async def prompt(
         self,
-        prompt: list[Any],
+        prompt: list[ContentBlock],
         session_id: str,
         **_: Any,
     ) -> PromptResponse:
