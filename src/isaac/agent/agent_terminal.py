@@ -94,7 +94,7 @@ async def wait_for_terminal_exit(
     returncode = await state.proc.wait()
     exit_status = build_exit_status(returncode)
     return WaitForTerminalExitResponse(
-        exit_code=exit_status.exitCode if exit_status else None,
+        exit_code=exit_status.exit_code if exit_status else None,
         signal=exit_status.signal if exit_status else None,
     )
 

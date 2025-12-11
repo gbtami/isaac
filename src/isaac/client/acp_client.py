@@ -69,9 +69,9 @@ class ACPClient(Client):
         self._logger.info(
             "permission.request session=%s tool=%s options=%s raw=%s",
             session_id,
-            getattr(tool_call, "title", "") or getattr(tool_call, "toolCallId", ""),
-            [getattr(opt, "option_id", getattr(opt, "optionId", "<id>")) for opt in options],
-            getattr(tool_call, "raw_input", None) or getattr(tool_call, "rawInput", None) or {},
+            getattr(tool_call, "title", "") or getattr(tool_call, "tool_call_id", ""),
+            [getattr(opt, "option_id", "<id>") for opt in options],
+            getattr(tool_call, "raw_input", None) or {},
         )
         try:
             for idx, opt in enumerate(options, start=1):
@@ -89,20 +89,13 @@ class ACPClient(Client):
             outcome=AllowedOutcome(option_id=selection, outcome="selected")
         )
 
-    async def extMethod(self, method: str, params: dict[str, Any]) -> dict[str, Any]:  # type: ignore[override]
+    async def ext_method(self, method: str, params: dict[str, Any]) -> dict[str, Any]:
         """Handle extension methods from the agent (unused in example client)."""
         return {}
 
-    async def extNotification(self, method: str, params: dict[str, Any]) -> None:  # type: ignore[override]
+    async def ext_notification(self, method: str, params: dict[str, Any]) -> None:
         """Handle extension notifications from the agent (noop for example client)."""
         return None
-
-    # Provide snake_case aliases to satisfy local tests and structural typing.
-    async def ext_method(self, method: str, params: dict[str, Any]) -> dict[str, Any]:
-        return await self.extMethod(method, params)
-
-    async def ext_notification(self, method: str, params: dict[str, Any]) -> None:
-        await self.extNotification(method, params)
 
     def on_connect(self, *_: Any, **__: Any) -> None:
         """No-op connect hook for compatibility with ACP client interface."""

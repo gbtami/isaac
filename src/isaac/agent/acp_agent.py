@@ -463,7 +463,7 @@ class ACPAgent(Agent):
             return await self._respond_model_error(session_id, model_error)
 
         for block in prompt:
-            tool_call = getattr(block, "toolCall", None)
+            tool_call = getattr(block, "tool_call", None)
             if tool_call:
                 await self._handle_tool_call(session_id, tool_call)
                 return PromptResponse(stop_reason="end_turn")
@@ -521,7 +521,7 @@ class ACPAgent(Agent):
         """Dispatch a tool call coming from the model (Tool Calls section)."""
         function_name = getattr(tool_call, "function", "")
         arguments = getattr(tool_call, "arguments", {}) or {}
-        tool_call_id = getattr(tool_call, "toolCallId", str(uuid.uuid4()))
+        tool_call_id = getattr(tool_call, "tool_call_id", str(uuid.uuid4()))
 
         if function_name == "run_command":
             await self._execute_run_command_with_terminal(
@@ -914,7 +914,7 @@ class ACPAgent(Agent):
     async def ext_method(self, name: str, payload: dict[str, Any]) -> dict[str, Any]:
         """Handle extension methods for model listing/selection."""
         if name == "model/list":
-            session_id = payload.get("session_id") or payload.get("sessionId")
+            session_id = payload.get("session_id")
             current = self._session_model_ids.get(session_id, self._current_model_id())
             models = model_registry.list_user_models()
             return {
@@ -925,8 +925,8 @@ class ACPAgent(Agent):
                 ],
             }
         if name == "model/set":
-            session_id = payload.get("session_id") or payload.get("sessionId")
-            model_id = payload.get("model_id") or payload.get("modelId")
+            session_id = payload.get("session_id")
+            model_id = payload.get("model_id")
             if not session_id or not model_id:
                 return {"error": "session_id and model_id required"}
             try:
@@ -1022,10 +1022,10 @@ class ACPAgent(Agent):
                 PermissionOption(option_id="reject_once", name="Reject", kind="reject_once"),
             ]
             tool_call = ToolCall(
-                toolCallId=tool_call_id,
+                tool_call_id=tool_call_id,
                 title="run_command",
                 kind="execute",
-                rawInput={"tool": "run_command", "command": command, "cwd": cwd},
+                raw_input={"tool": "run_command", "command": command, "cwd": cwd},
                 status="pending",
             )
             from acp.schema import ToolCallUpdate  # type: ignore
@@ -1042,7 +1042,7 @@ class ACPAgent(Agent):
             outcome = getattr(resp, "outcome", None)
             option_id = ""
             if outcome is not None:
-                option_id = getattr(outcome, "option_id", "") or getattr(outcome, "optionId", "")
+                option_id = getattr(outcome, "option_id", "")
             key = (command.strip(), cwd or "")
             if option_id == "allow_always":
                 self._session_allowed_commands.setdefault(session_id, set()).add(key)

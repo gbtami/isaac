@@ -42,5 +42,5 @@ def build_exit_status(returncode: int | None) -> TerminalExitStatus | None:
             sig_name = signal.Signals(sig).name
         except Exception:
             sig_name = f"SIG{sig}"
-        return TerminalExitStatus(exitCode=None, signal=sig_name)
-    return TerminalExitStatus(exitCode=returncode, signal=None)
+        return TerminalExitStatus(exit_code=None, signal=sig_name)
+    return TerminalExitStatus(exit_code=returncode, signal=None)
