@@ -271,6 +271,16 @@ class PromptStrategyManager:
                     ),
                 )
             )
+            # Discard provider error text so it isn't reused as a pseudo-plan.
+            combined_plan_text = ""
+        elif combined_plan_text.lower().startswith("Model output failed validation"):
+            await self.env.send_update(
+                session_notification(
+                    ctx.session_id,
+                    update_agent_message(text_block(combined_plan_text)),
+                )
+            )
+            # Drop validation failure text to avoid feeding it into execution prompts.
             combined_plan_text = ""
 
         plan_update = parse_plan_from_text(combined_plan_text or "")
