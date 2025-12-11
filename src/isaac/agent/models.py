@@ -136,10 +136,6 @@ def current_model_id() -> str:
     return _load_current_model()
 
 
-def save_models_config(config: Dict[str, Any]) -> None:
-    MODELS_FILE.write_text(json.dumps(config, indent=2), encoding="utf-8")
-
-
 def list_models() -> Dict[str, Any]:
     return load_models_config().get("models", {})
 

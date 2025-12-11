@@ -28,6 +28,7 @@ from acp import (
     ReadTextFileResponse,
     ReleaseTerminalRequest,
     ReleaseTerminalResponse,
+    RequestError,
     RequestPermissionResponse,
     SetSessionModeResponse,
     SetSessionModelResponse,
@@ -43,6 +44,7 @@ from acp.helpers import (
     session_notification,
     text_block,
     tool_content,
+    tool_diff_content,
     update_agent_message,
 )
 from acp.schema import (
@@ -51,6 +53,8 @@ from acp.schema import (
     CurrentModeUpdate,
     ListSessionsResponse,
     ReadTextFileRequest,
+    SessionCapabilities,
+    SessionListCapabilities,
     WriteTextFileRequest,
     Implementation,
     McpCapabilities,
@@ -203,14 +207,19 @@ class ACPAgent(Agent):
     ) -> InitializeResponse:
         """Handle ACP initialize handshake (Initialization section)."""
         logger.info("Received initialize request: %s", protocol_version)
+        if protocol_version != PROTOCOL_VERSION:
+            raise RequestError.invalid_request(
+                {"message": f"Incompatible protocol version {protocol_version}"}
+            )
         capabilities = AgentCapabilities(
             load_session=True,
             prompt_capabilities=PromptCapabilities(
-                embedded_context=True,
+                embedded_context=False,
                 image=False,
                 audio=False,
             ),
             mcp_capabilities=McpCapabilities(http=True, sse=True),
+            session_capabilities=SessionCapabilities(list=SessionListCapabilities()),
         )
         capabilities.field_meta = {"extMethods": ["model/list", "model/set"]}
         try:
@@ -254,9 +263,7 @@ class ACPAgent(Agent):
         session_id = str(uuid.uuid4())
         logger.info("Received new session request: %s cwd=%s", session_id, cwd)
         self._sessions.add(session_id)
-        cwd_path = Path(cwd or Path.cwd()).expanduser()
-        if not cwd_path.is_absolute():
-            cwd_path = (Path.cwd() / cwd_path).resolve()
+        cwd_path = self._require_absolute_cwd(cwd)
         self._session_cwds[session_id] = cwd_path
         self._cancel_events[session_id] = asyncio.Event()
         toolsets = build_mcp_toolsets(mcp_servers)
@@ -290,9 +297,7 @@ class ACPAgent(Agent):
         logger.info("Received load session request %s", session_id)
         self._sessions.add(session_id)
         stored_meta = self._load_session_meta(session_id)
-        cwd_path = Path(cwd or stored_meta.get("cwd") or Path.cwd()).expanduser()
-        if not cwd_path.is_absolute():
-            cwd_path = (Path.cwd() / cwd_path).resolve()
+        cwd_path = self._require_absolute_cwd(cwd)
         self._session_cwds[session_id] = cwd_path
         self._cancel_events.setdefault(session_id, asyncio.Event())
         mcp_servers = mcp_servers or stored_meta.get("mcpServers", [])
@@ -596,6 +601,16 @@ class ACPAgent(Agent):
             result_with_tool["truncated"] = True
         status = "completed" if not result_with_tool.get("error") else "failed"
         summary = result_with_tool.get("content") or result_with_tool.get("error") or ""
+        content_blocks: list[Any] = []
+        if tool_name == "edit_file":
+            new_text = result_with_tool.get("new_text")
+            old_text = result_with_tool.get("old_text")
+            path = arguments.get("path", "")
+            if isinstance(new_text, str):
+                with contextlib.suppress(Exception):
+                    content_blocks.append(tool_diff_content(path, new_text, old_text))
+        if not content_blocks:
+            content_blocks = [tool_content(text_block(summary))]
         logger.info(
             "Tool call done %s session=%s status=%s summary_preview=%s",
             tool_name,
@@ -607,7 +622,7 @@ class ACPAgent(Agent):
             external_id=tool_call_id,
             status=status,
             raw_output=result_with_tool,
-            content=[tool_content(text_block(summary))],
+            content=content_blocks,
         )
         await self._send_update(session_notification(session_id, progress))
 
@@ -977,6 +992,13 @@ class ACPAgent(Agent):
             session_id,
             update_agent_message(text_block(summary)),
         )
+
+    @staticmethod
+    def _require_absolute_cwd(cwd: str) -> Path:
+        path = Path(cwd or "").expanduser()
+        if not path.is_absolute():
+            raise RequestError.invalid_request({"message": "cwd must be an absolute path"})
+        return path
 
     async def _respond_model_error(self, session_id: str, message: str | None) -> PromptResponse:
         """Emit a model error message (once) and end the prompt turn."""

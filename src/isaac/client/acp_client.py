@@ -26,6 +26,7 @@ from acp.schema import (
     AgentPlanUpdate,
     AllowedOutcome,
     AudioContentBlock,
+    FileEditToolCallContent,
     CurrentModeUpdate,
     EmbeddedResourceContentBlock,
     AvailableCommandsUpdate,
@@ -42,6 +43,7 @@ from isaac.client.display import (
     print_diff,
     print_mode_update,
     print_plan,
+    print_file_edit_diff,
     print_tool,
 )
 from isaac.client.session_state import SessionUIState
@@ -212,6 +214,19 @@ class ACPClient(Client):
                 print()
                 self._state.pending_newline = False
             raw_out = getattr(update, "raw_output", {}) or {}
+            for block in update.content or []:
+                if (
+                    isinstance(block, FileEditToolCallContent)
+                    or getattr(block, "type", "") == "diff"
+                ):
+                    try:
+                        print_file_edit_diff(
+                            getattr(block, "path", "") or "",
+                            getattr(block, "old_text", None),
+                            getattr(block, "new_text", ""),
+                        )
+                    except Exception:
+                        pass
             if update.status == "completed":
                 rc = raw_out.get("returncode")
                 err = raw_out.get("error")

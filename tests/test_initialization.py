@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import pytest
 from acp import PROTOCOL_VERSION, text_block
+from acp import RequestError
 from acp.agent.connection import AgentSideConnection
 from acp.schema import AgentMessageChunk
 from unittest.mock import AsyncMock
@@ -54,3 +55,33 @@ async def test_provider_error_is_sent_to_client():
         if isinstance(call.kwargs.get("update"), AgentMessageChunk)
     ]
     assert any("Model/provider error" in getattr(u.content, "text", "") for u in updates)
+
+
+@pytest.mark.asyncio
+async def test_initialize_rejects_protocol_mismatch():
+    conn = AsyncMock(spec=AgentSideConnection)
+    agent = make_function_agent(conn)
+
+    with pytest.raises(RequestError):
+        await agent.initialize(protocol_version=PROTOCOL_VERSION + 1)
+
+
+@pytest.mark.asyncio
+async def test_new_session_requires_absolute_cwd(monkeypatch, tmp_path):
+    monkeypatch.setattr("pathlib.Path.home", lambda: tmp_path)
+    conn = AsyncMock(spec=AgentSideConnection)
+    agent = make_function_agent(conn)
+
+    with pytest.raises(RequestError):
+        await agent.new_session(cwd="relative/path", mcp_servers=[])
+
+
+@pytest.mark.asyncio
+async def test_load_session_requires_absolute_cwd(monkeypatch, tmp_path):
+    monkeypatch.setattr("pathlib.Path.home", lambda: tmp_path)
+    conn = AsyncMock(spec=AgentSideConnection)
+    agent = make_function_agent(conn)
+
+    session_id = "sess-123"
+    with pytest.raises(RequestError):
+        await agent.load_session(cwd="relative/path", mcp_servers=[], session_id=session_id)

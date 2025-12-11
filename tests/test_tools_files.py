@@ -14,6 +14,7 @@ from pydantic_ai.models.test import TestModel  # type: ignore
 
 from isaac.agent.runner import register_tools
 from isaac.agent.tools.apply_patch import apply_patch
+from isaac.agent.tools.edit_file import edit_file
 from isaac.agent.tools.list_files import list_files
 from tests.utils import make_function_agent
 
@@ -161,6 +162,52 @@ async def test_tool_apply_patch(tmp_path: Path):
     assert result["error"] is None
     assert (result["content"] or "").strip()
     assert target.read_text() == "new content\n"
+
+
+@pytest.mark.asyncio
+async def test_tool_apply_patch_dedents_indented_patch(tmp_path: Path):
+    target = tmp_path / "demo.txt"
+    target.write_text("line one\nline two\n")
+
+    patch = """    --- demo.txt
+    +++ demo.txt
+    @@ -1,2 +1,4 @@
+    -line one
+    -line two
+    +line one
+    +line 1.5
+    +line two
+    +line three
+    """
+    result = await apply_patch(path=str(target), patch=patch, strip=0)
+    assert result["error"] is None
+    assert "line 1.5" in target.read_text()
+
+
+@pytest.mark.asyncio
+async def test_edit_file_partial_replace(tmp_path: Path):
+    target = tmp_path / "partial.txt"
+    target.write_text("line1\nline2\nline3\n")
+
+    result = await edit_file(
+        path=str(target),
+        content="LINE2\nLINE3\n",
+        start=2,
+        end=3,
+        cwd=str(tmp_path),
+    )
+
+    assert result["error"] is None
+    assert target.read_text() == "line1\nLINE2\nLINE3\n"
+    assert "LINE2" in (result.get("diff") or "")
+
+
+@pytest.mark.asyncio
+async def test_edit_file_blocks_outside_cwd(tmp_path: Path):
+    target = tmp_path / "outside.txt"
+    result = await edit_file(path="../outside.txt", content="data", cwd=str(tmp_path))
+    assert result["error"]
+    assert not target.exists()
 
 
 @pytest.mark.asyncio
