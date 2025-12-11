@@ -373,6 +373,7 @@ class ACPAgent(Agent):
     ) -> SetSessionModelResponse | None:
         """Switch the backing model for a session."""
         logger.info("Received set session model request %s -> %s", session_id, model_id)
+        previous_model_id = model_registry.current_model_id()
         try:
             toolsets = self._session_toolsets.get(session_id, [])
             executor, planner = model_registry.build_agent_pair(
@@ -405,6 +406,9 @@ class ACPAgent(Agent):
                     update_agent_message(text_block(f"Model load failed: {exc}")),
                 )
             )
+            # Preserve the previously persisted model selection on failure.
+            with contextlib.suppress(Exception):
+                model_registry.set_current_model(previous_model_id)
             raise
         return SetSessionModelResponse()
 
