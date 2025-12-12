@@ -58,12 +58,12 @@ async def test_provider_error_is_sent_to_client():
 
 
 @pytest.mark.asyncio
-async def test_initialize_rejects_protocol_mismatch():
+async def test_initialize_negotiates_protocol_version():
     conn = AsyncMock(spec=AgentSideConnection)
     agent = make_function_agent(conn)
 
-    with pytest.raises(RequestError):
-        await agent.initialize(protocol_version=PROTOCOL_VERSION + 1)
+    resp = await agent.initialize(protocol_version=PROTOCOL_VERSION + 1)
+    assert resp.protocol_version == PROTOCOL_VERSION
 
 
 @pytest.mark.asyncio

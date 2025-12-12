@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from typing import Any, Awaitable, Callable, Dict, List, Type
 
 from pydantic import ValidationError
+from pydantic_ai import RunContext
 
 from .apply_patch import apply_patch
 from .code_search import code_search
@@ -179,13 +180,53 @@ async def run_tool(function_name: str, ctx: Any | None = None, **kwargs: Any) ->
 def register_readonly_tools(agent: Any) -> None:
     """Register read-only tool wrappers on the given agent (for planning delegate)."""
 
-    for name in READ_ONLY_TOOLS:
+    @agent.tool(name="list_files")  # type: ignore[misc]
+    async def list_files_tool(
+        ctx: RunContext[Any],
+        directory: str = ".",
+        recursive: bool = True,
+    ) -> Any:
+        return await run_tool("list_files", ctx=ctx, directory=directory, recursive=recursive)
 
-        def _make_tool(fn_name: str):
-            @agent.tool_plain(name=fn_name)  # type: ignore[misc]
-            async def _wrapper(ctx: Any | None = None, **kwargs: Any) -> Any:
-                return await run_tool(fn_name, ctx=ctx, **kwargs)
+    @agent.tool(name="read_file")  # type: ignore[misc]
+    async def read_file_tool(
+        ctx: RunContext[Any],
+        path: str,
+        start: int | None = None,
+        lines: int | None = None,
+    ) -> Any:
+        return await run_tool("read_file", ctx=ctx, path=path, start=start, lines=lines)
 
-            return _wrapper
+    @agent.tool(name="file_summary")  # type: ignore[misc]
+    async def file_summary_tool(
+        ctx: RunContext[Any],
+        path: str,
+        head_lines: int | None = 20,
+        tail_lines: int | None = 20,
+    ) -> Any:
+        return await run_tool(
+            "file_summary",
+            ctx=ctx,
+            path=path,
+            head_lines=head_lines,
+            tail_lines=tail_lines,
+        )
 
-        _make_tool(name)
+    @agent.tool(name="code_search")  # type: ignore[misc]
+    async def code_search_tool(
+        ctx: RunContext[Any],
+        pattern: str,
+        directory: str = ".",
+        glob: str | None = None,
+        case_sensitive: bool = True,
+        timeout: float | None = None,
+    ) -> Any:
+        return await run_tool(
+            "code_search",
+            ctx=ctx,
+            pattern=pattern,
+            directory=directory,
+            glob=glob,
+            case_sensitive=case_sensitive,
+            timeout=timeout,
+        )

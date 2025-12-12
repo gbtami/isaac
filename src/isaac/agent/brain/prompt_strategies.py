@@ -16,10 +16,12 @@ from acp.helpers import (
     tool_content,
     tool_diff_content,
     update_agent_message,
+    update_agent_thought,
     update_plan,
 )
 from acp.schema import PlanEntry, SessionNotification
 from pydantic import BaseModel, model_validator
+from pydantic_ai import RunContext
 from pydantic_ai import Agent as PydanticAgent  # type: ignore
 from pydantic_ai.messages import FunctionToolCallEvent, FunctionToolResultEvent, RetryPromptPart
 from pydantic_ai.run import AgentRunResultEvent  # type: ignore
@@ -362,6 +364,7 @@ class PromptStrategyManager:
             ctx.planner,
             ctx.prompt_text,
             _plan_chunk,
+            self._make_thought_sender(ctx.session_id),
             ctx.cancel_event,
             history=ctx.history,
             on_event=_capture_plan_event,
@@ -448,6 +451,17 @@ class PromptStrategyManager:
             )
 
         return _push_chunk
+
+    def _make_thought_sender(self, session_id: str) -> Callable[[str], Awaitable[None]]:
+        async def _push_thought(chunk: str) -> None:
+            await self.env.send_update(
+                session_notification(
+                    session_id,
+                    update_agent_thought(text_block(chunk)),
+                )
+            )
+
+        return _push_thought
 
     def _build_runner_event_handler(
         self,
@@ -603,6 +617,7 @@ class PromptStrategyManager:
         run_command_ctx_tokens: Dict[str, Any] = {}
         plan_progress = {"plan": plan_update, "idx": 0} if plan_update else None
         _push_chunk = self._make_chunk_sender(session_id)
+        _push_thought = self._make_thought_sender(session_id)
         handler = self._build_runner_event_handler(
             session_id,
             tool_trackers,
@@ -615,6 +630,7 @@ class PromptStrategyManager:
             runner,
             executor_prompt,
             _push_chunk,
+            _push_thought,
             cancel_event,
             history=history,
             on_event=handler,
@@ -652,7 +668,8 @@ class PromptStrategyManager:
             return
 
         @runner.tool(name="delegate_plan")  # type: ignore[misc]
-        async def delegate_plan(task: str) -> dict[str, Any]:
+        async def delegate_plan(ctx: RunContext[Any], task: str) -> dict[str, Any]:
+            _ = ctx
             try:
                 result = await planner.run(task)
                 data = getattr(result, "data", None)

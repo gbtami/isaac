@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import sys
 
@@ -41,8 +42,11 @@ async def interactive_loop(
                 f"{state.current_mode}|{state.current_model}{usage_suffix}> "
             )
             if line == CANCEL_TOKEN:
+                state.cancel_requested = True
                 await conn.cancel(session_id=session_id)
                 print("[cancelled]")
+                loop = asyncio.get_running_loop()
+                loop.call_later(1.0, setattr, state, "cancel_requested", False)
                 continue
         except EOFError:
             break

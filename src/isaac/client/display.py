@@ -36,6 +36,10 @@ def print_agent_text(text: str) -> None:
     console.print(Text(text, style="green"), end="")
 
 
+def print_thought(text: str) -> None:
+    console.print(Text(text, style="cyan dim"), end="")
+
+
 def print_diff(text: str) -> None:
     """Render a unified diff with syntax highlighting."""
     console.print(Syntax(text, "diff", theme="ansi_dark", line_numbers=False))

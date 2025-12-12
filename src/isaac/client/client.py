@@ -49,7 +49,7 @@ async def run_client(program: str, args: Iterable[str], mcp_servers: list[Any]) 
     client_impl = ACPClient(state)
     conn = connect_to_agent(client_impl, proc.stdin, proc.stdout)
 
-    await conn.initialize(
+    init_resp = await conn.initialize(
         protocol_version=PROTOCOL_VERSION,
         client_capabilities=ClientCapabilities(
             fs=FileSystemCapability(read_text_file=False, write_text_file=False),
@@ -57,6 +57,18 @@ async def run_client(program: str, args: Iterable[str], mcp_servers: list[Any]) 
         ),
         client_info=Implementation(name="example-client", title="Example Client", version="0.1.0"),
     )
+    if init_resp.protocol_version != PROTOCOL_VERSION:
+        print(
+            f"Incompatible ACP protocol version from agent: {init_resp.protocol_version}",
+            file=sys.stderr,
+        )
+        with contextlib.suppress(Exception):
+            await conn.close()
+        if proc.returncode is None:
+            proc.terminate()
+            with contextlib.suppress(ProcessLookupError):
+                await proc.wait()
+        return 1
     state.mcp_servers = [
         (srv.get("name") if isinstance(srv, dict) else getattr(srv, "name", "<server>"))
         or "<server>"

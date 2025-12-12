@@ -23,9 +23,11 @@ from acp import (
 )
 from acp.schema import (
     AgentMessageChunk,
+    AgentThoughtChunk,
     AgentPlanUpdate,
     AllowedOutcome,
     AudioContentBlock,
+    DeniedOutcome,
     FileEditToolCallContent,
     CurrentModeUpdate,
     EmbeddedResourceContentBlock,
@@ -44,6 +46,7 @@ from isaac.client.display import (
     print_mode_update,
     print_plan,
     print_file_edit_diff,
+    print_thought,
     print_tool,
 )
 from isaac.client.session_state import SessionUIState
@@ -68,6 +71,8 @@ class ACPClient(Client):
         **_: Any,
     ) -> RequestPermissionResponse:
         """Prompt the user for a permission choice (Prompt Turn permission flow)."""
+        if self._state.cancel_requested:
+            return RequestPermissionResponse(outcome=DeniedOutcome(outcome="cancelled"))
         raw_input = getattr(tool_call, "raw_input", None) or {}
         if raw_input.get("tool") == "run_command" and raw_input.get("command"):
             cwd = raw_input.get("cwd")
@@ -256,6 +261,17 @@ class ACPClient(Client):
             return
         if isinstance(update, AgentPlanUpdate):
             print_plan(update.entries or [])
+            return
+        if isinstance(update, AgentThoughtChunk):
+            if not self._state.show_thinking:
+                return
+            content = getattr(update, "content", None)
+            if content is not None and getattr(content, "text", None):
+                if self._state.pending_newline:
+                    print()
+                    self._state.pending_newline = False
+                print_thought(content.text)
+                self._state.pending_newline = True
             return
         if not isinstance(update, AgentMessageChunk):
             return

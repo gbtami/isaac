@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import inspect
 import logging
 import json
@@ -11,7 +12,12 @@ from typing import Any, Callable
 from pydantic_ai import RunContext
 from pydantic_ai import exceptions as ai_exc  # type: ignore
 
-from pydantic_ai.messages import PartDeltaEvent, PartEndEvent  # type: ignore
+from pydantic_ai.messages import (  # type: ignore
+    PartDeltaEvent,
+    PartEndEvent,
+    TextPartDelta,
+    ThinkingPartDelta,
+)
 from pydantic_ai.run import AgentRunResultEvent  # type: ignore
 
 from isaac.agent.tools import run_tool
@@ -139,6 +145,7 @@ async def stream_with_runner(
     runner: Any,
     prompt_text: str,
     on_text: Callable[[str], asyncio.Future | Any],
+    on_thought: Callable[[str], asyncio.Future | Any] | None = None,
     cancel_event: asyncio.Event | None = None,
     *,
     history: Any | None = None,
@@ -237,6 +244,10 @@ async def stream_with_runner(
             event_iter = await event_iter
         async for event in event_iter:
             if cancel_event.is_set():
+                closer = getattr(event_iter, "aclose", None)
+                if callable(closer):
+                    with contextlib.suppress(Exception):
+                        await closer()
                 return None, usage
 
             handled = False
@@ -260,12 +271,21 @@ async def stream_with_runner(
                 await on_text(event)
                 continue
             if isinstance(event, PartDeltaEvent):
-                delta = getattr(event.delta, "content_delta", "")
-                if delta:
-                    output_parts.append(delta)
-                    stream_logger.info("LLM delta=%s", delta[:200].replace("\n", "\\n"))
-                    llm_logger.info("RECV delta\n%s", delta)
-                    await on_text(delta)
+                if isinstance(event.delta, ThinkingPartDelta):
+                    delta = getattr(event.delta, "content_delta", None)
+                    if delta and on_thought is not None:
+                        stream_logger.info(
+                            "LLM thinking delta=%s", str(delta)[:200].replace("\n", "\\n")
+                        )
+                        llm_logger.info("RECV thinking delta\n%s", delta)
+                        await on_thought(str(delta))
+                elif isinstance(event.delta, TextPartDelta):
+                    delta = getattr(event.delta, "content_delta", "")
+                    if delta:
+                        output_parts.append(delta)
+                        stream_logger.info("LLM delta=%s", delta[:200].replace("\n", "\\n"))
+                        llm_logger.info("RECV delta\n%s", delta)
+                        await on_text(delta)
             elif isinstance(event, PartEndEvent):
                 kind = getattr(event.part, "part_kind", "")
                 if kind and kind not in {"text", "thinking"}:
@@ -275,7 +295,11 @@ async def stream_with_runner(
                         getattr(event.part, "content", None),
                     )
                 part = getattr(event.part, "content", "")
-                if part and not output_parts:
+                if kind == "thinking" and part and on_thought is not None:
+                    stream_logger.info("LLM thinking=%s", str(part)[:200].replace("\n", "\\n"))
+                    llm_logger.info("RECV thinking\n%s", part)
+                    await on_thought(str(part))
+                elif part and not output_parts:
                     output_parts.append(part)
                     stream_logger.info("LLM part_end=%s", str(part)[:200].replace("\n", "\\n"))
                     llm_logger.info("RECV part_end\n%s", part)

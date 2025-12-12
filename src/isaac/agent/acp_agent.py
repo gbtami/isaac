@@ -91,7 +91,7 @@ from isaac.agent.session_modes import build_mode_state
 from isaac.agent.session_store import SessionStore
 from isaac.agent.slash import available_slash_commands, handle_slash_command
 from isaac.agent.tool_io import await_with_cancel, truncate_text, truncate_tool_output
-from isaac.agent.tools import get_tools, run_tool
+from isaac.agent.tools import run_tool
 from isaac.agent.usage import format_usage_summary, normalize_usage
 
 logger = logging.getLogger("acp_server")
@@ -155,6 +155,8 @@ class ACPAgent(Agent):
         self._agent_name = agent_name
         self._agent_title = agent_title
         self._agent_version = agent_version
+        self._client_capabilities: Any | None = None
+        self._client_info: Any | None = None
         self._custom_runners = ai_runner is not None or planning_runner is not None
         self._session_commands_advertised: set[str] = set()
         self._ai_runner = ai_runner
@@ -207,10 +209,17 @@ class ACPAgent(Agent):
     ) -> InitializeResponse:
         """Handle ACP initialize handshake (Initialization section)."""
         logger.info("Received initialize request: %s", protocol_version)
+        # ACP version negotiation: if the requested version isn't supported, respond with
+        # the latest version we support; the client may disconnect if it can't accept it.
         if protocol_version != PROTOCOL_VERSION:
-            raise RequestError.invalid_request(
-                {"message": f"Incompatible protocol version {protocol_version}"}
+            logger.warning(
+                "Protocol version mismatch requested=%s supported=%s",
+                protocol_version,
+                PROTOCOL_VERSION,
             )
+        # Capture peer capabilities/info for optional behavior gating.
+        self._client_capabilities = client_capabilities
+        self._client_info = client_info
         capabilities = AgentCapabilities(
             load_session=True,
             prompt_capabilities=PromptCapabilities(
@@ -222,10 +231,6 @@ class ACPAgent(Agent):
             session_capabilities=SessionCapabilities(list=SessionListCapabilities()),
         )
         capabilities.field_meta = {"extMethods": ["model/list", "model/set"]}
-        try:
-            capabilities.tools = get_tools()  # type: ignore[attr-defined]
-        except Exception:
-            pass
 
         return InitializeResponse(
             protocol_version=PROTOCOL_VERSION,

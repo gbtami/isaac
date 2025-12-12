@@ -197,16 +197,8 @@ async def handle_slash_command(
 
     entry = SLASH_HANDLERS.get(command)
     if entry is None:
-        # Forward to agent only if it advertised the command; otherwise, surface guidance.
-        if command in state.available_agent_commands:
-            return False
-        # Fall back to local help to show available commands.
-        help_entry = SLASH_HANDLERS.get("/help")
-        if help_entry:
-            result = help_entry.handler(conn, session_id, state, permission_reset, "")
-            return bool(await result) if asyncio.iscoroutine(result) else bool(result)
-        print("Unknown slash command. Try /help.")
-        return True
+        # Always forward unknown slash commands to the agent for maximum ACP interop.
+        return False
 
     try:
         result = entry.handler(conn, session_id, state, permission_reset, argument)

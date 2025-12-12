@@ -16,5 +16,6 @@ class SessionUIState:
     show_status_on_start: bool = True
     pending_newline: bool = False
     show_thinking: bool = False
+    cancel_requested: bool = False
     usage_summary: str | None = None
     available_agent_commands: dict[str, str] = field(default_factory=dict)
