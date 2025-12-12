@@ -14,7 +14,7 @@ from pydantic_ai import exceptions as ai_exc  # type: ignore
 from pydantic_ai.messages import PartDeltaEvent, PartEndEvent  # type: ignore
 from pydantic_ai.run import AgentRunResultEvent  # type: ignore
 
-from isaac.agent.tools import TOOL_HANDLERS, run_tool
+from isaac.agent.tools import run_tool
 
 HISTORY_LOG_MAX = 8000
 
@@ -22,16 +22,117 @@ HISTORY_LOG_MAX = 8000
 def register_tools(agent: Any) -> None:
     logger = logging.getLogger("acp_server")
 
-    for name in TOOL_HANDLERS.keys():
+    @agent.tool(name="list_files")  # type: ignore[misc]
+    async def list_files_tool(
+        ctx: RunContext[Any],
+        directory: str = ".",
+        recursive: bool = True,
+    ) -> Any:
+        logger.info(
+            "Pydantic tool invoked: list_files args=%s",
+            {"directory": directory, "recursive": recursive},
+        )
+        return await run_tool("list_files", ctx=ctx, directory=directory, recursive=recursive)
 
-        def _make_tool(fn_name: str):
-            async def _wrapper(ctx: RunContext[Any] = None, **kwargs: Any) -> Any:
-                logger.info("Pydantic tool invoked: %s args=%s", fn_name, sorted(kwargs))
-                return await run_tool(fn_name, ctx=ctx, **kwargs)
+    @agent.tool(name="read_file")  # type: ignore[misc]
+    async def read_file_tool(
+        ctx: RunContext[Any],
+        path: str,
+        start: int | None = None,
+        lines: int | None = None,
+    ) -> Any:
+        logger.info(
+            "Pydantic tool invoked: read_file args=%s",
+            {"path": path, "start": start, "lines": lines},
+        )
+        return await run_tool("read_file", ctx=ctx, path=path, start=start, lines=lines)
 
-            return agent.tool(name=fn_name)(_wrapper)  # type: ignore[misc]
+    @agent.tool(name="run_command")  # type: ignore[misc]
+    async def run_command_tool(
+        ctx: RunContext[Any],
+        command: str,
+        cwd: str | None = None,
+        timeout: float | None = None,
+    ) -> Any:
+        logger.info(
+            "Pydantic tool invoked: run_command args=%s",
+            {"command": command, "cwd": cwd, "timeout": timeout},
+        )
+        return await run_tool("run_command", ctx=ctx, command=command, cwd=cwd, timeout=timeout)
 
-        _make_tool(name)
+    @agent.tool(name="edit_file")  # type: ignore[misc]
+    async def edit_file_tool(
+        ctx: RunContext[Any],
+        path: str,
+        content: str,
+        create: bool = True,
+    ) -> Any:
+        logger.info(
+            "Pydantic tool invoked: edit_file args=%s",
+            {"path": path, "create": create},
+        )
+        return await run_tool("edit_file", ctx=ctx, path=path, content=content, create=create)
+
+    @agent.tool(name="apply_patch")  # type: ignore[misc]
+    async def apply_patch_tool(
+        ctx: RunContext[Any],
+        path: str,
+        patch: str,
+        strip: int | None = None,
+    ) -> Any:
+        logger.info(
+            "Pydantic tool invoked: apply_patch args=%s",
+            {"path": path, "strip": strip},
+        )
+        return await run_tool("apply_patch", ctx=ctx, path=path, patch=patch, strip=strip)
+
+    @agent.tool(name="file_summary")  # type: ignore[misc]
+    async def file_summary_tool(
+        ctx: RunContext[Any],
+        path: str,
+        head_lines: int | None = 20,
+        tail_lines: int | None = 20,
+    ) -> Any:
+        logger.info(
+            "Pydantic tool invoked: file_summary args=%s",
+            {"path": path, "head_lines": head_lines, "tail_lines": tail_lines},
+        )
+        return await run_tool(
+            "file_summary",
+            ctx=ctx,
+            path=path,
+            head_lines=head_lines,
+            tail_lines=tail_lines,
+        )
+
+    @agent.tool(name="code_search")  # type: ignore[misc]
+    async def code_search_tool(
+        ctx: RunContext[Any],
+        pattern: str,
+        directory: str = ".",
+        glob: str | None = None,
+        case_sensitive: bool = True,
+        timeout: float | None = None,
+    ) -> Any:
+        logger.info(
+            "Pydantic tool invoked: code_search args=%s",
+            {
+                "pattern": pattern,
+                "directory": directory,
+                "glob": glob,
+                "case_sensitive": case_sensitive,
+                "timeout": timeout,
+            },
+        )
+        return await run_tool(
+            "code_search",
+            ctx=ctx,
+            pattern=pattern,
+            directory=directory,
+            glob=glob,
+            case_sensitive=case_sensitive,
+            timeout=timeout,
+        )
 
 
 async def stream_with_runner(

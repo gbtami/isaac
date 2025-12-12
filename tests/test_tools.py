@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Any
 
 import pytest
 from acp import RequestPermissionResponse, text_block
@@ -16,7 +17,7 @@ from isaac.agent.tools.file_summary import file_summary
 from isaac.agent.tools.list_files import list_files
 from isaac.agent.tools.read_file import read_file
 from isaac.agent.tools import TOOL_HANDLERS, run_tool
-from isaac.agent.tools.run_command import get_run_command_context, run_command
+from isaac.agent.tools.run_command import get_run_command_permission, run_command
 from tests.utils import make_function_agent
 from pydantic_ai import Agent as PydanticAgent  # type: ignore
 from pydantic_ai.models.test import TestModel  # type: ignore
@@ -164,9 +165,10 @@ async def test_model_tool_call_requests_permission(monkeypatch: pytest.MonkeyPat
 
     calls: list[dict[str, object]] = []
 
-    async def fake_run_command(command: str, cwd: str | None = None, timeout: float | None = None):
-        ctx = get_run_command_context()
-        if ctx and not await ctx.request_permission(command, cwd):
+    async def fake_run_command(
+        ctx: Any = None, command: str = "", cwd: str | None = None, timeout: float | None = None
+    ):
+        if get_run_command_permission(getattr(ctx, "tool_call_id", None)) is False:
             return {"content": None, "error": "permission denied", "returncode": -1}
         calls.append({"command": command, "cwd": cwd, "timeout": timeout})
         return {"content": "ok", "error": None, "returncode": 0}
@@ -188,6 +190,47 @@ async def test_model_tool_call_requests_permission(monkeypatch: pytest.MonkeyPat
     conn.request_permission.assert_awaited()
     assert calls, "Expected run_command to be invoked by the model"
     assert response.stop_reason == "end_turn"
+
+
+@pytest.mark.asyncio
+async def test_model_run_command_denied_blocks_execution(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+):
+    """When permission is denied, run_command should not execute."""
+
+    conn = AsyncMock()
+    conn.session_update = AsyncMock()
+    conn.request_permission = AsyncMock(
+        return_value=RequestPermissionResponse(
+            outcome=AllowedOutcome(option_id="reject_once", outcome="selected")
+        )
+    )
+
+    calls: list[dict[str, object]] = []
+
+    async def fake_run_command(
+        ctx: Any = None, command: str = "", cwd: str | None = None, timeout: float | None = None
+    ):
+        if get_run_command_permission(getattr(ctx, "tool_call_id", None)) is False:
+            return {"content": None, "error": "permission denied", "returncode": -1}
+        calls.append({"command": command, "cwd": cwd, "timeout": timeout})
+        return {"content": "ok", "error": None, "returncode": 0}
+
+    monkeypatch.setattr("isaac.agent.tools.run_command", fake_run_command)
+    monkeypatch.setitem(TOOL_HANDLERS, "run_command", fake_run_command)
+
+    model = TestModel(call_tools=["run_command"], custom_output_text="done")
+    ai_runner = PydanticAgent(model)
+    register_tools(ai_runner)
+    planning_runner = build_planning_agent(TestModel(call_tools=[]))
+    agent = ACPAgent(conn, ai_runner=ai_runner, planning_runner=planning_runner)
+    session = await agent.new_session(cwd=str(tmp_path), mcp_servers=[])
+    agent._session_modes[session.session_id] = "ask"
+
+    await agent.prompt(prompt=[text_block("run a command")], session_id=session.session_id)
+
+    conn.request_permission.assert_awaited()
+    assert calls == [], "run_command should not execute when denied"
 
 
 @pytest.mark.asyncio

@@ -17,6 +17,24 @@ _run_command_context: contextvars.ContextVar[RunCommandContext | None] = context
     "run_command_context", default=None
 )
 
+# Fallback permission map keyed by tool_call_id for cases where contextvars
+# don't propagate into tool execution tasks.
+_run_command_permissions: dict[str, bool] = {}
+
+
+def set_run_command_permission(tool_call_id: str, allowed: bool) -> None:
+    _run_command_permissions[tool_call_id] = allowed
+
+
+def pop_run_command_permission(tool_call_id: str) -> None:
+    _run_command_permissions.pop(tool_call_id, None)
+
+
+def get_run_command_permission(tool_call_id: str | None) -> bool | None:
+    if tool_call_id is None:
+        return None
+    return _run_command_permissions.get(tool_call_id)
+
 
 def set_run_command_context(ctx: RunCommandContext) -> contextvars.Token[RunCommandContext | None]:
     """Install a permission context for the current tool execution."""
@@ -46,11 +64,17 @@ async def run_command(
     if command == "" and isinstance(ctx, str):
         command = ctx
         ctx = None
-    ctx = get_run_command_context()
-    if ctx:
-        allowed = await ctx.request_permission(command, cwd)
-        if not allowed:
-            return {"content": "", "error": "permission denied", "returncode": -1}
+
+    allowed = get_run_command_permission(getattr(ctx, "tool_call_id", None))
+    ctx_var = get_run_command_context()
+    if ctx_var:
+        try:
+            allowed = await ctx_var.request_permission(command, cwd)
+        except TypeError:
+            allowed = bool(ctx_var.request_permission(command, cwd))
+
+    if allowed is False:
+        return {"content": "", "error": "permission denied", "returncode": -1}
 
     try:
         proc = await asyncio.create_subprocess_shell(

@@ -19,7 +19,7 @@ from acp.helpers import (
     update_plan,
 )
 from acp.schema import PlanEntry, SessionNotification
-from pydantic import BaseModel
+from pydantic import BaseModel, model_validator
 from pydantic_ai import Agent as PydanticAgent  # type: ignore
 from pydantic_ai.messages import FunctionToolCallEvent, FunctionToolResultEvent, RetryPromptPart
 from pydantic_ai.run import AgentRunResultEvent  # type: ignore
@@ -29,8 +29,10 @@ from isaac.agent.brain.prompt import EXECUTOR_PROMPT, PLANNING_SYSTEM_PROMPT
 from isaac.agent.runner import stream_with_runner
 from isaac.agent.tools.run_command import (
     RunCommandContext,
+    pop_run_command_permission,
     reset_run_command_context,
     set_run_command_context,
+    set_run_command_permission,
 )
 from isaac.agent.usage import normalize_usage
 
@@ -43,6 +45,56 @@ class PlanStep(BaseModel):
 
 class PlanSteps(BaseModel):
     entries: List[PlanStep]
+
+    @model_validator(mode="before")
+    @classmethod
+    def _coerce_legacy_formats(cls, value: Any) -> Any:
+        """Accept older/looser plan shapes and normalize to entries.
+
+        Models may still emit:
+        - {"steps": [...]} (legacy)
+        - {"entries": ["step", ...]} (strings)
+        - ["step", ...] (bare list)
+        - "1. step\\n2. step" (markdown list)
+        """
+        entries: Any = None
+        if isinstance(value, dict):
+            if "entries" in value:
+                entries = value.get("entries")
+            elif "steps" in value:
+                entries = value.get("steps")
+        else:
+            entries = value
+
+        if isinstance(entries, list):
+            normalized: list[dict[str, Any]] = []
+            for item in entries:
+                if isinstance(item, PlanStep):
+                    normalized.append(item.model_dump())
+                elif isinstance(item, str):
+                    text = item.strip()
+                    if text:
+                        normalized.append({"content": text})
+                elif isinstance(item, dict):
+                    if "content" not in item and "step" in item:
+                        item = {**item, "content": item.get("step")}
+                    normalized.append(item)
+            return {"entries": normalized}
+
+        if isinstance(entries, str):
+            lines = [ln.strip() for ln in entries.splitlines() if ln.strip()]
+            if not lines:
+                return {"entries": []}
+            items: list[str] = []
+            for ln in lines:
+                cleaned = ln.lstrip("-* ").strip()
+                if cleaned and cleaned[0].isdigit() and "." in cleaned:
+                    cleaned = cleaned.split(".", 1)[1].strip()
+                if cleaned:
+                    items.append(cleaned)
+            return {"entries": [{"content": it} for it in items]} if items else {"entries": []}
+
+        return value
 
 
 def build_planning_agent(model: Any, model_settings: Any = None) -> PydanticAgent:
@@ -431,6 +483,15 @@ class PromptStrategyManager:
                             else "",
                             cwd=args.get("cwd") if isinstance(args, dict) else None,
                         )
+                    set_run_command_permission(event.tool_call_id, allowed)
+
+                    async def _permission(_: str, __: str | None = None) -> bool:
+                        return allowed
+
+                    token = set_run_command_context(
+                        RunCommandContext(request_permission=_permission)
+                    )
+                    run_command_ctx_tokens[event.tool_call_id] = token
                     if not allowed:
                         denied = tracker.progress(
                             external_id=event.tool_call_id,
@@ -446,11 +507,6 @@ class PromptStrategyManager:
                         )
                         await self.env.send_update(session_notification(session_id, denied))
                         return True
-
-                    token = set_run_command_context(
-                        RunCommandContext(request_permission=lambda *_: True)
-                    )
-                    run_command_ctx_tokens[event.tool_call_id] = token
                 return True
 
             if isinstance(event, FunctionToolResultEvent):
@@ -462,6 +518,8 @@ class PromptStrategyManager:
                 )
                 result_part = event.result
                 tool_name = getattr(result_part, "tool_name", None) or ""
+                if tool_name == "run_command":
+                    pop_run_command_permission(event.tool_call_id)
                 content = getattr(result_part, "content", None)
                 raw_output: dict[str, Any] = {}
                 if isinstance(content, dict):
