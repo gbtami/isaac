@@ -72,11 +72,16 @@ async def test_programmatic_plan_then_execute():
     await agent.prompt(prompt=[text_block("do work")], session_id=session_id)
 
     updates = [call.kwargs["update"] for call in conn.session_update.await_args_list]  # type: ignore[attr-defined]
-    assert any(isinstance(u, AgentPlanUpdate) for u in updates)
+    plan_updates = [u for u in updates if isinstance(u, AgentPlanUpdate)]
+    assert plan_updates
     assert any(
         isinstance(u, AgentMessageChunk)
         and getattr(getattr(u, "content", None), "text", "") == "executed"
         for u in updates
+    )
+    assert any(e.status == "in_progress" for e in plan_updates[0].entries)
+    assert plan_updates[-1].entries and all(
+        e.status == "completed" for e in plan_updates[-1].entries
     )
     assert len(planning_runner.prompts) == 1
     assert len(executor.prompts) == 1
@@ -170,6 +175,16 @@ async def test_delegation_strategy_emits_plan_update_and_execution():
     )
     assert len(delegate_runner.prompts) == 1
     assert "delegate_plan" in delegate_runner.prompts[0]
+
+
+@pytest.mark.asyncio
+async def test_plan_parser_handles_steps_list_line():
+    from isaac.agent.brain.planner import parse_plan_from_text
+
+    update = parse_plan_from_text("steps=['first','second','third']")
+    assert update
+    contents = [getattr(e, "content", "") for e in update.entries]
+    assert contents == ["first", "second", "third"]
 
 
 @pytest.mark.asyncio

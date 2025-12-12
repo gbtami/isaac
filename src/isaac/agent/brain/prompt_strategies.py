@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 from dataclasses import dataclass
+import contextlib
 from typing import Any, Awaitable, Callable, Dict
 
 from acp.contrib.tool_calls import ToolCallTracker
@@ -12,10 +13,11 @@ from acp.helpers import (
     session_notification,
     text_block,
     tool_content,
+    tool_diff_content,
     update_agent_message,
     update_plan,
 )
-from acp.schema import SessionNotification
+from acp.schema import PlanEntry, SessionNotification
 from pydantic_ai.messages import FunctionToolCallEvent, FunctionToolResultEvent, RetryPromptPart
 
 from isaac.agent.brain.planner import parse_plan_from_text
@@ -169,12 +171,13 @@ class PromptStrategyManager:
         plan_update, plan_text, plan_usage = await self._run_planning_phase(ctx)
         history = ctx.history
         if plan_update:
-            await self.env.send_update(session_notification(ctx.session_id, plan_update))
+            planned = self._plan_with_status(plan_update, active_index=0)
+            await self.env.send_update(session_notification(ctx.session_id, planned))
 
         executor_prompt = self._prepare_executor_prompt(
             ctx.prompt_text, plan_update=plan_update, plan_response=plan_text
         )
-        return await self._run_execution_phase(
+        response = await self._run_execution_phase(
             ctx.session_id,
             ctx.runner,
             executor_prompt,
@@ -186,6 +189,10 @@ class PromptStrategyManager:
             plan_usage=plan_usage,
             allow_plan_parse=ctx.strategy_has_planning,
         )
+        if plan_update:
+            completed = self._plan_with_status(plan_update, status_all="completed")
+            await self.env.send_update(session_notification(ctx.session_id, completed))
+        return response
 
     async def _run_delegation_strategy(self, ctx: PromptContext) -> Any:
         self._ensure_delegate_tool(ctx.session_id, ctx.runner, ctx.planner)
@@ -194,14 +201,18 @@ class PromptStrategyManager:
         )
         executor_prompt = f"{delegate_hint}\n\n{ctx.prompt_text}"
         plan_seen = {"sent": False}
+        first_plan: Any | None = None
 
         async def _plan_hook(tool_name: str, raw_output: dict[str, Any]) -> None:
+            nonlocal first_plan
             if tool_name != "delegate_plan":
                 return
             plan_update = self._plan_update_from_raw(raw_output)
             if plan_update:
                 plan_seen["sent"] = True
-                await self.env.send_update(session_notification(ctx.session_id, plan_update))
+                first_plan = plan_update
+                initial = self._plan_with_status(plan_update, active_index=0)
+                await self.env.send_update(session_notification(ctx.session_id, initial))
 
         response = await self._run_execution_phase(
             ctx.session_id,
@@ -218,7 +229,13 @@ class PromptStrategyManager:
                 {"content": self.env.session_last_chunk.get(ctx.session_id)}
             )
             if maybe_plan:
-                await self.env.send_update(session_notification(ctx.session_id, maybe_plan))
+                first_plan = maybe_plan
+                initial = self._plan_with_status(maybe_plan, active_index=0)
+                await self.env.send_update(session_notification(ctx.session_id, initial))
+                plan_seen["sent"] = True
+        if plan_seen["sent"] and first_plan:
+            completed = self._plan_with_status(first_plan, status_all="completed")
+            await self.env.send_update(session_notification(ctx.session_id, completed))
         return response
 
     async def _run_single_agent_strategy(self, ctx: PromptContext) -> Any:
@@ -238,7 +255,8 @@ class PromptStrategyManager:
     async def _run_plan_only_strategy(self, ctx: PromptContext) -> Any:
         plan_update, _, plan_usage = await self._run_planning_phase(ctx)
         if plan_update:
-            await self.env.send_update(session_notification(ctx.session_id, plan_update))
+            pending = self._plan_with_status(plan_update, status_all="pending")
+            await self.env.send_update(session_notification(ctx.session_id, pending))
         self.env.set_usage(ctx.session_id, normalize_usage(plan_usage))
         return self._prompt_end()
 
@@ -325,6 +343,7 @@ class PromptStrategyManager:
         tool_trackers: Dict[str, ToolCallTracker],
         run_command_ctx_tokens: Dict[str, Any],
         plan_result_hook: Callable[[str, dict[str, Any]], Awaitable[None]] | None = None,
+        plan_progress: dict[str, Any] | None = None,
     ) -> Callable[[Any], Awaitable[bool]]:
         async def _handle_runner_event(event: Any) -> bool:
             if isinstance(event, FunctionToolCallEvent):
@@ -402,13 +421,45 @@ class PromptStrategyManager:
                         await plan_result_hook(tool_name, raw_output)
                     except Exception:
                         pass
+                content_blocks: list[Any] = []
+                new_text = raw_output.get("new_text")
+                old_text = raw_output.get("old_text")
+                if tool_name in {"edit_file", "apply_patch"} and isinstance(new_text, str):
+                    path = ""
+                    try:
+                        path = str(args.get("path")) if isinstance(args, dict) else ""
+                    except Exception:
+                        path = ""
+                    with contextlib.suppress(Exception):
+                        content_blocks.append(tool_diff_content(path, new_text, old_text))
+                if not content_blocks and summary:
+                    content_blocks = [tool_content(text_block(str(summary)))]
                 progress = tracker.progress(
                     external_id=event.tool_call_id,
                     status=status,
                     raw_output=raw_output,
-                    content=[tool_content(text_block(str(summary)))] if summary else None,
+                    content=content_blocks or None,
                 )
                 await self.env.send_update(session_notification(session_id, progress))
+
+                # Advance plan status when a tool completes successfully.
+                if plan_progress and plan_progress.get("plan") and not raw_output.get("error"):
+                    entries = getattr(plan_progress["plan"], "entries", []) or []
+                    if entries:
+                        idx = plan_progress.get("idx", 0)
+                        idx = max(int(idx), 0)
+                        if idx < len(entries):
+                            idx += 1
+                            plan_progress["idx"] = idx
+                            if idx >= len(entries):
+                                plan_note = self._plan_with_status(
+                                    plan_progress["plan"], status_all="completed"
+                                )
+                            else:
+                                plan_note = self._plan_with_status(
+                                    plan_progress["plan"], active_index=idx
+                                )
+                            await self.env.send_update(session_notification(session_id, plan_note))
                 return True
 
             return False
@@ -432,9 +483,14 @@ class PromptStrategyManager:
     ) -> Any:
         tool_trackers: Dict[str, ToolCallTracker] = {}
         run_command_ctx_tokens: Dict[str, Any] = {}
+        plan_progress = {"plan": plan_update, "idx": 0} if plan_update else None
         _push_chunk = self._make_chunk_sender(session_id)
         handler = self._build_runner_event_handler(
-            session_id, tool_trackers, run_command_ctx_tokens, plan_result_hook
+            session_id,
+            tool_trackers,
+            run_command_ctx_tokens,
+            plan_result_hook,
+            plan_progress,
         )
 
         response_text, usage = await stream_with_runner(
@@ -462,7 +518,9 @@ class PromptStrategyManager:
         if allow_plan_parse and not plan_update and not plan_response and plan_result_hook is None:
             exec_plan_update = parse_plan_from_text(response_text or "")
         if exec_plan_update:
-            await self.env.send_update(session_notification(session_id, exec_plan_update))
+            plan_progress = {"plan": exec_plan_update, "idx": 0}
+            initial = self._plan_with_status(exec_plan_update, active_index=0)
+            await self.env.send_update(session_notification(session_id, initial))
         if response_text == "":
             await _push_chunk(response_text)
         combined_usage = normalize_usage(usage) or normalize_usage(plan_usage)
@@ -498,20 +556,62 @@ class PromptStrategyManager:
         content = raw_output.get("content") or ""
         candidates: list[str] = []
         if isinstance(plan, list):
-            candidates.extend(str(item) for item in plan if item)
-        if not candidates and isinstance(plan, str):
-            candidates.append(plan)
+            candidates.extend(self._normalize_plan_items(plan))
+        elif isinstance(plan, str):
+            candidates.extend(self._normalize_plan_items([plan]))
         if not candidates and content:
             parsed = parse_plan_from_text(str(content))
             if parsed:
                 return parsed
-            candidates.append(str(content))
+            candidates.extend(self._normalize_plan_items([str(content)]))
         if not candidates:
             return None
         entries = [plan_entry(item) for item in candidates if item]
         if not entries:
             return None
         return update_plan(entries)
+
+    @staticmethod
+    def _normalize_plan_items(items: list[Any]) -> list[str]:
+        normalized: list[str] = []
+        for item in items:
+            text = str(item).strip()
+            if text.startswith("steps="):
+                text = text.split("=", 1)[1].strip()
+            if text.startswith("[") and text.endswith("]"):
+                try:
+                    inner = text.strip()[1:-1]
+                    parts = [p.strip(" '\"") for p in inner.split(",") if p.strip(" '\"")]
+                    normalized.extend(parts)
+                    continue
+                except Exception:
+                    pass
+            normalized.append(text)
+        return normalized
+
+    @staticmethod
+    def _plan_with_status(
+        plan_update: Any, *, active_index: int | None = None, status_all: str | None = None
+    ) -> Any:
+        try:
+            entries = list(getattr(plan_update, "entries", []) or [])
+        except Exception:
+            return plan_update
+        if not entries:
+            return plan_update
+        updated: list[PlanEntry] = []
+        for idx, entry in enumerate(entries):
+            status = status_all or (
+                "in_progress" if active_index is not None and idx == active_index else "pending"
+            )
+            try:
+                updated.append(entry.model_copy(update={"status": status}))
+            except Exception:
+                updated.append(entry)
+        try:
+            return update_plan(updated)
+        except Exception:
+            return plan_update
 
     @staticmethod
     def _prompt_cancel() -> Any:

@@ -24,23 +24,14 @@ def parse_plan_from_text(output: str) -> AgentPlanUpdate | None:
     if not lines:
         return None
 
-    start = None
-    header_present = False
-    header_remainder: str | None = None
-    for idx, line in enumerate(lines):
-        if line.lower().startswith("plan:"):
-            start = idx + 1
-            header_present = True
-            remainder = line.split(":", 1)[1].strip()
-            if remainder:
-                header_remainder = remainder
-            break
-
     candidates: List[str] = []
-    if header_remainder:
-        candidates.extend(_split_inline_items(header_remainder))
+    scan_lines = lines
+    if lines and lines[0].lower().startswith("plan:"):
+        remainder = lines[0].split(":", 1)[1].strip()
+        if remainder:
+            candidates.extend(_split_inline_items(remainder))
+        scan_lines = lines[1:]
 
-    scan_lines = lines[start:] if header_present else lines
     for line in scan_lines:
         if line and line[0] in {"-", "*"}:
             candidates.append(line.lstrip("-* ").strip())
@@ -51,14 +42,29 @@ def parse_plan_from_text(output: str) -> AgentPlanUpdate | None:
             else:
                 candidates.append(line.strip())
 
-    # Without an explicit header, require at least two steps to avoid false positives.
-    if not header_present and len(candidates) < 2:
+    items: list[str] = []
+    for item in candidates:
+        if not item:
+            continue
+        normalized = item
+        if normalized.startswith("steps="):
+            normalized = normalized.split("=", 1)[1].strip()
+        if normalized.startswith("[") and normalized.endswith("]"):
+            try:
+                # Remove leading/trailing brackets then split on commas.
+                inner = normalized.strip()[1:-1]
+                parts = [p.strip(" '\"") for p in inner.split(",") if p.strip(" '\"")]
+                if parts:
+                    items.extend(parts)
+                    continue
+            except Exception:
+                pass
+        items.append(normalized)
+
+    if not items:
         return None
 
-    if not candidates:
-        return None
-
-    entries = [plan_entry(item) for item in candidates if item]
+    entries = [plan_entry(item) for item in items if item]
     if not entries:
         return None
     return update_plan(entries)

@@ -255,8 +255,7 @@ class ACPClient(Client):
                         self._state.pending_newline = True
             return
         if isinstance(update, AgentPlanUpdate):
-            entries = [getattr(e, "content", "") for e in update.entries or []]
-            print_plan(entries)
+            print_plan(update.entries or [])
             return
         if not isinstance(update, AgentMessageChunk):
             return

@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
-from typing import Iterable
+from typing import Any, Iterable
+import ast
+import contextlib
 
 from rich.console import Console
 from rich.syntax import Syntax
@@ -39,12 +41,39 @@ def print_diff(text: str) -> None:
     console.print(Syntax(text, "diff", theme="ansi_dark", line_numbers=False))
 
 
-def print_plan(entries: Iterable[str]) -> None:
-    table = Table(title="Plan", show_header=False, box=None, border_style="cyan")
-    table.add_column("#", width=4, style="cyan")
+def print_plan(entries: Iterable[Any]) -> None:
+    """Render plan entries with status/priority."""
+    table = Table(show_header=False, box=None, border_style="cyan")
+    table.add_column("", width=2, style="cyan")
+    table.add_column("Priority", width=9, style="yellow")
     table.add_column("Item", style="white")
-    for idx, entry in enumerate(entries, start=1):
-        table.add_row(str(idx), entry)
+    status_icons = {
+        "completed": ("[✓]", "green"),
+        "in_progress": ("[~]", "yellow"),
+        "pending": ("[ ]", "cyan"),
+    }
+
+    def _format_content(raw: Any) -> str:
+        if not isinstance(raw, str):
+            return str(raw)
+        text = raw.strip()
+        if text.startswith("steps="):
+            text = text.split("=", 1)[1].strip()
+        if text.startswith("[") and text.endswith("]"):
+            with contextlib.suppress(Exception):
+                parsed = ast.literal_eval(text)
+                if isinstance(parsed, list):
+                    return "\n".join(
+                        f"- {str(item).strip()}" for item in parsed if str(item).strip()
+                    )
+        return text
+
+    for entry in entries:
+        status = getattr(entry, "status", "pending") or "pending"
+        icon, color = status_icons.get(status, ("[ ]", "cyan"))
+        priority = getattr(entry, "priority", "medium") or "medium"
+        content = _format_content(getattr(entry, "content", "") or "")
+        table.add_row(Text(icon, style=color), priority, content)
     console.print(table)
 
 

@@ -33,10 +33,13 @@ async def test_set_session_model_changes_runner(monkeypatch, tmp_path: Path):
     response = await agent.prompt(prompt=[text_block("hello")], session_id=session.session_id)
 
     conn.session_update.assert_called()
-    notification = conn.session_update.call_args.kwargs["update"]
-    assert isinstance(notification, AgentMessageChunk)
-    assert notification.content.text
-    assert "Error" not in notification.content.text
+    updates = [call.kwargs["update"] for call in conn.session_update.call_args_list]  # type: ignore[attr-defined]
+    agent_chunks = [u for u in updates if isinstance(u, AgentMessageChunk)]
+    assert agent_chunks
+    assert any(
+        getattr(c.content, "text", "") and "Error" not in getattr(c.content, "text", "")
+        for c in agent_chunks
+    )
     assert response.stop_reason == "end_turn"
 
 
