@@ -41,6 +41,8 @@ def parse_plan_from_text(output: str) -> AgentPlanUpdate | None:
                 candidates.append(remainder[1].strip())
             else:
                 candidates.append(line.strip())
+        elif line.lower().startswith("steps="):
+            candidates.append(line.strip())
 
     items: list[str] = []
     for item in candidates:

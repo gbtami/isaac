@@ -7,7 +7,7 @@ from acp import RequestPermissionResponse, text_block
 from acp.schema import AllowedOutcome
 from unittest.mock import AsyncMock
 
-from isaac.agent.brain.planning_agent import build_planning_agent
+from isaac.agent.brain.prompt_strategies import build_planning_agent
 from isaac.agent.runner import register_tools
 from isaac.agent.tools.apply_patch import apply_patch
 from isaac.agent.tools.code_search import code_search

@@ -35,7 +35,7 @@ from pydantic_ai.providers.openai import OpenAIProvider  # type: ignore
 from pydantic_ai.providers.openrouter import OpenRouterProvider  # type: ignore
 
 from isaac.agent.brain.prompt import SINGLE_AGENT_SYSTEM_PROMPT, SYSTEM_PROMPT
-from isaac.agent.brain.planning_agent import build_planning_agent
+from isaac.agent.brain.prompt_strategies import build_planning_agent
 from isaac.agent.tools import register_readonly_tools
 
 logger = logging.getLogger("acp_server")

@@ -5,7 +5,8 @@ from __future__ import annotations
 import asyncio
 from dataclasses import dataclass
 import contextlib
-from typing import Any, Awaitable, Callable, Dict
+from typing import Any, Awaitable, Callable, Dict, List, Literal
+from uuid import uuid4
 
 from acp.contrib.tool_calls import ToolCallTracker
 from acp.helpers import (
@@ -18,10 +19,13 @@ from acp.helpers import (
     update_plan,
 )
 from acp.schema import PlanEntry, SessionNotification
+from pydantic import BaseModel
+from pydantic_ai import Agent as PydanticAgent  # type: ignore
 from pydantic_ai.messages import FunctionToolCallEvent, FunctionToolResultEvent, RetryPromptPart
+from pydantic_ai.run import AgentRunResultEvent  # type: ignore
 
 from isaac.agent.brain.planner import parse_plan_from_text
-from isaac.agent.brain.prompt import EXECUTOR_PROMPT
+from isaac.agent.brain.prompt import EXECUTOR_PROMPT, PLANNING_SYSTEM_PROMPT
 from isaac.agent.runner import stream_with_runner
 from isaac.agent.tools.run_command import (
     RunCommandContext,
@@ -29,6 +33,28 @@ from isaac.agent.tools.run_command import (
     set_run_command_context,
 )
 from isaac.agent.usage import normalize_usage
+
+
+class PlanStep(BaseModel):
+    content: str
+    priority: Literal["high", "medium", "low"] = "medium"
+    id: str | None = None
+
+
+class PlanSteps(BaseModel):
+    entries: List[PlanStep]
+
+
+def build_planning_agent(model: Any, model_settings: Any = None) -> PydanticAgent:
+    """Create a lightweight planning agent for programmatic hand-off."""
+
+    return PydanticAgent(
+        model,
+        system_prompt=PLANNING_SYSTEM_PROMPT,
+        model_settings=model_settings,
+        toolsets=(),
+        output_type=PlanSteps,
+    )
 
 
 @dataclass
@@ -266,9 +292,19 @@ class PromptStrategyManager:
         self, ctx: PromptContext
     ) -> tuple[Any | None, str | None, Any | None]:
         plan_chunks: list[str] = []
+        structured_plan: PlanSteps | None = None
 
         async def _plan_chunk(chunk: str) -> None:
             plan_chunks.append(chunk)
+
+        async def _capture_plan_event(event: Any) -> bool:
+            nonlocal structured_plan
+            if isinstance(event, AgentRunResultEvent):
+                result = getattr(event, "result", None)
+                output = getattr(result, "output", None) if result is not None else None
+                if isinstance(output, PlanSteps):
+                    structured_plan = output
+            return False
 
         plan_response, plan_usage = await stream_with_runner(
             ctx.planner,
@@ -276,6 +312,7 @@ class PromptStrategyManager:
             _plan_chunk,
             ctx.cancel_event,
             history=ctx.history,
+            on_event=_capture_plan_event,
             store_messages=ctx.store_model_messages,
         )
         combined_plan_text = plan_response or "".join(plan_chunks)
@@ -300,12 +337,35 @@ class PromptStrategyManager:
             )
             # Drop validation failure text to avoid feeding it into execution prompts.
             combined_plan_text = ""
+        plan_update = None
+        plan_text_for_executor = combined_plan_text or plan_response
 
-        plan_update = parse_plan_from_text(combined_plan_text or "")
-        if not plan_update and combined_plan_text:
-            entries = [plan_entry(combined_plan_text)]
-            plan_update = update_plan(entries)
-        return plan_update, combined_plan_text or plan_response, plan_usage
+        if structured_plan and structured_plan.entries:
+            entries: list[PlanEntry] = []
+            executor_lines: list[str] = []
+            for idx, item in enumerate(structured_plan.entries):
+                if not isinstance(item, PlanStep):
+                    continue
+                content = item.content.strip()
+                if not content:
+                    continue
+                priority = item.priority if item.priority in {"high", "medium", "low"} else "medium"
+                step_id = item.id or f"step_{idx + 1}_{uuid4().hex[:6]}"
+                pe = plan_entry(content, priority=priority, status="pending")
+                pe = pe.model_copy(update={"field_meta": {"id": step_id}})
+                entries.append(pe)
+                executor_lines.append(content)
+            if entries:
+                plan_update = update_plan(entries)
+                plan_text_for_executor = "\n".join(f"- {line}" for line in executor_lines)
+
+        if plan_update is None:
+            plan_update = parse_plan_from_text(combined_plan_text or "")
+            if not plan_update and combined_plan_text:
+                entries = [plan_entry(combined_plan_text)]
+                plan_update = update_plan(entries)
+
+        return plan_update, plan_text_for_executor, plan_usage
 
     def _prepare_executor_prompt(
         self,
@@ -538,13 +598,44 @@ class PromptStrategyManager:
             try:
                 result = await planner.run(task)
                 data = getattr(result, "data", None)
-                steps = getattr(data, "steps", None) if data is not None else None
-                plan_steps = list(steps or [])
-                if not plan_steps and isinstance(data, str):
-                    plan_steps = [data]
-                if not plan_steps and hasattr(result, "output") and isinstance(result.output, str):
-                    plan_steps = [result.output]
-                plan_text = "\n".join(str(step) for step in plan_steps if step) or task
+                output = getattr(result, "output", None)
+
+                plan_steps: list[Any] = []
+                candidate = data if data is not None else output
+
+                if isinstance(candidate, PlanSteps):
+                    plan_steps = [
+                        {"content": e.content, "priority": e.priority, "id": e.id}
+                        for e in candidate.entries
+                        if isinstance(e, PlanStep) and e.content.strip()
+                    ]
+                elif isinstance(output, PlanSteps):
+                    plan_steps = [
+                        {"content": e.content, "priority": e.priority, "id": e.id}
+                        for e in output.entries
+                        if isinstance(e, PlanStep) and e.content.strip()
+                    ]
+                elif isinstance(candidate, str) and candidate.strip():
+                    parsed = parse_plan_from_text(candidate)
+                    if parsed:
+                        entries = getattr(parsed, "entries", []) or []
+                        plan_steps = [
+                            str(getattr(e, "content", "")).strip()
+                            for e in entries
+                            if str(getattr(e, "content", "")).strip()
+                        ]
+                    if not plan_steps:
+                        plan_steps = self._normalize_plan_items([candidate])
+
+                if not plan_steps and isinstance(candidate, str):
+                    plan_steps = [candidate.strip()]
+
+                if plan_steps and isinstance(plan_steps[0], dict):
+                    plan_text = (
+                        "\n".join(str(p.get("content", "")).strip() for p in plan_steps) or task
+                    )
+                else:
+                    plan_text = "\n".join(str(step) for step in plan_steps if step) or task
                 return {"plan": plan_steps, "content": plan_text, "tool": "delegate_plan"}
             except Exception as exc:  # noqa: BLE001
                 return {"plan": [], "content": None, "error": str(exc), "tool": "delegate_plan"}
@@ -556,6 +647,26 @@ class PromptStrategyManager:
         content = raw_output.get("content") or ""
         candidates: list[str] = []
         if isinstance(plan, list):
+            if any(isinstance(item, dict) for item in plan):
+                entries: list[PlanEntry] = []
+                for idx, item in enumerate(plan):
+                    if isinstance(item, dict):
+                        text = str(item.get("content", "")).strip()
+                        if not text:
+                            continue
+                        priority = str(item.get("priority", "medium")).strip().lower()
+                        if priority not in {"high", "medium", "low"}:
+                            priority = "medium"
+                        step_id = str(item.get("id") or f"step_{idx + 1}_{uuid4().hex[:6]}")
+                        pe = plan_entry(text, priority=priority, status="pending")
+                        pe = pe.model_copy(update={"field_meta": {"id": step_id}})
+                        entries.append(pe)
+                    else:
+                        text = str(item).strip()
+                        if text:
+                            entries.append(plan_entry(text))
+                if entries:
+                    return update_plan(entries)
             candidates.extend(self._normalize_plan_items(plan))
         elif isinstance(plan, str):
             candidates.extend(self._normalize_plan_items([plan]))
@@ -601,9 +712,17 @@ class PromptStrategyManager:
             return plan_update
         updated: list[PlanEntry] = []
         for idx, entry in enumerate(entries):
-            status = status_all or (
-                "in_progress" if active_index is not None and idx == active_index else "pending"
-            )
+            if status_all is not None:
+                status = status_all
+            elif active_index is not None:
+                if idx < active_index:
+                    status = "completed"
+                elif idx == active_index:
+                    status = "in_progress"
+                else:
+                    status = "pending"
+            else:
+                status = getattr(entry, "status", "pending")
             try:
                 updated.append(entry.model_copy(update={"status": status}))
             except Exception:

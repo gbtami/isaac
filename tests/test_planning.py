@@ -187,6 +187,44 @@ async def test_plan_parser_handles_steps_list_line():
     assert contents == ["first", "second", "third"]
 
 
+def test_plan_update_from_raw_accepts_structured_entries():
+    from isaac.agent.brain.prompt_strategies import PromptStrategyManager, StrategyEnv
+
+    async def _noop_send(*_: object) -> None:
+        return None
+
+    async def _noop_permission(*_: object, **__: object) -> bool:
+        return True
+
+    env = StrategyEnv(
+        session_modes={},
+        session_last_chunk={},
+        session_strategies={},
+        delegate_tool_enabled=set(),
+        default_strategy="single",
+        send_update=_noop_send,
+        request_run_permission=_noop_permission,
+        refresh_history=lambda *_: [],
+        set_usage=lambda *_: None,
+    )
+    mgr = PromptStrategyManager(env)
+    update = mgr._plan_update_from_raw(
+        {
+            "plan": [
+                {"content": "a", "priority": "high", "id": "one"},
+                {"content": "b", "priority": "low", "id": "two"},
+            ]
+        }
+    )
+    assert update
+    assert [e.content for e in update.entries] == ["a", "b"]
+    assert [e.priority for e in update.entries] == ["high", "low"]
+    assert [getattr(e.field_meta, "get", lambda *_: None)("id") for e in update.entries] == [
+        "one",
+        "two",
+    ]
+
+
 @pytest.mark.asyncio
 async def test_single_strategy_uses_single_runner_only():
     conn = AsyncMock()

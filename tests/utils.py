@@ -7,7 +7,7 @@ from acp.agent.connection import AgentSideConnection
 from acp import RequestPermissionResponse
 from acp.schema import AllowedOutcome
 from isaac.agent import ACPAgent
-from isaac.agent.brain.planning_agent import build_planning_agent
+from isaac.agent.brain.prompt_strategies import build_planning_agent
 from isaac.agent.runner import register_tools
 from pydantic_ai import Agent as PydanticAgent  # type: ignore
 from pydantic_ai.models.test import TestModel  # type: ignore
