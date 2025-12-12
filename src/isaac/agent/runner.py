@@ -223,6 +223,7 @@ async def stream_with_runner(
 
     try:
         event_iter = None
+        thought_delta_buffer: list[str] = []
         if history is not None:
             try:
                 llm_logger.info("HISTORY %s", json.dumps(history)[:HISTORY_LOG_MAX])
@@ -273,12 +274,12 @@ async def stream_with_runner(
             if isinstance(event, PartDeltaEvent):
                 if isinstance(event.delta, ThinkingPartDelta):
                     delta = getattr(event.delta, "content_delta", None)
-                    if delta and on_thought is not None:
+                    if delta:
                         stream_logger.info(
                             "LLM thinking delta=%s", str(delta)[:200].replace("\n", "\\n")
                         )
                         llm_logger.info("RECV thinking delta\n%s", delta)
-                        await on_thought(str(delta))
+                        thought_delta_buffer.append(str(delta))
                 elif isinstance(event.delta, TextPartDelta):
                     delta = getattr(event.delta, "content_delta", "")
                     if delta:
@@ -295,10 +296,15 @@ async def stream_with_runner(
                         getattr(event.part, "content", None),
                     )
                 part = getattr(event.part, "content", "")
-                if kind == "thinking" and part and on_thought is not None:
-                    stream_logger.info("LLM thinking=%s", str(part)[:200].replace("\n", "\\n"))
-                    llm_logger.info("RECV thinking\n%s", part)
-                    await on_thought(str(part))
+                if kind == "thinking" and on_thought is not None:
+                    final_thought = str(part) if part else "".join(thought_delta_buffer)
+                    thought_delta_buffer.clear()
+                    if final_thought:
+                        stream_logger.info(
+                            "LLM thinking=%s", final_thought[:200].replace("\n", "\\n")
+                        )
+                        llm_logger.info("RECV thinking\n%s", final_thought)
+                        await on_thought(final_thought)
                 elif part and not output_parts:
                     output_parts.append(part)
                     stream_logger.info("LLM part_end=%s", str(part)[:200].replace("\n", "\\n"))
@@ -340,5 +346,11 @@ async def stream_with_runner(
         stream_logger.warning("LLM stream error: %s", msg)
         llm_logger.warning("LLM stream error: %s", msg)
         return f"Provider error: {msg}", None
+
+    if thought_delta_buffer and on_thought is not None:
+        final_thought = "".join(thought_delta_buffer)
+        if final_thought:
+            with contextlib.suppress(Exception):
+                await on_thought(final_thought)
 
     return ("".join(output_parts) or None), usage

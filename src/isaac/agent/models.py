@@ -9,6 +9,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
 import urllib.request
 import configparser
 from pathlib import Path
@@ -22,7 +23,7 @@ from pydantic_ai.models.anthropic import AnthropicModel, AnthropicModelSettings 
 from pydantic_ai.models.cerebras import CerebrasModel  # type: ignore
 from pydantic_ai.models.google import GoogleModel, GoogleModelSettings  # type: ignore
 from pydantic_ai.models.mistral import MistralModel  # type: ignore
-from pydantic_ai.models.openai import OpenAIChatModel  # type: ignore
+from pydantic_ai.models.openai import OpenAIChatModel, OpenAIChatModelSettings  # type: ignore
 from pydantic_ai.models.openrouter import OpenRouterModel, OpenRouterModelSettings  # type: ignore
 from pydantic_ai.models.test import TestModel  # type: ignore
 
@@ -228,12 +229,19 @@ def _build_provider_model(model_id: str, model_entry: Dict[str, Any]) -> Any:
     model_spec = model_entry.get("model") or "test"
     api_key = model_entry.get("api_key")
 
+    def _openai_model_supports_reasoning_effort(name: str) -> bool:
+        # OpenAI "reasoning models" are currently named like `o1-*`, `o3-*`, `o4-*`, etc.
+        return bool(re.match(r"^o\d", (name or "").strip().lower()))
+
     if provider == "openai":
         key = api_key or os.getenv("OPENAI_API_KEY")
         if not key:
             raise RuntimeError("OPENAI_API_KEY is required for openai models")
         provider_obj = OpenAIProvider(api_key=key)
-        return OpenAIChatModel(model_spec, provider=provider_obj), None
+        settings: OpenAIChatModelSettings | None = None
+        if _openai_model_supports_reasoning_effort(str(model_spec)):
+            settings = OpenAIChatModelSettings(openai_reasoning_effort="medium")
+        return OpenAIChatModel(model_spec, provider=provider_obj), settings
 
     if provider == "anthropic":
         key = api_key or os.getenv("ANTHROPIC_API_KEY")

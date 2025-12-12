@@ -86,3 +86,52 @@ async def test_unknown_model_id_is_rejected(monkeypatch, tmp_path: Path):
         and "Unknown model id: no-such" in getattr(getattr(u, "content", None), "text", "")
         for u in updates
     )
+
+
+def test_openai_reasoning_effort_enabled_for_reasoning_models(monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setenv("OPENAI_API_KEY", "test")
+    _model, settings = model_registry._build_provider_model(  # type: ignore[attr-defined]
+        "openai:o1-mini",
+        {"provider": "openai", "model": "o1-mini"},
+    )
+    assert isinstance(settings, dict)
+    assert settings.get("openai_reasoning_effort") == "medium"
+
+
+def test_openai_reasoning_effort_not_set_for_non_reasoning_models(monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setenv("OPENAI_API_KEY", "test")
+    _model, settings = model_registry._build_provider_model(  # type: ignore[attr-defined]
+        "openai:gpt-4o-mini",
+        {"provider": "openai", "model": "gpt-4o-mini"},
+    )
+    assert settings is None
+
+
+def test_anthropic_thinking_enabled_by_default(monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "test")
+    _model, settings = model_registry._build_provider_model(  # type: ignore[attr-defined]
+        "anthropic:claude-sonnet-4-0",
+        {"provider": "anthropic", "model": "claude-sonnet-4-0"},
+    )
+    assert isinstance(settings, dict)
+    assert settings.get("anthropic_thinking") == {"type": "enabled", "budget_tokens": 512}
+
+
+def test_google_thinking_enabled_by_default(monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setenv("GOOGLE_API_KEY", "test")
+    _model, settings = model_registry._build_provider_model(  # type: ignore[attr-defined]
+        "google:gemini-2.5-pro",
+        {"provider": "google", "model": "gemini-2.5-pro"},
+    )
+    assert isinstance(settings, dict)
+    assert settings.get("google_thinking_config") == {"include_thoughts": True}
+
+
+def test_openrouter_reasoning_enabled_by_default(monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setenv("OPENROUTER_API_KEY", "test")
+    _model, settings = model_registry._build_provider_model(  # type: ignore[attr-defined]
+        "openrouter:openai/gpt-5",
+        {"provider": "openrouter", "model": "openai/gpt-5"},
+    )
+    assert isinstance(settings, dict)
+    assert settings.get("openrouter_reasoning") == {"effort": "medium"}
