@@ -36,10 +36,7 @@ async def test_set_session_model_changes_runner(monkeypatch, tmp_path: Path):
     updates = [call.kwargs["update"] for call in conn.session_update.call_args_list]  # type: ignore[attr-defined]
     agent_chunks = [u for u in updates if isinstance(u, AgentMessageChunk)]
     assert agent_chunks
-    assert any(
-        getattr(c.content, "text", "") and "Error" not in getattr(c.content, "text", "")
-        for c in agent_chunks
-    )
+    assert any(getattr(c.content, "text", "") and "Error" not in getattr(c.content, "text", "") for c in agent_chunks)
     assert response.stop_reason == "end_turn"
 
 
@@ -57,8 +54,7 @@ async def test_model_build_failure_surfaces_error(monkeypatch, tmp_path: Path):
 
     updates = [call.kwargs["update"] for call in conn.session_update.await_args_list]  # type: ignore[attr-defined]
     assert any(
-        isinstance(u, AgentMessageChunk)
-        and "Model load failed" in getattr(getattr(u, "content", None), "text", "")
+        isinstance(u, AgentMessageChunk) and "Model load failed" in getattr(getattr(u, "content", None), "text", "")
         for u in updates
     )
 

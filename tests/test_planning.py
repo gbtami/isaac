@@ -33,9 +33,7 @@ class _PlanningRunner:
         self.prompts: list[str] = []
         self.content = content
 
-    async def run_stream_events(
-        self, prompt: str, message_history: list[dict[str, str]] | None = None, **_: object
-    ):
+    async def run_stream_events(self, prompt: str, message_history: list[dict[str, str]] | None = None, **_: object):
         self.prompts.append(prompt)
 
         async def _gen():
@@ -48,9 +46,7 @@ class _StreamingExecutor:
     def __init__(self):
         self.prompts: list[str] = []
 
-    async def run_stream_events(
-        self, prompt: str, message_history: list[dict[str, str]] | None = None, **_: object
-    ):
+    async def run_stream_events(self, prompt: str, message_history: list[dict[str, str]] | None = None, **_: object):
         self.prompts.append(prompt)
 
         async def _gen():
@@ -75,14 +71,11 @@ async def test_programmatic_plan_then_execute():
     plan_updates = [u for u in updates if isinstance(u, AgentPlanUpdate)]
     assert plan_updates
     assert any(
-        isinstance(u, AgentMessageChunk)
-        and getattr(getattr(u, "content", None), "text", "") == "executed"
+        isinstance(u, AgentMessageChunk) and getattr(getattr(u, "content", None), "text", "") == "executed"
         for u in updates
     )
     assert any(e.status == "in_progress" for e in plan_updates[0].entries)
-    assert plan_updates[-1].entries and all(
-        e.status == "completed" for e in plan_updates[-1].entries
-    )
+    assert plan_updates[-1].entries and all(e.status == "completed" for e in plan_updates[-1].entries)
     assert len(planning_runner.prompts) == 1
     assert len(executor.prompts) == 1
     assert "Plan:" in executor.prompts[0]
@@ -101,9 +94,7 @@ class _DelegateRunner:
 
         return _decorator
 
-    async def run_stream_events(
-        self, prompt: str, message_history: list[dict[str, str]] | None = None, **_: object
-    ):
+    async def run_stream_events(self, prompt: str, message_history: list[dict[str, str]] | None = None, **_: object):
         from pydantic_ai.messages import (
             FunctionToolCallEvent,
             FunctionToolResultEvent,
@@ -144,9 +135,7 @@ class _SingleRunner:
     def __init__(self):
         self.prompts: list[str] = []
 
-    async def run_stream_events(
-        self, prompt: str, message_history: list[dict[str, str]] | None = None, **_: object
-    ):
+    async def run_stream_events(self, prompt: str, message_history: list[dict[str, str]] | None = None, **_: object):
         self.prompts.append(prompt)
 
         async def _gen():
@@ -169,8 +158,7 @@ async def test_delegation_strategy_emits_plan_update_and_execution():
     updates = [call.kwargs["update"] for call in conn.session_update.await_args_list]  # type: ignore[attr-defined]
     assert any(isinstance(u, AgentPlanUpdate) for u in updates)
     assert any(
-        isinstance(u, AgentMessageChunk)
-        and getattr(getattr(u, "content", None), "text", "") == "delegate complete"
+        isinstance(u, AgentMessageChunk) and getattr(getattr(u, "content", None), "text", "") == "delegate complete"
         for u in updates
     )
     assert len(delegate_runner.prompts) == 1
@@ -243,7 +231,6 @@ async def test_single_strategy_uses_single_runner_only():
     assert not failing_planner.called
     updates = [call.kwargs["update"] for call in conn.session_update.await_args_list]  # type: ignore[attr-defined]
     assert any(
-        isinstance(u, AgentMessageChunk)
-        and getattr(getattr(u, "content", None), "text", "") == "plan then execute"
+        isinstance(u, AgentMessageChunk) and getattr(getattr(u, "content", None), "text", "") == "plan then execute"
         for u in updates
     )

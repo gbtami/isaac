@@ -104,18 +104,14 @@ async def test_run_tool_reports_missing_args():
 async def test_run_command_requests_permission():
     conn = AsyncMock()
     conn.request_permission = AsyncMock(
-        return_value=RequestPermissionResponse(
-            outcome=AllowedOutcome(option_id="reject_once", outcome="selected")
-        )
+        return_value=RequestPermissionResponse(outcome=AllowedOutcome(option_id="reject_once", outcome="selected"))
     )
     agent = make_function_agent(conn)
     session_id = "perm-session"
     agent._session_modes[session_id] = "ask"
     agent._session_cwds[session_id] = Path.cwd()
 
-    await agent._execute_run_command_with_terminal(
-        session_id, tool_call_id="tc1", arguments={"command": "echo hi"}
-    )
+    await agent._execute_run_command_with_terminal(session_id, tool_call_id="tc1", arguments={"command": "echo hi"})
 
     conn.request_permission.assert_awaited()
     assert conn.session_update.await_args_list, "Expected a session_update for permission denial"
@@ -130,21 +126,15 @@ async def test_run_command_requests_permission():
 async def test_allow_always_cached_per_command():
     conn = AsyncMock()
     conn.request_permission = AsyncMock(
-        return_value=RequestPermissionResponse(
-            outcome=AllowedOutcome(option_id="allow_always", outcome="selected")
-        )
+        return_value=RequestPermissionResponse(outcome=AllowedOutcome(option_id="allow_always", outcome="selected"))
     )
     agent = make_function_agent(conn)
     session_id = "perm-cache"
     agent._session_modes[session_id] = "ask"
     agent._session_cwds[session_id] = Path.cwd()
 
-    first = await agent._request_run_permission(
-        session_id, tool_call_id="tc-1", command="echo cached", cwd=None
-    )
-    second = await agent._request_run_permission(
-        session_id, tool_call_id="tc-2", command="echo cached", cwd=None
-    )
+    first = await agent._request_run_permission(session_id, tool_call_id="tc-1", command="echo cached", cwd=None)
+    second = await agent._request_run_permission(session_id, tool_call_id="tc-2", command="echo cached", cwd=None)
 
     assert first is True
     assert second is True
@@ -158,9 +148,7 @@ async def test_model_tool_call_requests_permission(monkeypatch: pytest.MonkeyPat
     conn = AsyncMock()
     conn.session_update = AsyncMock()
     conn.request_permission = AsyncMock(
-        return_value=RequestPermissionResponse(
-            outcome=AllowedOutcome(option_id="allow_once", outcome="selected")
-        )
+        return_value=RequestPermissionResponse(outcome=AllowedOutcome(option_id="allow_once", outcome="selected"))
     )
 
     calls: list[dict[str, object]] = []
@@ -183,9 +171,7 @@ async def test_model_tool_call_requests_permission(monkeypatch: pytest.MonkeyPat
     agent = ACPAgent(conn, ai_runner=ai_runner, planning_runner=planning_runner)
     session = await agent.new_session(cwd=str(tmp_path), mcp_servers=[])
 
-    response = await agent.prompt(
-        prompt=[text_block("run a command")], session_id=session.session_id
-    )
+    response = await agent.prompt(prompt=[text_block("run a command")], session_id=session.session_id)
 
     conn.request_permission.assert_awaited()
     assert calls, "Expected run_command to be invoked by the model"
@@ -193,17 +179,13 @@ async def test_model_tool_call_requests_permission(monkeypatch: pytest.MonkeyPat
 
 
 @pytest.mark.asyncio
-async def test_model_run_command_denied_blocks_execution(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-):
+async def test_model_run_command_denied_blocks_execution(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
     """When permission is denied, run_command should not execute."""
 
     conn = AsyncMock()
     conn.session_update = AsyncMock()
     conn.request_permission = AsyncMock(
-        return_value=RequestPermissionResponse(
-            outcome=AllowedOutcome(option_id="reject_once", outcome="selected")
-        )
+        return_value=RequestPermissionResponse(outcome=AllowedOutcome(option_id="reject_once", outcome="selected"))
     )
 
     calls: list[dict[str, object]] = []
@@ -240,9 +222,7 @@ async def test_request_permission_path():
     conn = AsyncMock()
     conn.session_update = AsyncMock()
     conn.request_permission = AsyncMock(
-        return_value=RequestPermissionResponse(
-            outcome=AllowedOutcome(option_id="allow_once", outcome="selected")
-        )
+        return_value=RequestPermissionResponse(outcome=AllowedOutcome(option_id="allow_once", outcome="selected"))
     )
 
     agent = make_function_agent(conn)

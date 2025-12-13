@@ -184,18 +184,13 @@ class ACPAgent(Agent):
             delegate_tool_enabled=self._delegate_tool_enabled,
             default_strategy=self._default_prompt_strategy,
             send_update=self._send_update,
-            request_run_permission=lambda session_id,
-            tool_call_id,
-            command,
-            cwd: self._request_run_permission(  # type: ignore[arg-type]
+            request_run_permission=lambda session_id, tool_call_id, command, cwd: self._request_run_permission(  # type: ignore[arg-type]
                 session_id=session_id,
                 tool_call_id=tool_call_id,
                 command=command,
                 cwd=cwd,
             ),
-            refresh_history=lambda session_id: build_chat_history(
-                self._session_history.get(session_id, [])
-            ),
+            refresh_history=lambda session_id: build_chat_history(self._session_history.get(session_id, [])),
             set_usage=lambda session_id, usage: self._session_usage.__setitem__(session_id, usage),
         )
         return PromptStrategyManager(env)
@@ -337,9 +332,7 @@ class ACPAgent(Agent):
         await self._send_available_commands(session_id)
         return LoadSessionResponse()
 
-    async def list_sessions(
-        self, cursor: str | None = None, cwd: str | None = None, **_: Any
-    ) -> ListSessionsResponse:
+    async def list_sessions(self, cursor: str | None = None, cwd: str | None = None, **_: Any) -> ListSessionsResponse:
         """Return known sessions; minimal implementation without paging."""
         sessions: list[SessionInfo] = []
         for session_id in self._sessions:
@@ -351,9 +344,7 @@ class ACPAgent(Agent):
             )
         return ListSessionsResponse(sessions=sessions, next_cursor=None)
 
-    async def set_session_mode(
-        self, mode_id: str, session_id: str, **_: Any
-    ) -> SetSessionModeResponse | None:
+    async def set_session_mode(self, mode_id: str, session_id: str, **_: Any) -> SetSessionModeResponse | None:
         """Update the current session mode and broadcast (Session Modes)."""
         logger.info(
             "Received set session mode request %s -> %s",
@@ -372,15 +363,11 @@ class ACPAgent(Agent):
             self._session_cwds.get(session_id, Path.cwd()),
             self._session_mcp_servers.get(session_id, []),
             current_mode=mode_id,
-            prompt_strategy=self._session_prompt_strategies.get(
-                session_id, self._default_prompt_strategy
-            ),
+            prompt_strategy=self._session_prompt_strategies.get(session_id, self._default_prompt_strategy),
         )
         return SetSessionModeResponse()
 
-    async def set_session_model(
-        self, model_id: str, session_id: str, **_: Any
-    ) -> SetSessionModelResponse | None:
+    async def set_session_model(self, model_id: str, session_id: str, **_: Any) -> SetSessionModelResponse | None:
         """Switch the backing model for a session."""
         logger.info("Received set session model request %s -> %s", session_id, model_id)
         previous_model_id = model_registry.current_model_id()
@@ -392,13 +379,9 @@ class ACPAgent(Agent):
                 toolsets=toolsets,
             )
             try:
-                single_agent = model_registry.build_single_agent(
-                    model_id, register_tools, toolsets=toolsets
-                )
+                single_agent = model_registry.build_single_agent(model_id, register_tools, toolsets=toolsets)
             except Exception as exc:  # noqa: BLE001
-                logger.warning(
-                    "Using executor as fallback single-agent runner after build error: %s", exc
-                )
+                logger.warning("Using executor as fallback single-agent runner after build error: %s", exc)
                 single_agent = executor
             self._session_models[session_id] = executor
             self._session_planners[session_id] = planner
@@ -503,9 +486,7 @@ class ACPAgent(Agent):
         planner = self._session_planners.get(session_id) or self._planning_runner or self._ai_runner
         single_runner = self._session_single_models.get(session_id) or runner
         if runner is None or planner is None:
-            return await self._respond_model_error(
-                session_id, self._session_model_errors.get(session_id)
-            )
+            return await self._respond_model_error(session_id, self._session_model_errors.get(session_id))
 
         def _store_model_messages(msgs: Any) -> None:
             try:
@@ -599,9 +580,7 @@ class ACPAgent(Agent):
         # Include tool name for downstream clients to interpret plan tool output.
         result_with_tool = dict(result)
         result_with_tool.setdefault("tool", tool_name)
-        result_with_tool, was_truncated = truncate_tool_output(
-            result_with_tool, self._tool_output_limit
-        )
+        result_with_tool, was_truncated = truncate_tool_output(result_with_tool, self._tool_output_limit)
         if was_truncated:
             result_with_tool["truncated"] = True
         status = "completed" if not result_with_tool.get("error") else "failed"
@@ -757,18 +736,12 @@ class ACPAgent(Agent):
                     TerminalOutputRequest(session_id=session_id, terminal_id=term_id),
                 )
                 if final_out.output:
-                    capped_output, chunk_truncated = truncate_text(
-                        final_out.output, self._tool_output_limit
-                    )
+                    capped_output, chunk_truncated = truncate_text(final_out.output, self._tool_output_limit)
                     collected.append(capped_output)
                     truncated = truncated or final_out.truncated or chunk_truncated
-                    exit_code = exit_code or (
-                        final_out.exit_status.exit_code if final_out.exit_status else None
-                    )
+                    exit_code = exit_code or (final_out.exit_status.exit_code if final_out.exit_status else None)
 
-        full_output, capped = truncate_text(
-            "".join(collected).rstrip("\n"), self._tool_output_limit
-        )
+        full_output, capped = truncate_text("".join(collected).rstrip("\n"), self._tool_output_limit)
         truncated = truncated or capped
         status = "failed" if error_msg else "completed"
         if exit_code not in (0, None) and not error_msg:
@@ -788,20 +761,14 @@ class ACPAgent(Agent):
         )
         await self._send_update(session_notification(session_id, progress))
 
-    async def read_text_file(
-        self, path: str, session_id: str, **kwargs: Any
-    ) -> ReadTextFileResponse:
+    async def read_text_file(self, path: str, session_id: str, **kwargs: Any) -> ReadTextFileResponse:
         """Serve fs/read_text_file to clients (File System section)."""
         params = ReadTextFileRequest(path=path, session_id=session_id, field_meta=kwargs or None)
         return await read_text_file(self._session_cwds, params)
 
-    async def write_text_file(
-        self, content: str, path: str, session_id: str, **kwargs: Any
-    ) -> WriteTextFileResponse:
+    async def write_text_file(self, content: str, path: str, session_id: str, **kwargs: Any) -> WriteTextFileResponse:
         """Serve fs/write_text_file to clients (File System section)."""
-        params = WriteTextFileRequest(
-            content=content, path=path, session_id=session_id, field_meta=kwargs or None
-        )
+        params = WriteTextFileRequest(content=content, path=path, session_id=session_id, field_meta=kwargs or None)
         return await write_text_file(self._session_cwds, params)
 
     async def create_terminal(
@@ -826,40 +793,28 @@ class ACPAgent(Agent):
         )
         return await create_terminal(self._session_cwds, self._terminals, params)
 
-    async def terminal_output(
-        self, session_id: str, terminal_id: str, **kwargs: Any
-    ) -> TerminalOutputResponse:
+    async def terminal_output(self, session_id: str, terminal_id: str, **kwargs: Any) -> TerminalOutputResponse:
         """Stream terminal output (Terminals section)."""
-        params = TerminalOutputRequest(
-            session_id=session_id, terminal_id=terminal_id, field_meta=kwargs or None
-        )
+        params = TerminalOutputRequest(session_id=session_id, terminal_id=terminal_id, field_meta=kwargs or None)
         return await terminal_output(self._terminals, params)
 
     async def wait_for_terminal_exit(
         self, session_id: str, terminal_id: str, **kwargs: Any
     ) -> WaitForTerminalExitResponse:
         """Wait for a terminal to exit (Terminals section)."""
-        params = WaitForTerminalExitRequest(
-            session_id=session_id, terminal_id=terminal_id, field_meta=kwargs or None
-        )
+        params = WaitForTerminalExitRequest(session_id=session_id, terminal_id=terminal_id, field_meta=kwargs or None)
         return await wait_for_terminal_exit(self._terminals, params)
 
     async def kill_terminal_command(
         self, session_id: str, terminal_id: str, **kwargs: Any
     ) -> KillTerminalCommandResponse:
         """Kill a running terminal command (Terminals section)."""
-        params = KillTerminalCommandRequest(
-            session_id=session_id, terminal_id=terminal_id, field_meta=kwargs or None
-        )
+        params = KillTerminalCommandRequest(session_id=session_id, terminal_id=terminal_id, field_meta=kwargs or None)
         return await kill_terminal(self._terminals, params)
 
-    async def release_terminal(
-        self, session_id: str, terminal_id: str, **kwargs: Any
-    ) -> ReleaseTerminalResponse:
+    async def release_terminal(self, session_id: str, terminal_id: str, **kwargs: Any) -> ReleaseTerminalResponse:
         """Release resources for a terminal (Terminals section)."""
-        params = ReleaseTerminalRequest(
-            session_id=session_id, terminal_id=terminal_id, field_meta=kwargs or None
-        )
+        params = ReleaseTerminalRequest(session_id=session_id, terminal_id=terminal_id, field_meta=kwargs or None)
         return await release_terminal(self._terminals, params)
 
     async def _send_update(self, note: SessionNotification) -> None:
@@ -896,9 +851,7 @@ class ACPAgent(Agent):
     def _current_model_id(self) -> str:
         return model_registry.current_model_id()
 
-    async def _init_session_runners(
-        self, session_id: str, toolsets: list[Any] | None = None
-    ) -> None:
+    async def _init_session_runners(self, session_id: str, toolsets: list[Any] | None = None) -> None:
         """Initialize runners for a session or surface build failures."""
         try:
             if self._custom_runners:
@@ -943,10 +896,7 @@ class ACPAgent(Agent):
             models = model_registry.list_user_models()
             return {
                 "current": current,
-                "models": [
-                    {"id": mid, "description": meta.get("description", "")}
-                    for mid, meta in models.items()
-                ],
+                "models": [{"id": mid, "description": meta.get("description", "")} for mid, meta in models.items()],
             }
         if name == "model/set":
             session_id = payload.get("session_id")
@@ -974,9 +924,7 @@ class ACPAgent(Agent):
         current_mode: str,
         prompt_strategy: str | None = None,
     ) -> None:
-        strategy = prompt_strategy or self._session_prompt_strategies.get(
-            session_id, self._default_prompt_strategy
-        )
+        strategy = prompt_strategy or self._session_prompt_strategies.get(session_id, self._default_prompt_strategy)
         self._session_store.persist_meta(
             session_id, cwd, mcp_servers or [], current_mode=current_mode, strategy=strategy
         )
@@ -1024,9 +972,7 @@ class ACPAgent(Agent):
         if session_id in self._session_commands_advertised:
             return
         commands = available_slash_commands()
-        update = AvailableCommandsUpdate(
-            session_update="available_commands_update", available_commands=commands
-        )
+        update = AvailableCommandsUpdate(session_update="available_commands_update", available_commands=commands)
         await self._send_update(session_notification(session_id, update))
         self._session_commands_advertised.add(session_id)
 
@@ -1047,9 +993,7 @@ class ACPAgent(Agent):
         try:
             options = [
                 PermissionOption(option_id="allow_once", name="Allow once", kind="allow_once"),
-                PermissionOption(
-                    option_id="allow_always", name="Allow this command", kind="allow_always"
-                ),
+                PermissionOption(option_id="allow_always", name="Allow this command", kind="allow_always"),
                 PermissionOption(option_id="reject_once", name="Reject", kind="reject_once"),
             ]
             tool_call = ToolCall(
@@ -1067,9 +1011,7 @@ class ACPAgent(Agent):
             requester = getattr(self._conn, "request_permission", None)
             if requester is None:
                 raise RuntimeError("Connection missing request_permission handler")
-            resp = await requester(
-                options=options, session_id=session_id, tool_call=tool_call_update
-            )
+            resp = await requester(options=options, session_id=session_id, tool_call=tool_call_update)
             outcome = getattr(resp, "outcome", None)
             option_id = ""
             if outcome is not None:

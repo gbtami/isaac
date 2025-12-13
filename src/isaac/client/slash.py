@@ -32,9 +32,7 @@ class SlashCommandDef:
 SLASH_HANDLERS: dict[str, SlashCommandDef] = {}
 
 
-def register_slash_command(
-    name: str, description: str, hint: str
-) -> Callable[[SlashHandler], SlashHandler]:
+def register_slash_command(name: str, description: str, hint: str) -> Callable[[SlashHandler], SlashHandler]:
     """Decorator to register a slash command."""
 
     def _decorator(func: SlashHandler) -> SlashHandler:
@@ -86,9 +84,7 @@ async def _handle_strategy(
     return True
 
 
-@register_slash_command(
-    "/status", description="Show current mode, model, and MCP servers.", hint="/status"
-)
+@register_slash_command("/status", description="Show current mode, model, and MCP servers.", hint="/status")
 def _handle_status(
     _conn: ClientSideConnection,
     _session_id: str,
@@ -130,9 +126,7 @@ async def _handle_model(
     return True
 
 
-@register_slash_command(
-    "/thinking", description="Toggle display of model thinking traces.", hint="/thinking on|off"
-)
+@register_slash_command("/thinking", description="Toggle display of model thinking traces.", hint="/thinking on|off")
 def _handle_thinking(
     _conn: ClientSideConnection,
     _session_id: str,

@@ -27,9 +27,7 @@ def build_chat_history(updates: Iterable[Any]) -> List[dict[str, str]]:
                 continue
             content = getattr(update_obj, "content", None)
             if content and getattr(content, "text", None):
-                history.append(
-                    {"role": "assistant", "content": content.text, "_src": "agent_chunk"}
-                )
+                history.append({"role": "assistant", "content": content.text, "_src": "agent_chunk"})
         elif isinstance(update_obj, ToolCallProgress):
             blocks = getattr(update_obj, "content", None) or []
             for block in blocks:
@@ -39,9 +37,7 @@ def build_chat_history(updates: Iterable[Any]) -> List[dict[str, str]]:
                     history.append({"role": "assistant", "content": text, "_src": "tool"})
         elif isinstance(update_obj, AgentPlanUpdate):
             entries = getattr(update_obj, "entries", None) or []
-            text = "\n".join(
-                f"- {getattr(e, 'content', '')}" for e in entries if getattr(e, "content", "")
-            )
+            text = "\n".join(f"- {getattr(e, 'content', '')}" for e in entries if getattr(e, "content", ""))
             if text:
                 history.append({"role": "assistant", "content": f"Plan:\n{text}", "_src": "plan"})
     # Merge sequences from the same role (assistant/user) to avoid fragmented context.

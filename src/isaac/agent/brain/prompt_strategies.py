@@ -276,9 +276,7 @@ class PromptStrategyManager:
 
     async def _run_delegation_strategy(self, ctx: PromptContext) -> Any:
         self._ensure_delegate_tool(ctx.session_id, ctx.runner, ctx.planner)
-        delegate_hint = (
-            "Use the delegate_plan tool first to request a 3-6 step plan, then execute it."
-        )
+        delegate_hint = "Use the delegate_plan tool first to request a 3-6 step plan, then execute it."
         executor_prompt = f"{delegate_hint}\n\n{ctx.prompt_text}"
         plan_seen = {"sent": False}
         first_plan: Any | None = None
@@ -305,9 +303,7 @@ class PromptStrategyManager:
             allow_plan_parse=ctx.strategy_has_planning,
         )
         if getattr(response, "stop_reason", "") == "end_turn" and not plan_seen["sent"]:
-            maybe_plan = self._plan_update_from_raw(
-                {"content": self.env.session_last_chunk.get(ctx.session_id)}
-            )
+            maybe_plan = self._plan_update_from_raw({"content": self.env.session_last_chunk.get(ctx.session_id)})
             if maybe_plan:
                 first_plan = maybe_plan
                 initial = self._plan_with_status(maybe_plan, active_index=0)
@@ -342,9 +338,7 @@ class PromptStrategyManager:
 
     # --- Shared helpers ---
 
-    async def _run_planning_phase(
-        self, ctx: PromptContext
-    ) -> tuple[Any | None, str | None, Any | None]:
+    async def _run_planning_phase(self, ctx: PromptContext) -> tuple[Any | None, str | None, Any | None]:
         plan_chunks: list[str] = []
         structured_plan: PlanSteps | None = None
 
@@ -376,9 +370,7 @@ class PromptStrategyManager:
             await self.env.send_update(
                 session_notification(
                     ctx.session_id,
-                    update_agent_message(
-                        text_block(f"Model/provider error during planning: {msg}")
-                    ),
+                    update_agent_message(text_block(f"Model/provider error during planning: {msg}")),
                 )
             )
             # Discard provider error text so it isn't reused as a pseudo-plan.
@@ -492,9 +484,7 @@ class PromptStrategyManager:
                         allowed = await self.env.request_run_permission(
                             session_id=session_id,
                             tool_call_id=event.tool_call_id,
-                            command=str(args.get("command") if isinstance(args, dict) else "")
-                            if args
-                            else "",
+                            command=str(args.get("command") if isinstance(args, dict) else "") if args else "",
                             cwd=args.get("cwd") if isinstance(args, dict) else None,
                         )
                     set_run_command_permission(event.tool_call_id, allowed)
@@ -502,9 +492,7 @@ class PromptStrategyManager:
                     async def _permission(_: str, __: str | None = None) -> bool:
                         return allowed
 
-                    token = set_run_command_context(
-                        RunCommandContext(request_permission=_permission)
-                    )
+                    token = set_run_command_context(RunCommandContext(request_permission=_permission))
                     run_command_ctx_tokens[event.tool_call_id] = token
                     if not allowed:
                         denied = tracker.progress(
@@ -515,9 +503,7 @@ class PromptStrategyManager:
                                 "content": None,
                                 "error": "permission denied",
                             },
-                            content=[
-                                tool_content(text_block("Command blocked: permission denied"))
-                            ],
+                            content=[tool_content(text_block("Command blocked: permission denied"))],
                         )
                         await self.env.send_update(session_notification(session_id, denied))
                         return True
@@ -584,13 +570,9 @@ class PromptStrategyManager:
                             idx += 1
                             plan_progress["idx"] = idx
                             if idx >= len(entries):
-                                plan_note = self._plan_with_status(
-                                    plan_progress["plan"], status_all="completed"
-                                )
+                                plan_note = self._plan_with_status(plan_progress["plan"], status_all="completed")
                             else:
-                                plan_note = self._plan_with_status(
-                                    plan_progress["plan"], active_index=idx
-                                )
+                                plan_note = self._plan_with_status(plan_progress["plan"], active_index=idx)
                             await self.env.send_update(session_notification(session_id, plan_note))
                 return True
 
@@ -706,9 +688,7 @@ class PromptStrategyManager:
                     plan_steps = [candidate.strip()]
 
                 if plan_steps and isinstance(plan_steps[0], dict):
-                    plan_text = (
-                        "\n".join(str(p.get("content", "")).strip() for p in plan_steps) or task
-                    )
+                    plan_text = "\n".join(str(p.get("content", "")).strip() for p in plan_steps) or task
                 else:
                     plan_text = "\n".join(str(step) for step in plan_steps if step) or task
                 return {"plan": plan_steps, "content": plan_text, "tool": "delegate_plan"}
@@ -776,9 +756,7 @@ class PromptStrategyManager:
         return normalized
 
     @staticmethod
-    def _plan_with_status(
-        plan_update: Any, *, active_index: int | None = None, status_all: str | None = None
-    ) -> Any:
+    def _plan_with_status(plan_update: Any, *, active_index: int | None = None, status_all: str | None = None) -> Any:
         try:
             entries = list(getattr(plan_update, "entries", []) or [])
         except Exception:

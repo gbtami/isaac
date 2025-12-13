@@ -248,9 +248,7 @@ def _build_provider_model(model_id: str, model_entry: Dict[str, Any]) -> Any:
         if not key:
             raise RuntimeError("ANTHROPIC_API_KEY is required for anthropic models")
         provider_obj = AnthropicProvider(api_key=key)
-        settings = AnthropicModelSettings(
-            anthropic_thinking={"type": "enabled", "budget_tokens": 512}
-        )
+        settings = AnthropicModelSettings(anthropic_thinking={"type": "enabled", "budget_tokens": 512})
         return AnthropicModel(model_spec, provider=provider_obj), settings
 
     if provider == "mistral":

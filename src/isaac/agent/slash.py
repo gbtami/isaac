@@ -19,9 +19,7 @@ from isaac.agent.usage import format_usage_summary, normalize_usage
 
 SLASH_HANDLERS: dict[str, "SlashCommandDef"] = {}
 
-SlashHandler = Callable[
-    [Any, str, str, str], Awaitable[SessionNotification | None] | SessionNotification | None
-]
+SlashHandler = Callable[[Any, str, str, str], Awaitable[SessionNotification | None] | SessionNotification | None]
 
 
 @dataclass
@@ -31,9 +29,7 @@ class SlashCommandDef:
     handler: SlashHandler
 
 
-def register_slash_command(
-    name: str, description: str, hint: str
-) -> Callable[[SlashHandler], SlashHandler]:
+def register_slash_command(name: str, description: str, hint: str) -> Callable[[SlashHandler], SlashHandler]:
     """Decorator to register a slash command handler."""
 
     def _decorator(func: SlashHandler) -> SlashHandler:
@@ -111,9 +107,7 @@ async def _handle_model(agent: Any, session_id: str, _: str, argument: str) -> S
     description="List available models.",
     hint="/models",
 )
-def _handle_models(
-    agent: Any, session_id: str, _command: str, _argument: str
-) -> SessionNotification:
+def _handle_models(agent: Any, session_id: str, _command: str, _argument: str) -> SessionNotification:
     # /models and bare /model both list available models.
     return _list_models(agent, session_id)
 
@@ -136,9 +130,7 @@ def _handle_log(agent: Any, session_id: str, _command: str, argument: str) -> Se
     description="Show token usage for the latest run.",
     hint="/usage",
 )
-def _handle_usage(
-    agent: Any, session_id: str, _command: str, _argument: str
-) -> SessionNotification:
+def _handle_usage(agent: Any, session_id: str, _command: str, _argument: str) -> SessionNotification:
     try:
         # Prefer existing helper when available to keep formatting consistent.
         builder = getattr(agent, "_build_usage_note", None)
@@ -159,9 +151,7 @@ def _handle_usage(
     description="List available prompt strategies.",
     hint="/strategies",
 )
-def _handle_strategies(
-    agent: Any, session_id: str, _command: str, _argument: str
-) -> SessionNotification:
+def _handle_strategies(agent: Any, session_id: str, _command: str, _argument: str) -> SessionNotification:
     describer = getattr(agent, "describe_prompt_strategies", None)
     if callable(describer):
         message = describer(session_id)
@@ -175,9 +165,7 @@ def _handle_strategies(
     description="Set the prompt strategy (handoff|delegation|single|plan_only).",
     hint="/strategy <id>",
 )
-async def _handle_strategy(
-    agent: Any, session_id: str, _command: str, argument: str
-) -> SessionNotification:
+async def _handle_strategy(agent: Any, session_id: str, _command: str, argument: str) -> SessionNotification:
     setter = getattr(agent, "set_session_prompt_strategy", None)
     if not callable(setter):
         message = "Prompt strategy selection is not supported by this agent."
@@ -187,9 +175,7 @@ async def _handle_strategy(
     return session_notification(session_id, update_agent_message(text_block(message)))
 
 
-async def handle_slash_command(
-    agent: Any, session_id: str, prompt: str
-) -> SessionNotification | None:
+async def handle_slash_command(agent: Any, session_id: str, prompt: str) -> SessionNotification | None:
     """Handle server-side slash commands (Slash Commands section)."""
     trimmed = prompt.strip()
     if not trimmed.startswith("/"):
@@ -252,7 +238,4 @@ def _log_usage(valid_levels: set[str], invalid: str | None = None) -> str:
         msg = f"Unsupported log level '{invalid}'. "
     current = logging.getLogger().getEffectiveLevel()
     current_name = logging.getLevelName(current)
-    return (
-        f"{msg}Usage: /log <level>. "
-        f"Valid levels: {', '.join(sorted(valid_levels))}. Current: {current_name}."
-    )
+    return f"{msg}Usage: /log <level>. Valid levels: {', '.join(sorted(valid_levels))}. Current: {current_name}."

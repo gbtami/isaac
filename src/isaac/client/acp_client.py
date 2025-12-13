@@ -97,9 +97,7 @@ class ACPClient(Client):
         except Exception:
             selection = options[0].option_id if options else "default"
         self._logger.info("permission.response session=%s selection=%s", session_id, selection)
-        return RequestPermissionResponse(
-            outcome=AllowedOutcome(option_id=selection, outcome="selected")
-        )
+        return RequestPermissionResponse(outcome=AllowedOutcome(option_id=selection, outcome="selected"))
 
     async def ext_method(self, method: str, params: dict[str, Any]) -> dict[str, Any]:
         """Handle extension methods from the agent (unused in example client)."""
@@ -140,29 +138,21 @@ class ACPClient(Client):
         )
         return await self._terminal_manager.create_terminal(req)
 
-    async def terminal_output(
-        self, session_id: str, terminal_id: str, **_: Any
-    ) -> TerminalOutputResponse:
+    async def terminal_output(self, session_id: str, terminal_id: str, **_: Any) -> TerminalOutputResponse:
         """Return terminal output to the agent."""
         req = TerminalOutputRequest(session_id=session_id, terminal_id=terminal_id)
         return await self._terminal_manager.terminal_output(req)
 
-    async def release_terminal(
-        self, session_id: str, terminal_id: str, **_: Any
-    ) -> ReleaseTerminalResponse:
+    async def release_terminal(self, session_id: str, terminal_id: str, **_: Any) -> ReleaseTerminalResponse:
         req = ReleaseTerminalRequest(session_id=session_id, terminal_id=terminal_id)
         return await self._terminal_manager.release_terminal(req)
 
-    async def wait_for_terminal_exit(
-        self, session_id: str, terminal_id: str, **_: Any
-    ) -> WaitForTerminalExitResponse:
+    async def wait_for_terminal_exit(self, session_id: str, terminal_id: str, **_: Any) -> WaitForTerminalExitResponse:
         """Block until the requested client terminal exits."""
         req = WaitForTerminalExitRequest(session_id=session_id, terminal_id=terminal_id)
         return await self._terminal_manager.wait_for_terminal_exit(req)
 
-    async def kill_terminal_command(
-        self, session_id: str, terminal_id: str, **_: Any
-    ) -> KillTerminalCommandResponse:
+    async def kill_terminal_command(self, session_id: str, terminal_id: str, **_: Any) -> KillTerminalCommandResponse:
         req = KillTerminalCommandRequest(session_id=session_id, terminal_id=terminal_id)
         return await self._terminal_manager.kill_terminal(req)
 
@@ -170,9 +160,7 @@ class ACPClient(Client):
         """Alias for kill_terminal_command to satisfy ACP interface expectations."""
         return await self.kill_terminal_command(*args, **kwargs)
 
-    async def session_update(
-        self, session_id: str, update: SessionNotification | Any, **_: Any
-    ) -> None:
+    async def session_update(self, session_id: str, update: SessionNotification | Any, **_: Any) -> None:
         update_obj = update if not isinstance(update, SessionNotification) else update.update
         update = update_obj or update
         if isinstance(update, CurrentModeUpdate):
@@ -220,10 +208,7 @@ class ACPClient(Client):
                 self._state.pending_newline = False
             raw_out = getattr(update, "raw_output", {}) or {}
             for block in update.content or []:
-                if (
-                    isinstance(block, FileEditToolCallContent)
-                    or getattr(block, "type", "") == "diff"
-                ):
+                if isinstance(block, FileEditToolCallContent) or getattr(block, "type", "") == "diff":
                     try:
                         print_file_edit_diff(
                             getattr(block, "path", "") or "",

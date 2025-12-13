@@ -86,9 +86,7 @@ class SessionStore:
         """Bound session storage by keeping only the newest `max_sessions` sessions."""
         try:
             entries = [
-                (p, p.stat().st_mtime)
-                for p in self.root.iterdir()
-                if p.is_dir() and (p / "history.jsonl").exists()
+                (p, p.stat().st_mtime) for p in self.root.iterdir() if p.is_dir() and (p / "history.jsonl").exists()
             ]
         except FileNotFoundError:
             return

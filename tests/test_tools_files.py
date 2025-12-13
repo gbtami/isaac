@@ -114,9 +114,7 @@ async def test_tool_run_command_executes(tmp_path: Path):
     conn = AsyncMock(spec=AgentSideConnection)
     conn.session_update = AsyncMock()
     conn.request_permission = AsyncMock(
-        return_value=RequestPermissionResponse(
-            outcome=AllowedOutcome(option_id="allow_once", outcome="selected")
-        )
+        return_value=RequestPermissionResponse(outcome=AllowedOutcome(option_id="allow_once", outcome="selected"))
     )
     agent = make_function_agent(conn)
     session = await agent.new_session(cwd=str(tmp_path), mcp_servers=[])
@@ -232,9 +230,7 @@ async def test_tool_code_search(tmp_path: Path):
     register_tools(runner)
     agent._session_models[session.session_id] = runner
 
-    response = await agent.prompt(
-        prompt=[text_block("search hello")], session_id=session.session_id
-    )
+    response = await agent.prompt(prompt=[text_block("search hello")], session_id=session.session_id)
 
     assert response.stop_reason == "end_turn"
     progress = [
@@ -285,9 +281,7 @@ def test_list_files_truncates_and_skips_default_ignores(tmp_path: Path):
 
 
 @pytest.mark.asyncio
-async def test_tool_output_is_truncated_before_sending(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-):
+async def test_tool_output_is_truncated_before_sending(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
     conn = AsyncMock(spec=AgentSideConnection)
     conn.session_update = AsyncMock()
     agent = make_function_agent(conn)
@@ -328,8 +322,6 @@ async def test_file_system_read_write(tmp_path: Path):
     await agent.write_text_file(content=content, path="fs.txt", session_id=session.session_id)
 
     # read
-    response = await agent.read_text_file(
-        path="fs.txt", session_id=session.session_id, line=0, limit=10
-    )
+    response = await agent.read_text_file(path="fs.txt", session_id=session.session_id, line=0, limit=10)
 
     assert response.content == content

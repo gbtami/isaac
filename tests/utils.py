@@ -24,9 +24,7 @@ def make_function_agent(conn: AgentSideConnection) -> ACPAgent:
 
     # Default permission responder for tests (can be overridden per test).
     async def _default_perm(_: object) -> RequestPermissionResponse:
-        return RequestPermissionResponse(
-            outcome=AllowedOutcome(option_id="allow_once", outcome="selected")
-        )
+        return RequestPermissionResponse(outcome=AllowedOutcome(option_id="allow_once", outcome="selected"))
 
     current_perm = getattr(conn, "request_permission", None)
     if not inspect.iscoroutinefunction(current_perm):

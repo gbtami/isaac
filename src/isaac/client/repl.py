@@ -15,9 +15,7 @@ from isaac.client.status_box import render_status_box
 from isaac.client.slash import handle_slash_command
 
 
-async def interactive_loop(
-    conn: ClientSideConnection, session_id: str, state: SessionUIState
-) -> None:
+async def interactive_loop(conn: ClientSideConnection, session_id: str, state: SessionUIState) -> None:
     """Interactive REPL that drives session/prompt per ACP prompt turn rules."""
     kb = KeyBindings()
     CANCEL_TOKEN = "__CANCEL__"
@@ -38,9 +36,7 @@ async def interactive_loop(
                 print()
                 state.pending_newline = False
             usage_suffix = f" [{state.usage_summary}]" if state.usage_summary else ""
-            line = await session.prompt_async(
-                f"{state.current_mode}|{state.current_model}{usage_suffix}> "
-            )
+            line = await session.prompt_async(f"{state.current_mode}|{state.current_model}{usage_suffix}> ")
             if line == CANCEL_TOKEN:
                 state.cancel_requested = True
                 await conn.cancel(session_id=session_id)
@@ -59,9 +55,7 @@ async def interactive_loop(
 
         # Handle slash commands locally
         if line.startswith("/"):
-            handled = await handle_slash_command(
-                line, conn, session_id, state, permission_reset=lambda: None
-            )
+            handled = await handle_slash_command(line, conn, session_id, state, permission_reset=lambda: None)
             if handled:
                 continue
 

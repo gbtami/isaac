@@ -118,9 +118,7 @@ async def run_tool(function_name: str, ctx: Any | None = None, **kwargs: Any) ->
 
     args_model = TOOL_ARG_MODELS.get(function_name)
     required = TOOL_REQUIRED_ARGS.get(function_name, [])
-    missing_required = [
-        name for name in required if name not in kwargs or kwargs.get(name) in ("", None)
-    ]
+    missing_required = [name for name in required if name not in kwargs or kwargs.get(name) in ("", None)]
     if missing_required:
         msg = f"Missing required arguments: {', '.join(missing_required)}"
         if ctx is not None:

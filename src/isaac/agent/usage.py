@@ -36,9 +36,7 @@ def format_usage_summary(usage: Any, context_limit: int | None, model_id: str) -
     input_tokens = _get("input_tokens") or _get("prompt_tokens")
     output_tokens = _get("output_tokens") or _get("completion_tokens")
     total_tokens = _get("total_tokens") or (
-        input_tokens + output_tokens
-        if input_tokens is not None and output_tokens is not None
-        else None
+        input_tokens + output_tokens if input_tokens is not None and output_tokens is not None else None
     )
 
     parts: list[str] = []

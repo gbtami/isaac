@@ -183,19 +183,15 @@ async def stream_with_runner(
                 cleaned.append({"role": role, "content": content_str})
         return cleaned if cleaned else None
 
-    def _inject_system_prompt(
-        raw_history: list[dict[str, str]] | None, runner_obj: Any
-    ) -> list[dict[str, str]] | None:
+    def _inject_system_prompt(raw_history: list[dict[str, str]] | None, runner_obj: Any) -> list[dict[str, str]] | None:
         """Ensure the system prompt is present when passing history to the model.
 
         pydantic-ai skips generating the system prompt when message_history is provided;
-        we add it explicitly if missing to preserve behavior across turns.
+        we always inject the runner's system prompt (replacing any existing system
+        messages) to preserve behavior across turns.
         """
 
         if not raw_history:
-            return raw_history
-        has_system = any(msg.get("role") == "system" for msg in raw_history)
-        if has_system:
             return raw_history
         # Prefer stored system prompts on the pydantic-ai Agent.
         sys_prompt = None
@@ -214,7 +210,8 @@ async def stream_with_runner(
                 sys_prompt = None
         if not sys_prompt:
             return raw_history
-        return [{"role": "system", "content": str(sys_prompt)}] + raw_history
+        non_system = [msg for msg in raw_history if msg.get("role") != "system"]
+        return [{"role": "system", "content": str(sys_prompt)}] + non_system
 
     def _convert_to_model_messages(raw_history: list[dict[str, str]] | None) -> list[Any] | None:
         """Pass through sanitized history; pydantic-ai accepts role/content dicts."""
@@ -275,9 +272,7 @@ async def stream_with_runner(
                 if isinstance(event.delta, ThinkingPartDelta):
                     delta = getattr(event.delta, "content_delta", None)
                     if delta:
-                        stream_logger.info(
-                            "LLM thinking delta=%s", str(delta)[:200].replace("\n", "\\n")
-                        )
+                        stream_logger.info("LLM thinking delta=%s", str(delta)[:200].replace("\n", "\\n"))
                         llm_logger.info("RECV thinking delta\n%s", delta)
                         thought_delta_buffer.append(str(delta))
                 elif isinstance(event.delta, TextPartDelta):
@@ -300,9 +295,7 @@ async def stream_with_runner(
                     final_thought = str(part) if part else "".join(thought_delta_buffer)
                     thought_delta_buffer.clear()
                     if final_thought:
-                        stream_logger.info(
-                            "LLM thinking=%s", final_thought[:200].replace("\n", "\\n")
-                        )
+                        stream_logger.info("LLM thinking=%s", final_thought[:200].replace("\n", "\\n"))
                         llm_logger.info("RECV thinking\n%s", final_thought)
                         await on_thought(final_thought)
                 elif part and not output_parts:

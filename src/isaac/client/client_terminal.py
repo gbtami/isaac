@@ -52,9 +52,7 @@ class ClientTerminalManager:
         )
 
         terminal_id = str(uuid.uuid4())
-        self._terminals[terminal_id] = TerminalState(
-            proc=proc, output_limit=params.output_byte_limit
-        )
+        self._terminals[terminal_id] = TerminalState(proc=proc, output_limit=params.output_byte_limit)
         return CreateTerminalResponse(terminal_id=terminal_id)
 
     async def terminal_output(self, params: TerminalOutputRequest) -> TerminalOutputResponse:
@@ -76,9 +74,7 @@ class ClientTerminalManager:
 
         return TerminalOutputResponse(output=combined, truncated=truncated, exit_status=exit_status)
 
-    async def wait_for_terminal_exit(
-        self, params: WaitForTerminalExitRequest
-    ) -> WaitForTerminalExitResponse:
+    async def wait_for_terminal_exit(self, params: WaitForTerminalExitRequest) -> WaitForTerminalExitResponse:
         """Wait for a terminal to exit."""
         state = self._terminals.get(params.terminal_id)
         if not state:
@@ -90,9 +86,7 @@ class ClientTerminalManager:
             signal=exit_status.signal if exit_status else None,
         )
 
-    async def kill_terminal(
-        self, params: KillTerminalCommandRequest
-    ) -> KillTerminalCommandResponse:
+    async def kill_terminal(self, params: KillTerminalCommandRequest) -> KillTerminalCommandResponse:
         """Forcefully kill a terminal process."""
         state = self._terminals.get(params.terminal_id)
         if state and state.proc.returncode is None:

@@ -37,11 +37,7 @@ async def create_terminal(
     import uuid
 
     terminal_id = str(uuid.uuid4())
-    cwd = (
-        resolve_path_for_session(session_cwds, params.session_id, params.cwd)
-        if params.cwd
-        else Path.cwd()
-    )
+    cwd = resolve_path_for_session(session_cwds, params.session_id, params.cwd) if params.cwd else Path.cwd()
 
     env = os.environ.copy()
     if params.env:

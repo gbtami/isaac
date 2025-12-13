@@ -22,13 +22,7 @@ def print_mode_update(mode: str) -> None:
 
 def print_tool(status: str, message: str) -> None:
     normalized = status.lower()
-    style = (
-        "green"
-        if normalized == "completed"
-        else "yellow"
-        if normalized in {"in_progress", "start"}
-        else "red"
-    )
+    style = "green" if normalized == "completed" else "yellow" if normalized in {"in_progress", "start"} else "red"
     console.print(Text(f"| Tool[{status}]: {message}", style=style))
 
 
@@ -67,9 +61,7 @@ def print_plan(entries: Iterable[Any]) -> None:
             with contextlib.suppress(Exception):
                 parsed = ast.literal_eval(text)
                 if isinstance(parsed, list):
-                    return "\n".join(
-                        f"- {str(item).strip()}" for item in parsed if str(item).strip()
-                    )
+                    return "\n".join(f"- {str(item).strip()}" for item in parsed if str(item).strip())
         return text
 
     for entry in entries:

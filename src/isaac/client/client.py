@@ -70,8 +70,7 @@ async def run_client(program: str, args: Iterable[str], mcp_servers: list[Any]) 
                 await proc.wait()
         return 1
     state.mcp_servers = [
-        (srv.get("name") if isinstance(srv, dict) else getattr(srv, "name", "<server>"))
-        or "<server>"
+        (srv.get("name") if isinstance(srv, dict) else getattr(srv, "name", "<server>")) or "<server>"
         for srv in mcp_servers
     ]
     session = await conn.new_session(cwd=os.getcwd(), mcp_servers=mcp_servers)
