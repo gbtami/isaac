@@ -18,7 +18,6 @@ dependencies = [
     "pydantic-ai==1.32.0",
     "prompt-toolkit==3.0.52",
     "python-dotenv",
-    "ollama",
     "pathspec",
     "rich",
 ]
