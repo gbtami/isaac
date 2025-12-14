@@ -10,7 +10,6 @@ class SessionUIState:
     current_mode: str
     current_model: str
     mcp_servers: list[str]
-    prompt_strategy: str = "handoff"
     collect_models: bool = False
     model_buffer: list[str] | None = None
     show_status_on_start: bool = True

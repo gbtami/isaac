@@ -146,35 +146,6 @@ def _handle_usage(agent: Any, session_id: str, _command: str, _argument: str) ->
     return session_notification(session_id, update_agent_message(text_block(summary)))
 
 
-@register_slash_command(
-    "/strategies",
-    description="List available prompt strategies.",
-    hint="/strategies",
-)
-def _handle_strategies(agent: Any, session_id: str, _command: str, _argument: str) -> SessionNotification:
-    describer = getattr(agent, "describe_prompt_strategies", None)
-    if callable(describer):
-        message = describer(session_id)
-    else:  # pragma: no cover - defensive fallback
-        message = "Prompt strategies are not supported by this agent."
-    return session_notification(session_id, update_agent_message(text_block(message)))
-
-
-@register_slash_command(
-    "/strategy",
-    description="Set the prompt strategy (handoff|delegation|single|plan_only).",
-    hint="/strategy <id>",
-)
-async def _handle_strategy(agent: Any, session_id: str, _command: str, argument: str) -> SessionNotification:
-    setter = getattr(agent, "set_session_prompt_strategy", None)
-    if not callable(setter):
-        message = "Prompt strategy selection is not supported by this agent."
-    else:
-        result = setter(argument, session_id)
-        message = await result if asyncio.iscoroutine(result) else result
-    return session_notification(session_id, update_agent_message(text_block(message)))
-
-
 async def handle_slash_command(agent: Any, session_id: str, prompt: str) -> SessionNotification | None:
     """Handle server-side slash commands (Slash Commands section)."""
     trimmed = prompt.strip()

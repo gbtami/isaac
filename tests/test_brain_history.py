@@ -67,12 +67,12 @@ def test_build_chat_history_skips_slash_commands():
             "s1",
             UserMessageChunk(
                 session_update="user_message_chunk",
-                content=text_block("/strategy single"),
+                content=text_block("/mode yolo"),
             ),
         ),
         session_notification(
             "s1",
-            update_agent_message(text_block("Prompt strategy set to single.")),
+            update_agent_message(text_block("Mode set to yolo.")),
         ),
         session_notification(
             "s1",

@@ -76,12 +76,8 @@ from isaac.agent.agent_terminal import (
     wait_for_terminal_exit,
 )
 from isaac.agent.brain.history import build_chat_history
-from isaac.agent.brain.prompt_strategies import (
-    PromptStrategyManager,
-    StrategyEnv,
-)
+from isaac.agent.brain.handoff import HandoffEnv, HandoffPromptRunner
 from isaac.agent.constants import TOOL_OUTPUT_LIMIT
-from isaac.agent.default_runners import create_default_runners
 from isaac.agent.fs import read_text_file, write_text_file
 from isaac.agent.mcp_support import build_mcp_toolsets
 from isaac.agent.planner import build_plan_notification, parse_plan_request
@@ -122,6 +118,13 @@ def _describe_model_messages(msgs: Any) -> list[str]:
     return roles
 
 
+def _create_default_runners(toolsets: list[Any] | None = None) -> tuple[Any, Any]:
+    """Build executor/planner runners or let exceptions surface."""
+
+    current = model_registry.current_model_id()
+    return model_registry.build_agent_pair(current, register_tools, toolsets=toolsets or [])
+
+
 class ACPAgent(Agent):
     """Implements ACP session, prompt, tool, filesystem, and terminal flows."""
 
@@ -149,8 +152,6 @@ class ACPAgent(Agent):
         self._session_mcp_servers: Dict[str, Any] = {}
         self._session_usage: Dict[str, Any] = {}
         self._session_toolsets: Dict[str, list[Any]] = {}
-        self._session_single_models: Dict[str, Any | None] = {}
-        self._session_prompt_strategies: Dict[str, str] = {}
         self._session_model_messages: Dict[str, list[Any]] = {}
         self._agent_name = agent_name
         self._agent_title = agent_title
@@ -168,21 +169,16 @@ class ACPAgent(Agent):
         self._session_last_chunk: Dict[str, str | None] = {}
         self._session_model_errors: Dict[str, str] = {}
         self._session_model_error_notified: set[str] = set()
-        self._delegate_tool_enabled: set[str] = set()
-        self._default_prompt_strategy = "handoff"
-        self._strategy_manager = self._build_strategy_manager()
+        self._handoff_runner = self._build_handoff_runner()
 
     def on_connect(self, conn: AgentSideConnection) -> None:  # type: ignore[override]
         """Capture connection when wiring via run_agent/connect_to_agent."""
         self._conn = conn
 
-    def _build_strategy_manager(self) -> PromptStrategyManager:
-        env = StrategyEnv(
+    def _build_handoff_runner(self) -> HandoffPromptRunner:
+        env = HandoffEnv(
             session_modes=self._session_modes,
             session_last_chunk=self._session_last_chunk,
-            session_strategies=self._session_prompt_strategies,
-            delegate_tool_enabled=self._delegate_tool_enabled,
-            default_strategy=self._default_prompt_strategy,
             send_update=self._send_update,
             request_run_permission=lambda session_id, tool_call_id, command, cwd: self._request_run_permission(  # type: ignore[arg-type]
                 session_id=session_id,
@@ -190,10 +186,9 @@ class ACPAgent(Agent):
                 command=command,
                 cwd=cwd,
             ),
-            refresh_history=lambda session_id: build_chat_history(self._session_history.get(session_id, [])),
             set_usage=lambda session_id, usage: self._session_usage.__setitem__(session_id, usage),
         )
-        return PromptStrategyManager(env)
+        return HandoffPromptRunner(env)
 
     async def initialize(
         self,
@@ -269,18 +264,15 @@ class ACPAgent(Agent):
         toolsets = build_mcp_toolsets(mcp_servers)
         self._session_toolsets[session_id] = toolsets
         await self._init_session_runners(session_id, toolsets)
-        self._delegate_tool_enabled.discard(session_id)
         self._session_history[session_id] = []
         self._session_model_messages[session_id] = []
         self._session_allowed_commands[session_id] = set()
         self._session_mcp_servers[session_id] = mcp_servers
-        self._session_prompt_strategies[session_id] = self._default_prompt_strategy
         self._persist_session_meta(
             session_id,
             cwd_path,
             mcp_servers,
             current_mode="ask",
-            prompt_strategy=self._default_prompt_strategy,
         )
         mode_state = build_mode_state(self._session_modes, session_id, current_mode="ask")
         await self._send_available_commands(session_id)
@@ -304,20 +296,11 @@ class ACPAgent(Agent):
         toolsets = build_mcp_toolsets(mcp_servers)
         self._session_toolsets[session_id] = toolsets
         await self._init_session_runners(session_id, toolsets)
-        self._delegate_tool_enabled.discard(session_id)
         self._session_history.setdefault(session_id, [])
         self._session_allowed_commands.setdefault(session_id, set())
         self._session_mcp_servers[session_id] = mcp_servers
         mode = stored_meta.get("mode") or self._session_modes.get(session_id, "ask")
         self._session_modes[session_id] = mode
-        strategy = (
-            stored_meta.get("strategy")
-            or self._session_prompt_strategies.get(session_id)
-            or self._default_prompt_strategy
-        )
-        if not self._strategy_manager.is_valid_strategy(strategy):
-            strategy = self._default_prompt_strategy
-        self._session_prompt_strategies[session_id] = strategy
         history = self._load_session_history(session_id)
         self._session_history[session_id].extend(history)
         self._persist_session_meta(
@@ -325,7 +308,6 @@ class ACPAgent(Agent):
             cwd_path,
             mcp_servers,
             current_mode=mode,
-            prompt_strategy=strategy,
         )
         for note in history:
             await self._conn.session_update(session_id=note.session_id, update=note.update)  # type: ignore[arg-type]
@@ -363,7 +345,6 @@ class ACPAgent(Agent):
             self._session_cwds.get(session_id, Path.cwd()),
             self._session_mcp_servers.get(session_id, []),
             current_mode=mode_id,
-            prompt_strategy=self._session_prompt_strategies.get(session_id, self._default_prompt_strategy),
         )
         return SetSessionModeResponse()
 
@@ -378,17 +359,10 @@ class ACPAgent(Agent):
                 register_tools,
                 toolsets=toolsets,
             )
-            try:
-                single_agent = model_registry.build_single_agent(model_id, register_tools, toolsets=toolsets)
-            except Exception as exc:  # noqa: BLE001
-                logger.warning("Using executor as fallback single-agent runner after build error: %s", exc)
-                single_agent = executor
             self._session_models[session_id] = executor
             self._session_planners[session_id] = planner
-            self._session_single_models[session_id] = single_agent
             self._session_model_ids[session_id] = model_id
             self._session_model_errors.pop(session_id, None)
-            self._delegate_tool_enabled.discard(session_id)
             with contextlib.suppress(Exception):
                 model_registry.set_current_model(model_id)
         except Exception as exc:  # pragma: no cover - model build errors
@@ -404,30 +378,6 @@ class ACPAgent(Agent):
                 model_registry.set_current_model(previous_model_id)
             raise
         return SetSessionModelResponse()
-
-    def _current_prompt_strategy_id(self, session_id: str) -> str:
-        return self._strategy_manager.current_strategy_id(session_id)
-
-    def describe_prompt_strategies(self, session_id: str) -> str:
-        """Return a human-readable list of available prompt strategies."""
-
-        return self._strategy_manager.describe(session_id)
-
-    async def set_session_prompt_strategy(self, strategy_id: str, session_id: str) -> str:
-        """Update prompt handling strategy for the session."""
-
-        normalized = (strategy_id or "").strip().lower()
-        if not normalized:
-            return "Usage: /strategy <id> (use /strategies to list options)"
-        message = self._strategy_manager.set_strategy(normalized, session_id)
-        self._persist_session_meta(
-            session_id,
-            self._session_cwds.get(session_id, Path.cwd()),
-            self._session_mcp_servers.get(session_id, []),
-            current_mode=self._session_modes.get(session_id, "ask"),
-            prompt_strategy=self._current_prompt_strategy_id(session_id),
-        )
-        return message
 
     async def prompt(
         self,
@@ -484,7 +434,6 @@ class ACPAgent(Agent):
 
         runner = self._session_models.get(session_id) or self._ai_runner
         planner = self._session_planners.get(session_id) or self._planning_runner or self._ai_runner
-        single_runner = self._session_single_models.get(session_id) or runner
         if runner is None or planner is None:
             return await self._respond_model_error(session_id, self._session_model_errors.get(session_id))
 
@@ -494,14 +443,13 @@ class ACPAgent(Agent):
             except Exception:
                 self._session_model_messages[session_id] = []
 
-        return await self._strategy_manager.run(
+        return await self._handoff_runner.run(
             session_id,
             prompt_text,
             history=history,
             cancel_event=cancel_event,
             runner=runner,
             planner=planner,
-            single_runner=single_runner,
             store_model_messages=_store_model_messages,
         )
 
@@ -857,19 +805,10 @@ class ACPAgent(Agent):
             if self._custom_runners:
                 executor = self._ai_runner
                 planner = self._planning_runner or self._ai_runner
-                single_agent = self._ai_runner
             else:
-                executor, planner = create_default_runners(toolsets)
-                try:
-                    single_agent = model_registry.build_single_agent(
-                        self._current_model_id(), register_tools, toolsets=toolsets
-                    )
-                except Exception as exc:
-                    logger.warning("Falling back to executor for single-agent runner: %s", exc)
-                    single_agent = executor
+                executor, planner = _create_default_runners(toolsets)
             self._session_models[session_id] = executor
             self._session_planners[session_id] = planner
-            self._session_single_models[session_id] = single_agent
             self._session_model_ids[session_id] = self._current_model_id()
             self._session_model_errors.pop(session_id, None)
             self._session_model_error_notified.discard(session_id)
@@ -878,7 +817,6 @@ class ACPAgent(Agent):
             logger.error("Failed to build model for session %s: %s", session_id, exc)
             self._session_models[session_id] = None
             self._session_planners[session_id] = None
-            self._session_single_models[session_id] = None
             self._session_model_errors[session_id] = msg
             self._session_model_error_notified.add(session_id)
             await self._send_update(
@@ -922,12 +860,8 @@ class ACPAgent(Agent):
         mcp_servers: list[Any] | None,
         *,
         current_mode: str,
-        prompt_strategy: str | None = None,
     ) -> None:
-        strategy = prompt_strategy or self._session_prompt_strategies.get(session_id, self._default_prompt_strategy)
-        self._session_store.persist_meta(
-            session_id, cwd, mcp_servers or [], current_mode=current_mode, strategy=strategy
-        )
+        self._session_store.persist_meta(session_id, cwd, mcp_servers or [], current_mode=current_mode)
 
     def _load_session_meta(self, session_id: str) -> dict[str, Any]:
         return self._session_store.load_meta(session_id)

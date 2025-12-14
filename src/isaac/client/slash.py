@@ -7,7 +7,7 @@ import logging
 from dataclasses import dataclass
 from typing import Awaitable, Callable
 
-from acp import ClientSideConnection, text_block
+from acp import ClientSideConnection
 
 from isaac.client.acp_client import set_mode
 from isaac.client.session_state import SessionUIState
@@ -59,28 +59,6 @@ def _handle_help(
                 continue
             label = desc or "Handled by agent"
             print(f"{name:<16} - {label}")
-    return True
-
-
-@register_slash_command(
-    "/strategy",
-    description="Set prompt strategy (handoff|delegation|single|plan_only).",
-    hint="/strategy <id>",
-)
-async def _handle_strategy(
-    conn: ClientSideConnection,
-    session_id: str,
-    state: SessionUIState,
-    _permission_reset: Callable[[], None],
-    argument: str,
-) -> bool:
-    selection = argument.split()[0] if argument else ""
-    if not selection:
-        print("Usage: /strategy <id> (use /strategies to list options)")
-        return True
-    await conn.prompt(prompt=[text_block(f"/strategy {selection}")], session_id=session_id)
-    state.prompt_strategy = selection
-    print(f"[strategy set to {selection}]")
     return True
 
 

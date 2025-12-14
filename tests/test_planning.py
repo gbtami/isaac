@@ -1,31 +1,15 @@
 from __future__ import annotations
 
+import asyncio
 from unittest.mock import AsyncMock
 
 import pytest
 from acp import text_block
 from acp.schema import AgentMessageChunk, AgentPlanUpdate
+from pydantic_ai.run import AgentRunResultEvent  # type: ignore
 
+from isaac.agent.brain.handoff import HandoffEnv, HandoffPromptRunner, PlanStep, PlanSteps
 from tests.utils import make_function_agent
-
-
-@pytest.mark.asyncio
-async def test_plan_only_strategy_emits_plan_update_without_execution():
-    conn = AsyncMock()
-    planning_runner = _PlanningRunner("Plan:\n- step one\n- step two")
-    executor = _StreamingExecutor()
-    agent = make_function_agent(conn)
-    agent._planning_runner = planning_runner  # type: ignore[attr-defined]
-    agent._ai_runner = executor  # type: ignore[attr-defined]
-
-    session_id = "plan-only"
-    agent._session_prompt_strategies[session_id] = "plan_only"
-    response = await agent.prompt(prompt=[text_block("plan only")], session_id=session_id)
-
-    updates = [call.kwargs["update"] for call in conn.session_update.await_args_list]  # type: ignore[attr-defined]
-    assert any(isinstance(u, AgentPlanUpdate) for u in updates)
-    assert executor.prompts == []
-    assert response.stop_reason == "end_turn"
 
 
 class _PlanningRunner:
@@ -82,155 +66,56 @@ async def test_programmatic_plan_then_execute():
 
 
 @pytest.mark.asyncio
-class _DelegateRunner:
-    def __init__(self):
-        self.prompts: list[str] = []
-        self.tools: dict[str, object] = {}
-
-    def tool(self, name: str):
-        def _decorator(fn):
-            self.tools[name] = fn
-            return fn
-
-        return _decorator
-
-    async def run_stream_events(self, prompt: str, message_history: list[dict[str, str]] | None = None, **_: object):
-        from pydantic_ai.messages import (
-            FunctionToolCallEvent,
-            FunctionToolResultEvent,
-            ToolCallPart,
-            ToolReturnPart,
-        )
-
-        self.prompts.append(prompt)
-        call = FunctionToolCallEvent(
-            ToolCallPart(tool_name="delegate_plan", args={"task": prompt}, tool_call_id="call1")
-        )
-        result = FunctionToolResultEvent(
-            ToolReturnPart(
-                tool_name="delegate_plan",
-                content={"plan": ["step1", "step2"], "tool": "delegate_plan"},
-                tool_call_id="call1",
-            )
-        )
-
-        async def _gen():
-            yield call
-            yield result
-            yield "delegate complete"
-
-        return _gen()
-
-
-class _FailingPlanner:
-    def __init__(self):
-        self.called = False
-
-    async def run_stream_events(self, prompt: str, **_: object):
-        self.called = True
-        raise AssertionError("planner should not be used in single strategy")
-
-
-class _SingleRunner:
-    def __init__(self):
-        self.prompts: list[str] = []
-
-    async def run_stream_events(self, prompt: str, message_history: list[dict[str, str]] | None = None, **_: object):
-        self.prompts.append(prompt)
-
-        async def _gen():
-            yield "plan then execute"
-
-        return _gen()
-
-
-@pytest.mark.asyncio
-async def test_delegation_strategy_emits_plan_update_and_execution():
-    conn = AsyncMock()
-    delegate_runner = _DelegateRunner()
-    agent = make_function_agent(conn)
-    agent._ai_runner = delegate_runner  # type: ignore[attr-defined]
-    session_id = "delegation-session"
-    agent._session_prompt_strategies[session_id] = "delegation"
-
-    await agent.prompt(prompt=[text_block("do delegated work")], session_id=session_id)
-
-    updates = [call.kwargs["update"] for call in conn.session_update.await_args_list]  # type: ignore[attr-defined]
-    assert any(isinstance(u, AgentPlanUpdate) for u in updates)
-    assert any(
-        isinstance(u, AgentMessageChunk) and getattr(getattr(u, "content", None), "text", "") == "delegate complete"
-        for u in updates
+async def test_structured_plan_entries_generate_plan_updates():
+    send_update = AsyncMock()
+    env = HandoffEnv(
+        session_modes={},
+        session_last_chunk={},
+        send_update=send_update,
+        request_run_permission=AsyncMock(return_value=True),
+        set_usage=lambda *_: None,
     )
-    assert len(delegate_runner.prompts) == 1
-    assert "delegate_plan" in delegate_runner.prompts[0]
+    runner = HandoffPromptRunner(env)
+
+    class _StructuredPlanner:
+        async def run_stream_events(
+            self, prompt: str, message_history: list[dict[str, str]] | None = None, **_: object
+        ):
+            _ = prompt, message_history
+
+            class _Result:
+                def __init__(self, output: PlanSteps):
+                    self.output = output
+                    self.data = output
+
+            event = AgentRunResultEvent(result=_Result(PlanSteps(entries=[PlanStep(content="a", priority="high")])))
+
+            async def _gen():
+                yield event
+
+            return _gen()
+
+    plan_update, plan_text, _ = await runner._run_planning_phase(
+        "s1",
+        "do work",
+        history=[],
+        cancel_event=asyncio.Event(),
+        planner=_StructuredPlanner(),
+        store_model_messages=lambda *_: None,
+    )
+
+    assert plan_update is not None
+    assert plan_text == "- a"
+    entries = getattr(plan_update, "entries", []) or []
+    assert [e.content for e in entries] == ["a"]
+    assert [e.priority for e in entries] == ["high"]
+    assert all(getattr(e, "status", "") == "pending" for e in entries)
 
 
-@pytest.mark.asyncio
-async def test_plan_parser_handles_steps_list_line():
+def test_plan_parser_handles_steps_list_line():
     from isaac.agent.brain.planner import parse_plan_from_text
 
     update = parse_plan_from_text("steps=['first','second','third']")
     assert update
     contents = [getattr(e, "content", "") for e in update.entries]
     assert contents == ["first", "second", "third"]
-
-
-def test_plan_update_from_raw_accepts_structured_entries():
-    from isaac.agent.brain.prompt_strategies import PromptStrategyManager, StrategyEnv
-
-    async def _noop_send(*_: object) -> None:
-        return None
-
-    async def _noop_permission(*_: object, **__: object) -> bool:
-        return True
-
-    env = StrategyEnv(
-        session_modes={},
-        session_last_chunk={},
-        session_strategies={},
-        delegate_tool_enabled=set(),
-        default_strategy="single",
-        send_update=_noop_send,
-        request_run_permission=_noop_permission,
-        refresh_history=lambda *_: [],
-        set_usage=lambda *_: None,
-    )
-    mgr = PromptStrategyManager(env)
-    update = mgr._plan_update_from_raw(
-        {
-            "plan": [
-                {"content": "a", "priority": "high", "id": "one"},
-                {"content": "b", "priority": "low", "id": "two"},
-            ]
-        }
-    )
-    assert update
-    assert [e.content for e in update.entries] == ["a", "b"]
-    assert [e.priority for e in update.entries] == ["high", "low"]
-    assert [getattr(e.field_meta, "get", lambda *_: None)("id") for e in update.entries] == [
-        "one",
-        "two",
-    ]
-
-
-@pytest.mark.asyncio
-async def test_single_strategy_uses_single_runner_only():
-    conn = AsyncMock()
-    single_runner = _SingleRunner()
-    failing_planner = _FailingPlanner()
-    agent = make_function_agent(conn)
-    agent._ai_runner = single_runner  # type: ignore[attr-defined]
-    agent._planning_runner = failing_planner  # type: ignore[attr-defined]
-    session_id = "single-session"
-    agent._session_prompt_strategies[session_id] = "single"
-
-    await agent.prompt(prompt=[text_block("do single agent work")], session_id=session_id)
-
-    assert len(single_runner.prompts) == 1
-    assert "share a short plan" in single_runner.prompts[0]
-    assert not failing_planner.called
-    updates = [call.kwargs["update"] for call in conn.session_update.await_args_list]  # type: ignore[attr-defined]
-    assert any(
-        isinstance(u, AgentMessageChunk) and getattr(getattr(u, "content", None), "text", "") == "plan then execute"
-        for u in updates
-    )
