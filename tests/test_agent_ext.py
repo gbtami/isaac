@@ -5,10 +5,11 @@ from pathlib import Path
 from unittest.mock import AsyncMock
 
 import pytest
-from acp.agent.connection import AgentSideConnection
 from acp import PROTOCOL_VERSION, text_block
+from acp.agent.connection import AgentSideConnection
 from acp.helpers import session_notification, update_agent_message
 from acp.schema import AgentMessageChunk, SessionNotification, UserMessageChunk
+from pydantic_ai.run import AgentRunResultEvent  # type: ignore
 
 from isaac.agent.agent import ACPAgent
 from isaac.agent import models as model_registry
@@ -134,6 +135,7 @@ class _RecordingRunner:
     def __init__(self, output: str):
         self.output = output
         self.stream_messages: list[dict[str, str]] | None = None
+        self._new_messages: list[dict[str, str]] = []
 
     async def run_stream_events(
         self,
@@ -142,12 +144,29 @@ class _RecordingRunner:
         message_history: list[dict[str, str]] | None = None,
         **_: object,
     ):
-        self.stream_messages = (message_history if message_history is not None else messages) or []
+        prior = (message_history if message_history is not None else messages) or []
+        self.stream_messages = list(prior)
+        history = list(prior)
+        history.append({"role": "user", "content": prompt_text})
+        history.append({"role": "assistant", "content": self.output})
+        self._new_messages = history
 
         async def _gen():
-            yield self.output
+            class _Result:
+                def __init__(self, output: str, msgs: list[dict[str, str]]):
+                    self.output = output
+                    self._msgs = msgs
+                    self.usage = None
+
+                def new_messages(self) -> list[dict[str, str]]:
+                    return list(self._msgs)
+
+            yield AgentRunResultEvent(result=_Result(self.output, self._new_messages))
 
         return _gen()
+
+    def new_messages(self) -> list[dict[str, str]]:
+        return list(self._new_messages)
 
 
 @pytest.mark.asyncio

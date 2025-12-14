@@ -26,7 +26,7 @@ from pydantic_ai.messages import FunctionToolCallEvent, FunctionToolResultEvent,
 from pydantic_ai.run import AgentRunResultEvent  # type: ignore
 
 from isaac.agent.brain.planner import parse_plan_from_text
-from isaac.agent.brain.prompt import EXECUTOR_PROMPT, PLANNING_SYSTEM_PROMPT
+from isaac.agent.brain.prompt import EXECUTOR_PROMPT, PLANNER_PROMPT, SYSTEM_PROMPT
 from isaac.agent.runner import stream_with_runner
 from isaac.agent.tools.run_command import (
     RunCommandContext,
@@ -96,7 +96,8 @@ def build_planning_agent(model: Any, model_settings: Any = None) -> PydanticAgen
 
     return PydanticAgent(
         model,
-        system_prompt=PLANNING_SYSTEM_PROMPT,
+        system_prompt=SYSTEM_PROMPT,
+        instructions=PLANNER_PROMPT,
         model_settings=model_settings,
         toolsets=(),
         output_type=PlanSteps,
@@ -125,19 +126,21 @@ class HandoffPromptRunner:
         session_id: str,
         prompt_text: str,
         *,
-        history: Any,
+        planner_history: list[Any],
+        executor_history: list[Any],
         cancel_event: asyncio.Event,
         runner: Any,
         planner: Any,
-        store_model_messages: Callable[[Any], None],
+        store_planner_messages: Callable[[Any], None],
+        store_executor_messages: Callable[[Any], None],
     ) -> Any:
         plan_update, plan_text, plan_usage = await self._run_planning_phase(
             session_id,
             prompt_text,
-            history=history,
+            history=planner_history,
             cancel_event=cancel_event,
             planner=planner,
-            store_model_messages=store_model_messages,
+            store_model_messages=store_planner_messages,
         )
         if plan_update:
             planned = self._plan_with_status(plan_update, active_index=0)
@@ -152,9 +155,9 @@ class HandoffPromptRunner:
             session_id,
             runner,
             executor_prompt,
-            history=history,
+            history=executor_history,
             cancel_event=cancel_event,
-            store_model_messages=store_model_messages,
+            store_model_messages=store_executor_messages,
             plan_update=plan_update,
             plan_response=plan_text,
             plan_usage=plan_usage,
@@ -183,8 +186,7 @@ class HandoffPromptRunner:
         async def _capture_plan_event(event: Any) -> bool:
             nonlocal structured_plan
             if isinstance(event, AgentRunResultEvent):
-                result = getattr(event, "result", None)
-                output = getattr(result, "output", None) if result is not None else None
+                output = event.result.output
                 if isinstance(output, PlanSteps):
                     structured_plan = output
             return False

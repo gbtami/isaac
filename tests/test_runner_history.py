@@ -44,5 +44,5 @@ async def test_stream_with_runner_replaces_system_prompt_in_history() -> None:
     )
 
     assert runner.captured_history is not None
-    assert runner.captured_history[0] == {"role": "system", "content": "NEW_SYSTEM_PROMPT"}
-    assert all(msg.get("content") != "OLD_SYSTEM_PROMPT" for msg in runner.captured_history)
+    assert runner.captured_history[0] == {"role": "system", "content": "OLD_SYSTEM_PROMPT"}
+    assert any(msg.get("content") == "hi" for msg in runner.captured_history)

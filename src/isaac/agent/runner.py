@@ -183,36 +183,6 @@ async def stream_with_runner(
                 cleaned.append({"role": role, "content": content_str})
         return cleaned if cleaned else None
 
-    def _inject_system_prompt(raw_history: list[dict[str, str]] | None, runner_obj: Any) -> list[dict[str, str]] | None:
-        """Ensure the system prompt is present when passing history to the model.
-
-        pydantic-ai skips generating the system prompt when message_history is provided;
-        we always inject the runner's system prompt (replacing any existing system
-        messages) to preserve behavior across turns.
-        """
-
-        if not raw_history:
-            return raw_history
-        # Prefer stored system prompts on the pydantic-ai Agent.
-        sys_prompt = None
-        try:
-            prompts = getattr(runner_obj, "_system_prompts", None)
-            if prompts:
-                sys_prompt = "\n".join([p for p in prompts if p])
-        except Exception:
-            pass
-        if not sys_prompt:
-            sys_prompt = getattr(runner_obj, "system_prompt", None)
-        if callable(sys_prompt):
-            try:
-                sys_prompt = sys_prompt()
-            except Exception:
-                sys_prompt = None
-        if not sys_prompt:
-            return raw_history
-        non_system = [msg for msg in raw_history if msg.get("role") != "system"]
-        return [{"role": "system", "content": str(sys_prompt)}] + non_system
-
     def _convert_to_model_messages(raw_history: list[dict[str, str]] | None) -> list[Any] | None:
         """Pass through sanitized history; pydantic-ai accepts role/content dicts."""
 
@@ -229,7 +199,7 @@ async def stream_with_runner(
             if isinstance(history, list) and history and not isinstance(history[0], dict):
                 safe_history = history
             else:
-                sanitized = _inject_system_prompt(_sanitize_history(history), runner)
+                sanitized = _sanitize_history(history)
                 safe_history = _convert_to_model_messages(sanitized)
             try:
                 llm_logger.info("HISTORY_SANITIZED %s", json.dumps(safe_history)[:HISTORY_LOG_MAX])
@@ -272,15 +242,15 @@ async def stream_with_runner(
                 if isinstance(event.delta, ThinkingPartDelta):
                     delta = getattr(event.delta, "content_delta", None)
                     if delta:
-                        stream_logger.info("LLM thinking delta=%s", str(delta)[:200].replace("\n", "\\n"))
-                        llm_logger.info("RECV thinking delta\n%s", delta)
+                        # stream_logger.info("LLM thinking delta=%s", str(delta)[:200].replace("\n", "\\n"))
+                        # llm_logger.info("RECV thinking delta\n%s", delta)
                         thought_delta_buffer.append(str(delta))
                 elif isinstance(event.delta, TextPartDelta):
                     delta = getattr(event.delta, "content_delta", "")
                     if delta:
                         output_parts.append(delta)
-                        stream_logger.info("LLM delta=%s", delta[:200].replace("\n", "\\n"))
-                        llm_logger.info("RECV delta\n%s", delta)
+                        # stream_logger.info("LLM delta=%s", delta[:200].replace("\n", "\\n"))
+                        # llm_logger.info("RECV delta\n%s", delta)
                         await on_text(delta)
             elif isinstance(event, PartEndEvent):
                 kind = getattr(event.part, "part_kind", "")
@@ -304,30 +274,25 @@ async def stream_with_runner(
                     llm_logger.info("RECV part_end\n%s", part)
                     await on_text(part)
             elif isinstance(event, AgentRunResultEvent):
-                result = getattr(event, "result", None)
-                if result is not None and getattr(result, "output", None):
-                    full = getattr(result, "output")
-                    usage = getattr(result, "usage", None)
-                    stream_logger.info("LLM final output=%s", str(full)[:200].replace("\n", "\\n"))
-                    llm_logger.info("RECV final output\n%s", full)
+                result = event.result
+                full = result.output
+                usage = getattr(result, "usage", None)
+                stream_logger.info("LLM final output=%s", str(full)[:200].replace("\n", "\\n"))
+                llm_logger.info("RECV final output\n%s", full)
+                try:
+                    msgs = result.new_messages()
+                    llm_logger.info("MODEL_MESSAGES %s", str(msgs)[:HISTORY_LOG_MAX])
+                    if store_messages is not None:
+                        with contextlib.suppress(Exception):
+                            store_messages(msgs)
+                except Exception:
+                    pass
+                if not output_parts:
                     try:
-                        getter = getattr(result, "all_messages", None)
-                        if callable(getter):
-                            msgs = getter()
-                            llm_logger.info("MODEL_MESSAGES %s", str(msgs)[:HISTORY_LOG_MAX])
-                            if store_messages is not None:
-                                try:
-                                    store_messages(msgs)
-                                except Exception:
-                                    pass
+                        await on_text(str(full))
                     except Exception:
                         pass
-                    if not output_parts:
-                        try:
-                            await on_text(str(full))
-                        except Exception:
-                            pass
-                    return str(full), usage
+                return str(full), usage
     except (ai_exc.ModelRetry, ai_exc.UnexpectedModelBehavior) as exc:
         msg = str(exc)
         stream_logger.warning("LLM validation failure: %s", msg)

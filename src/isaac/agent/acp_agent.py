@@ -75,7 +75,6 @@ from isaac.agent.agent_terminal import (
     terminal_output,
     wait_for_terminal_exit,
 )
-from isaac.agent.brain.history import build_chat_history
 from isaac.agent.brain.handoff import HandoffEnv, HandoffPromptRunner
 from isaac.agent.constants import TOOL_OUTPUT_LIMIT
 from isaac.agent.fs import read_text_file, write_text_file
@@ -91,31 +90,6 @@ from isaac.agent.tools import run_tool
 from isaac.agent.usage import format_usage_summary, normalize_usage
 
 logger = logging.getLogger("acp_server")
-
-
-def _describe_model_messages(msgs: Any) -> list[str]:
-    roles: list[str] = []
-    for msg in msgs or []:
-        name = msg.__class__.__name__
-        if name == "ModelRequest":
-            parts = getattr(msg, "parts", [])
-            if parts:
-                part0 = parts[0].__class__.__name__
-                if "SystemPromptPart" in part0:
-                    roles.append("system")
-                elif "UserPromptPart" in part0:
-                    roles.append("user")
-                elif "ToolReturnPart" in part0:
-                    roles.append("tool_return")
-                else:
-                    roles.append(part0)
-            else:
-                roles.append("request")
-        elif name == "ModelResponse":
-            roles.append("assistant")
-        else:
-            roles.append(name)
-    return roles
 
 
 def _create_default_runners(toolsets: list[Any] | None = None) -> tuple[Any, Any]:
@@ -152,7 +126,8 @@ class ACPAgent(Agent):
         self._session_mcp_servers: Dict[str, Any] = {}
         self._session_usage: Dict[str, Any] = {}
         self._session_toolsets: Dict[str, list[Any]] = {}
-        self._session_model_messages: Dict[str, list[Any]] = {}
+        self._planner_history: Dict[str, list[Any]] = {}
+        self._executor_history: Dict[str, list[Any]] = {}
         self._agent_name = agent_name
         self._agent_title = agent_title
         self._agent_version = agent_version
@@ -265,7 +240,8 @@ class ACPAgent(Agent):
         self._session_toolsets[session_id] = toolsets
         await self._init_session_runners(session_id, toolsets)
         self._session_history[session_id] = []
-        self._session_model_messages[session_id] = []
+        self._planner_history[session_id] = []
+        self._executor_history[session_id] = []
         self._session_allowed_commands[session_id] = set()
         self._session_mcp_servers[session_id] = mcp_servers
         self._persist_session_meta(
@@ -297,6 +273,8 @@ class ACPAgent(Agent):
         self._session_toolsets[session_id] = toolsets
         await self._init_session_runners(session_id, toolsets)
         self._session_history.setdefault(session_id, [])
+        self._planner_history.setdefault(session_id, [])
+        self._executor_history.setdefault(session_id, [])
         self._session_allowed_commands.setdefault(session_id, set())
         self._session_mcp_servers[session_id] = mcp_servers
         mode = stored_meta.get("mode") or self._session_modes.get(session_id, "ask")
@@ -362,6 +340,8 @@ class ACPAgent(Agent):
             self._session_models[session_id] = executor
             self._session_planners[session_id] = planner
             self._session_model_ids[session_id] = model_id
+            self._planner_history[session_id] = []
+            self._executor_history[session_id] = []
             self._session_model_errors.pop(session_id, None)
             with contextlib.suppress(Exception):
                 model_registry.set_current_model(model_id)
@@ -389,22 +369,8 @@ class ACPAgent(Agent):
         logger.info("Received prompt request for session: %s", session_id)
         cancel_event = self._cancel_events.setdefault(session_id, asyncio.Event())
         cancel_event.clear()
-        raw_history = self._session_history.get(session_id, [])
-        history = self._session_model_messages.get(session_id) or build_chat_history(raw_history)
         # Reset last text chunk tracking for this prompt turn.
         self._session_last_chunk[session_id] = None
-        if raw_history and self._session_model_messages.get(session_id):
-            try:
-                msg_roles = _describe_model_messages(self._session_model_messages[session_id])
-                constructed_roles = [m.get("role", "") for m in build_chat_history(raw_history)]
-                logger.debug(
-                    "History comparison session=%s constructed_roles=%s model_message_roles=%s",
-                    session_id,
-                    constructed_roles,
-                    msg_roles,
-                )
-            except Exception:
-                logger.debug("History comparison failed for session=%s", session_id)
         model_error = self._session_model_errors.get(session_id)
         if model_error:
             return await self._respond_model_error(session_id, model_error)
@@ -437,20 +403,33 @@ class ACPAgent(Agent):
         if runner is None or planner is None:
             return await self._respond_model_error(session_id, self._session_model_errors.get(session_id))
 
-        def _store_model_messages(msgs: Any) -> None:
+        planner_history = list(self._planner_history.get(session_id, []))
+        executor_history = list(self._executor_history.get(session_id, []))
+
+        def _store_planner_messages(msgs: Any) -> None:
+            current = self._planner_history.setdefault(session_id, [])
             try:
-                self._session_model_messages[session_id] = list(msgs or [])
+                current.extend(list(msgs or []))
             except Exception:
-                self._session_model_messages[session_id] = []
+                return
+
+        def _store_executor_messages(msgs: Any) -> None:
+            current = self._executor_history.setdefault(session_id, [])
+            try:
+                current.extend(list(msgs or []))
+            except Exception:
+                return
 
         return await self._handoff_runner.run(
             session_id,
             prompt_text,
-            history=history,
+            planner_history=planner_history,
+            executor_history=executor_history,
             cancel_event=cancel_event,
             runner=runner,
             planner=planner,
-            store_model_messages=_store_model_messages,
+            store_planner_messages=_store_planner_messages,
+            store_executor_messages=_store_executor_messages,
         )
 
     async def cancel(self, session_id: str, **_: Any) -> None:
@@ -810,6 +789,8 @@ class ACPAgent(Agent):
             self._session_models[session_id] = executor
             self._session_planners[session_id] = planner
             self._session_model_ids[session_id] = self._current_model_id()
+            self._planner_history[session_id] = []
+            self._executor_history[session_id] = []
             self._session_model_errors.pop(session_id, None)
             self._session_model_error_notified.discard(session_id)
         except Exception as exc:

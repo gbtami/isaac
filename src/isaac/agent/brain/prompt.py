@@ -23,7 +23,7 @@ When calling a tool, always use the exact argument names in the schema.
 For file operations, always use {"path": "<filepath>"} as the argument.
 """
 
-PLANNING_SYSTEM_PROMPT = """
+PLANNER_PROMPT = """
 You are Isaac's dedicated planning agent.
 - Produce only a concise plan as 3-6 short, outcome-focused steps.
 - No execution, no code edits, and no extra narrative.
