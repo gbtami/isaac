@@ -35,7 +35,7 @@ from pydantic_ai.providers.ollama import OllamaProvider  # type: ignore
 from pydantic_ai.providers.openai import OpenAIProvider  # type: ignore
 from pydantic_ai.providers.openrouter import OpenRouterProvider  # type: ignore
 
-from isaac.agent.brain.prompt import EXECUTOR_PROMPT, SYSTEM_PROMPT
+from isaac.agent.brain.prompt import EXECUTOR_INSTRUCTIONS, SYSTEM_PROMPT
 from isaac.agent.brain.handoff import build_planning_agent
 from isaac.agent.tools import register_readonly_tools
 
@@ -320,7 +320,7 @@ def build_agent_pair(
         model_obj,
         toolsets=toolsets or (),
         system_prompt=SYSTEM_PROMPT,
-        instructions=EXECUTOR_PROMPT,
+        instructions=EXECUTOR_INSTRUCTIONS,
         model_settings=model_settings,
     )
     register_tools(executor)

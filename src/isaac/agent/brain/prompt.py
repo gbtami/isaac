@@ -17,13 +17,13 @@ Core behaviors:
 - Respect user intent; do not add speculative features.
 """
 
-EXECUTOR_PROMPT = """
+EXECUTOR_INSTRUCTIONS = """
 Execute this plan now. Use tools to make progress and report results.
 When calling a tool, always use the exact argument names in the schema.
 For file operations, always use {"path": "<filepath>"} as the argument.
 """
 
-PLANNER_PROMPT = """
+PLANNER_INSTRUCTIONS = """
 You are Isaac's dedicated planning agent.
 - Produce only a concise plan as 3-6 short, outcome-focused steps.
 - No execution, no code edits, and no extra narrative.

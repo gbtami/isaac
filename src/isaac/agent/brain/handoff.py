@@ -26,7 +26,7 @@ from pydantic_ai.messages import FunctionToolCallEvent, FunctionToolResultEvent,
 from pydantic_ai.run import AgentRunResultEvent  # type: ignore
 
 from isaac.agent.brain.planner import parse_plan_from_text
-from isaac.agent.brain.prompt import EXECUTOR_PROMPT, PLANNER_PROMPT, SYSTEM_PROMPT
+from isaac.agent.brain.prompt import EXECUTOR_INSTRUCTIONS, PLANNER_INSTRUCTIONS, SYSTEM_PROMPT
 from isaac.agent.runner import stream_with_runner
 from isaac.agent.tools.run_command import (
     RunCommandContext,
@@ -97,7 +97,7 @@ def build_planning_agent(model: Any, model_settings: Any = None) -> PydanticAgen
     return PydanticAgent(
         model,
         system_prompt=SYSTEM_PROMPT,
-        instructions=PLANNER_PROMPT,
+        instructions=PLANNER_INSTRUCTIONS,
         model_settings=model_settings,
         toolsets=(),
         output_type=PlanSteps,
@@ -464,9 +464,9 @@ class HandoffPromptRunner:
         plan_lines = [getattr(e, "content", "") for e in getattr(plan_update, "entries", []) or []]
         if plan_lines:
             plan_block = "\n".join(f"- {line}" for line in plan_lines if line)
-            return f"{prompt_text}\n\nPlan:\n{plan_block}\n\n{EXECUTOR_PROMPT}"
+            return f"{prompt_text}\n\nPlan:\n{plan_block}\n\n{EXECUTOR_INSTRUCTIONS}"
         if plan_response:
-            return f"{prompt_text}\n\nPlan:\n{plan_response}\n\n{EXECUTOR_PROMPT}"
+            return f"{prompt_text}\n\nPlan:\n{plan_response}\n\n{EXECUTOR_INSTRUCTIONS}"
         return prompt_text
 
     @staticmethod
