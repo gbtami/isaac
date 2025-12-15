@@ -911,11 +911,18 @@ class ACPAgent(Agent):
                 PermissionOption(option_id="allow_always", name="Allow this command", kind="allow_always"),
                 PermissionOption(option_id="reject_once", name="Reject", kind="reject_once"),
             ]
+            command_display = command.strip() or "<empty command>"
+            cwd_display = cwd or str(self._session_cwds.get(session_id, Path.cwd()))
             tool_call = ToolCall(
                 tool_call_id=tool_call_id,
-                title="run_command",
+                title=f"run_command: {command_display}",
                 kind="execute",
                 raw_input={"tool": "run_command", "command": command, "cwd": cwd},
+                content=[
+                    tool_content(
+                        text_block(f"Command: {command_display}\nCWD: {cwd_display}"),
+                    )
+                ],
                 status="pending",
             )
             from acp.schema import ToolCallUpdate  # type: ignore

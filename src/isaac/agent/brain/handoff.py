@@ -288,14 +288,14 @@ class HandoffPromptRunner:
             if isinstance(event, FunctionToolCallEvent):
                 tool_name = getattr(event.part, "tool_name", None) or ""
                 raw_args = getattr(event.part, "args", None)
-                args = raw_args if isinstance(raw_args, dict) else {}
+                args = self._coerce_tool_args(raw_args)
                 tracker = ToolCallTracker(id_factory=lambda: event.tool_call_id)
                 tool_trackers[event.tool_call_id] = tracker
                 start = tracker.start(
                     external_id=event.tool_call_id,
                     title=tool_name,
                     status="in_progress",
-                    raw_input={"tool": tool_name, **(args if isinstance(args, dict) else {})},
+                    raw_input={"tool": tool_name, **args},
                 )
                 await self.env.send_update(session_notification(session_id, start))
                 if tool_name == "run_command":
@@ -305,8 +305,8 @@ class HandoffPromptRunner:
                         allowed = await self.env.request_run_permission(
                             session_id=session_id,
                             tool_call_id=event.tool_call_id,
-                            command=str(args.get("command") if isinstance(args, dict) else "") if args else "",
-                            cwd=args.get("cwd") if isinstance(args, dict) else None,
+                            command=str(args.get("command") or ""),
+                            cwd=args.get("cwd"),
                         )
                     set_run_command_permission(event.tool_call_id, allowed)
 
@@ -510,3 +510,43 @@ class HandoffPromptRunner:
         from acp.schema import PromptResponse  # local import to avoid cycles
 
         return PromptResponse(stop_reason="end_turn")
+
+    @staticmethod
+    def _coerce_tool_args(raw_args: Any) -> dict[str, Any]:
+        """Convert tool call args to a dict, handling common non-dict shapes."""
+
+        if raw_args is None:
+            return {}
+        if isinstance(raw_args, dict):
+            return dict(raw_args)
+        if isinstance(raw_args, str):
+            return {"command": raw_args}
+
+        for attr in ("model_dump", "dict"):
+            func = getattr(raw_args, attr, None)
+            if callable(func):
+                try:
+                    data = func()
+                    if isinstance(data, dict):
+                        return dict(data)
+                except Exception:
+                    continue
+
+        collected: dict[str, Any] = {}
+        for key in ("command", "cwd", "timeout"):
+            if hasattr(raw_args, key):
+                try:
+                    collected[key] = getattr(raw_args, key)
+                except Exception:
+                    continue
+
+        if collected:
+            return collected
+
+        try:
+            mapping = dict(raw_args)  # type: ignore[arg-type]
+            if isinstance(mapping, dict):
+                return mapping
+        except Exception:
+            return {}
+        return {}
