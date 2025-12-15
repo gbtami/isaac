@@ -100,6 +100,7 @@ DEFAULT_CONFIG = {
 
 CONFIG_DIR = Path(os.getenv("XDG_CONFIG_HOME") or (Path.home() / ".config")) / "isaac"
 CONFIG_DIR.mkdir(parents=True, exist_ok=True)
+ENV_FILE = CONFIG_DIR / ".env"
 
 MODELS_FILE = CONFIG_DIR / "models.json"
 MODELS_DEV_URL = "https://models.dev/api.json"
@@ -301,6 +302,8 @@ def build_agent_pair(
 ) -> tuple[Any, Any]:
     """Build executor and planner agents for programmatic hand-off."""
 
+    # Load shared config env first, then allow current working directory to override.
+    load_dotenv(ENV_FILE, override=False)
     load_dotenv()
     config = load_models_config()
     models_cfg = config.get("models", {})

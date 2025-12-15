@@ -18,6 +18,14 @@ isaac ships both an ACP agent and an ACP client. The agent (`isaac.agent`) imple
 This project uses `uv` for environment and project management.
 - Install dependencies: `uv pip install -e .`
 
+## Cross-client Testing (install to user site)
+To test isaac with other ACP clients after code changes without bumping the version (e.g., a local toad clone) without polluting the repo cwd, install isaac to your user site and run it from there:
+- Install: `uv build --wheel` then `python -m pip install --user --no-deps --force-reinstall dist/isaac-*.whl` to ensure the new code is picked up.
+- Run with another client: `cd ~/toad && uv run toad acp "isaac" --project-dir ~/playground`
+
+## Environment variables
+- isaac loads a shared `.env` from `~/.config/isaac/.env`, then a `.env` in the current working directory (latter can override). Place provider keys (e.g., `OPENROUTER_API_KEY`) in the config path to use any cwd.
+
 ## Required Checks (run every change)
 - Format: `uv run ruff format .`
 - Lint: `uv run ruff check .`

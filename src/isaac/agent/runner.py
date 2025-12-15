@@ -151,13 +151,15 @@ async def stream_with_runner(
     history: Any | None = None,
     on_event: Callable[[Any], asyncio.Future | bool | None] | None = None,
     store_messages: Callable[[Any], None] | None = None,
+    log_context: str | None = None,
 ) -> tuple[str | None, Any | None]:
     """Stream responses using the runner's streaming API.
 
     `on_event` lets callers react to tool call events (used to emit ACP tool updates).
     """
-    stream_logger = logging.getLogger("acp_server")
-    llm_logger = logging.getLogger("isaac.llm")
+    name_suffix = f".{log_context}" if log_context else ""
+    stream_logger = logging.getLogger(f"acp_server{name_suffix}")
+    llm_logger = logging.getLogger(f"isaac.llm{name_suffix}")
     stream_logger.info("LLM stream start prompt_preview=%s", prompt_text[:200])
     llm_logger.info("SEND prompt\n%s", prompt_text)
     cancel_event = cancel_event or asyncio.Event()

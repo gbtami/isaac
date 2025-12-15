@@ -161,6 +161,7 @@ class HandoffPromptRunner:
             plan_update=plan_update,
             plan_response=plan_text,
             plan_usage=plan_usage,
+            log_context="executor",
         )
         if plan_update:
             completed = self._plan_with_status(plan_update, status_all="completed")
@@ -200,6 +201,7 @@ class HandoffPromptRunner:
             history=history,
             on_event=_capture_plan_event,
             store_messages=store_model_messages,
+            log_context="planner",
         )
         combined_plan_text = plan_response or "".join(plan_chunks)
         if combined_plan_text.startswith("Provider error:"):
@@ -402,6 +404,7 @@ class HandoffPromptRunner:
         plan_response: str | None = None,
         plan_usage: Any | None = None,
         allow_plan_parse: bool = True,
+        log_context: str | None = None,
     ) -> Any:
         tool_trackers: Dict[str, ToolCallTracker] = {}
         run_command_ctx_tokens: Dict[str, Any] = {}
@@ -424,6 +427,7 @@ class HandoffPromptRunner:
             history=history,
             on_event=handler,
             store_messages=store_model_messages,
+            log_context=log_context,
         )
         if response_text is None:
             return self._prompt_cancel()

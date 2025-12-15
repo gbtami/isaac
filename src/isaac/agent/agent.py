@@ -25,8 +25,7 @@ async def run_acp_agent():
 def _setup_acp_logging():
     log_dir = Path.home() / ".isaac"
     log_dir.mkdir(exist_ok=True)
-    log_file = log_dir / "acp_server.log"
-    llm_log_file = log_dir / "llm.log"
+    log_file = log_dir / "isaac.log"
 
     root_logger = logging.getLogger()
     for handler in root_logger.handlers[:]:
@@ -37,14 +36,8 @@ def _setup_acp_logging():
         format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
         handlers=[logging.FileHandler(log_file)],
     )
-
-    llm_logger = logging.getLogger("isaac.llm")
-    llm_logger.handlers.clear()
-    llm_logger.setLevel(logging.INFO)
-    llm_logger.propagate = False
-    llm_handler = logging.FileHandler(llm_log_file)
-    llm_handler.setFormatter(logging.Formatter("%(asctime)s - %(message)s"))
-    llm_logger.addHandler(llm_handler)
+    logging.getLogger("isaac").setLevel(logging.INFO)
+    logging.getLogger("acp_server").setLevel(logging.INFO)
 
 
 async def main(argv: list[str] | None = None):
