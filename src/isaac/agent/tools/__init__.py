@@ -74,6 +74,9 @@ TOOL_DESCRIPTIONS: Dict[str, str] = {
     "code_search": "Search for a pattern in files using ripgrep",
 }
 
+DEFAULT_TOOL_TIMEOUT_S = 10.0
+RUN_COMMAND_TIMEOUT_S = 60.0
+
 # Tools permitted for planning delegate (read-only, non-destructive)
 READ_ONLY_TOOLS = {
     "list_files",
@@ -178,7 +181,7 @@ async def run_tool(function_name: str, ctx: Any | None = None, **kwargs: Any) ->
 def register_readonly_tools(agent: Any) -> None:
     """Register read-only tool wrappers on the given agent (for planning delegate)."""
 
-    @agent.tool(name="list_files")  # type: ignore[misc]
+    @agent.tool(name="list_files", timeout=DEFAULT_TOOL_TIMEOUT_S)  # type: ignore[misc]
     async def list_files_tool(
         ctx: RunContext[Any],
         directory: str = ".",
@@ -186,7 +189,7 @@ def register_readonly_tools(agent: Any) -> None:
     ) -> Any:
         return await run_tool("list_files", ctx=ctx, directory=directory, recursive=recursive)
 
-    @agent.tool(name="read_file")  # type: ignore[misc]
+    @agent.tool(name="read_file", timeout=DEFAULT_TOOL_TIMEOUT_S)  # type: ignore[misc]
     async def read_file_tool(
         ctx: RunContext[Any],
         path: str,
@@ -195,7 +198,7 @@ def register_readonly_tools(agent: Any) -> None:
     ) -> Any:
         return await run_tool("read_file", ctx=ctx, path=path, start=start, lines=lines)
 
-    @agent.tool(name="file_summary")  # type: ignore[misc]
+    @agent.tool(name="file_summary", timeout=DEFAULT_TOOL_TIMEOUT_S)  # type: ignore[misc]
     async def file_summary_tool(
         ctx: RunContext[Any],
         path: str,
@@ -210,7 +213,7 @@ def register_readonly_tools(agent: Any) -> None:
             tail_lines=tail_lines,
         )
 
-    @agent.tool(name="code_search")  # type: ignore[misc]
+    @agent.tool(name="code_search", timeout=DEFAULT_TOOL_TIMEOUT_S)  # type: ignore[misc]
     async def code_search_tool(
         ctx: RunContext[Any],
         pattern: str,

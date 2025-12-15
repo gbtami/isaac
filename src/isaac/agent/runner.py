@@ -20,7 +20,7 @@ from pydantic_ai.messages import (  # type: ignore
 )
 from pydantic_ai.run import AgentRunResultEvent  # type: ignore
 
-from isaac.agent.tools import run_tool
+from isaac.agent.tools import DEFAULT_TOOL_TIMEOUT_S, RUN_COMMAND_TIMEOUT_S, run_tool
 
 HISTORY_LOG_MAX = 8000
 
@@ -28,7 +28,7 @@ HISTORY_LOG_MAX = 8000
 def register_tools(agent: Any) -> None:
     logger = logging.getLogger("acp_server")
 
-    @agent.tool(name="list_files")  # type: ignore[misc]
+    @agent.tool(name="list_files", timeout=DEFAULT_TOOL_TIMEOUT_S)  # type: ignore[misc]
     async def list_files_tool(
         ctx: RunContext[Any],
         directory: str = ".",
@@ -40,7 +40,7 @@ def register_tools(agent: Any) -> None:
         )
         return await run_tool("list_files", ctx=ctx, directory=directory, recursive=recursive)
 
-    @agent.tool(name="read_file")  # type: ignore[misc]
+    @agent.tool(name="read_file", timeout=DEFAULT_TOOL_TIMEOUT_S)  # type: ignore[misc]
     async def read_file_tool(
         ctx: RunContext[Any],
         path: str,
@@ -53,7 +53,7 @@ def register_tools(agent: Any) -> None:
         )
         return await run_tool("read_file", ctx=ctx, path=path, start=start, lines=lines)
 
-    @agent.tool(name="run_command")  # type: ignore[misc]
+    @agent.tool(name="run_command", timeout=RUN_COMMAND_TIMEOUT_S)  # type: ignore[misc]
     async def run_command_tool(
         ctx: RunContext[Any],
         command: str,
@@ -66,7 +66,7 @@ def register_tools(agent: Any) -> None:
         )
         return await run_tool("run_command", ctx=ctx, command=command, cwd=cwd, timeout=timeout)
 
-    @agent.tool(name="edit_file")  # type: ignore[misc]
+    @agent.tool(name="edit_file", timeout=DEFAULT_TOOL_TIMEOUT_S)  # type: ignore[misc]
     async def edit_file_tool(
         ctx: RunContext[Any],
         path: str,
@@ -79,7 +79,7 @@ def register_tools(agent: Any) -> None:
         )
         return await run_tool("edit_file", ctx=ctx, path=path, content=content, create=create)
 
-    @agent.tool(name="apply_patch")  # type: ignore[misc]
+    @agent.tool(name="apply_patch", timeout=DEFAULT_TOOL_TIMEOUT_S)  # type: ignore[misc]
     async def apply_patch_tool(
         ctx: RunContext[Any],
         path: str,
@@ -92,7 +92,7 @@ def register_tools(agent: Any) -> None:
         )
         return await run_tool("apply_patch", ctx=ctx, path=path, patch=patch, strip=strip)
 
-    @agent.tool(name="file_summary")  # type: ignore[misc]
+    @agent.tool(name="file_summary", timeout=DEFAULT_TOOL_TIMEOUT_S)  # type: ignore[misc]
     async def file_summary_tool(
         ctx: RunContext[Any],
         path: str,
@@ -111,7 +111,7 @@ def register_tools(agent: Any) -> None:
             tail_lines=tail_lines,
         )
 
-    @agent.tool(name="code_search")  # type: ignore[misc]
+    @agent.tool(name="code_search", timeout=DEFAULT_TOOL_TIMEOUT_S)  # type: ignore[misc]
     async def code_search_tool(
         ctx: RunContext[Any],
         pattern: str,
