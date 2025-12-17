@@ -111,12 +111,8 @@ async def test_structured_plan_entries_generate_plan_updates():
         store_model_messages=lambda *_: None,
     )
 
-    assert plan_update is not None
+    assert plan_update is None, "single-step plans should not emit plan updates"
     assert plan_text == "- a"
-    entries = getattr(plan_update, "entries", []) or []
-    assert [e.content for e in entries] == ["a"]
-    assert [e.priority for e in entries] == ["high"]
-    assert all(getattr(e, "status", "") == "pending" for e in entries)
 
 
 @pytest.mark.asyncio
@@ -183,6 +179,61 @@ async def test_structured_plan_reaches_executor_prompt(monkeypatch):
     assert "- alpha" in prompt_text
     assert "- beta" in prompt_text
     assert "Execute this plan now" in prompt_text
+
+
+@pytest.mark.asyncio
+async def test_single_step_plan_skips_plan_updates(monkeypatch):
+    conn = AsyncMock()
+    conn.session_update = AsyncMock()
+    agent = make_function_agent(conn)
+
+    class _SingleStepPlanner:
+        def __init__(self):
+            self.prompts: list[str] = []
+
+        async def run_stream_events(
+            self, prompt: str, message_history: list[dict[str, str]] | None = None, **_: object
+        ):
+            self.prompts.append(prompt)
+            event = AgentRunResultEvent(result=AgentRunResult(PlanSteps(entries=[PlanStep(content="solo")])))
+
+            async def _gen():
+                yield event
+
+            return _gen()
+
+    class _RecordingExecutor:
+        def __init__(self):
+            self.prompts: list[str] = []
+
+        async def run_stream_events(
+            self, prompt: str, message_history: list[dict[str, str]] | None = None, **_: object
+        ):
+            self.prompts.append(prompt)
+
+            async def _gen():
+                yield "done"
+
+            return _gen()
+
+    executor = _RecordingExecutor()
+    planner = _SingleStepPlanner()
+    from isaac.agent.brain import handoff_strategy
+
+    def _build(_model_id: str, _register: object, toolsets=None) -> tuple[object, object]:
+        _ = toolsets
+        return executor, planner
+
+    monkeypatch.setattr(handoff_strategy, "create_agents_for_model", _build)
+    session = await agent.new_session(cwd="/", mcp_servers=[])
+
+    await agent.prompt(prompt=[text_block("do one thing")], session_id=session.session_id)
+
+    updates = [call.kwargs["update"] for call in conn.session_update.await_args_list]  # type: ignore[attr-defined]
+    plan_updates = [u for u in updates if isinstance(u, AgentPlanUpdate)]
+    assert plan_updates == [], "Single-step plans should not emit plan updates"
+    assert executor.prompts
+    assert "- solo" in executor.prompts[0]
 
 
 def test_plan_parser_handles_steps_list_line():

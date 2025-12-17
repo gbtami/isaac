@@ -129,6 +129,7 @@ class HandoffRunner(StrategyPromptRunner):
             combined_plan_text = ""
         plan_update = None
         plan_text_for_executor = combined_plan_text or plan_response
+        plan_entry_count = 0
 
         if structured_plan and structured_plan.entries:
             entries: list[PlanEntry] = []
@@ -148,12 +149,21 @@ class HandoffRunner(StrategyPromptRunner):
             if entries:
                 plan_update = update_plan(entries)
                 plan_text_for_executor = "\n".join(f"- {line}" for line in executor_lines)
+                plan_entry_count = len(entries)
 
         if plan_update is None:
             plan_update = parse_plan_from_text(combined_plan_text or "")
             if not plan_update and combined_plan_text:
                 entries = [plan_entry(combined_plan_text)]
                 plan_update = update_plan(entries)
+            if plan_update:
+                try:
+                    plan_entry_count = len(getattr(plan_update, "entries", []) or [])
+                except Exception:
+                    plan_entry_count = 0
+
+        if plan_update and plan_entry_count == 1:
+            plan_update = None
 
         return plan_update, plan_text_for_executor, plan_usage
 
