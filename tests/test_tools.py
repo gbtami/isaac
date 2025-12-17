@@ -184,6 +184,7 @@ async def test_model_tool_call_requests_permission(monkeypatch: pytest.MonkeyPat
         return ai_runner, planning_runner
 
     monkeypatch.setattr(handoff_strategy, "create_agents_for_model", _build)
+    monkeypatch.setenv("ISAAC_PROMPT_STRATEGY", "handoff")
     agent = ACPAgent(conn)
     session = await agent.new_session(cwd=str(tmp_path), mcp_servers=[])
 
@@ -235,6 +236,7 @@ async def test_model_run_command_denied_blocks_execution(monkeypatch: pytest.Mon
         return ai_runner, planning_runner
 
     monkeypatch.setattr(handoff_strategy, "create_agents_for_model", _build)
+    monkeypatch.setenv("ISAAC_PROMPT_STRATEGY", "handoff")
     agent = ACPAgent(conn)
     session = await agent.new_session(cwd=str(tmp_path), mcp_servers=[])
     agent._session_modes[session.session_id] = "ask"

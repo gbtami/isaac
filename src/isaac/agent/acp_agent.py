@@ -140,7 +140,7 @@ class ACPAgent(Agent):
     def _build_prompt_strategy(self) -> PromptStrategy:
         """Construct the default planning/execution strategy."""
 
-        strategy_name = (os.getenv("ISAAC_PROMPT_STRATEGY") or "handoff").strip().lower()
+        strategy_name = (os.getenv("ISAAC_PROMPT_STRATEGY") or "subagent").strip().lower()
         env = StrategyEnv(
             session_modes=self._session_modes,
             session_last_chunk=self._session_last_chunk,

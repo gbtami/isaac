@@ -47,6 +47,7 @@ async def test_programmatic_plan_then_execute(monkeypatch):
     conn = AsyncMock()
     planning_runner = _PlanningRunner("Plan:\n- alpha\n- beta")
     executor = _StreamingExecutor()
+    monkeypatch.setenv("ISAAC_PROMPT_STRATEGY", "handoff")
     agent = make_function_agent(conn)
     from isaac.agent.brain import handoff_strategy
 
@@ -73,8 +74,9 @@ async def test_programmatic_plan_then_execute(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_structured_plan_entries_generate_plan_updates():
+async def test_structured_plan_entries_generate_plan_updates(monkeypatch):
     send_update = AsyncMock()
+    monkeypatch.setenv("ISAAC_PROMPT_STRATEGY", "handoff")
     env = StrategyEnv(
         session_modes={},
         session_last_chunk={},
@@ -118,6 +120,7 @@ async def test_structured_plan_entries_generate_plan_updates():
 @pytest.mark.asyncio
 async def test_structured_plan_reaches_executor_prompt(monkeypatch):
     conn = AsyncMock()
+    monkeypatch.setenv("ISAAC_PROMPT_STRATEGY", "handoff")
     agent = make_function_agent(conn)
 
     class _StructuredPlanner:
@@ -185,6 +188,7 @@ async def test_structured_plan_reaches_executor_prompt(monkeypatch):
 async def test_single_step_plan_skips_plan_updates(monkeypatch):
     conn = AsyncMock()
     conn.session_update = AsyncMock()
+    monkeypatch.setenv("ISAAC_PROMPT_STRATEGY", "handoff")
     agent = make_function_agent(conn)
 
     class _SingleStepPlanner:

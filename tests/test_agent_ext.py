@@ -174,6 +174,7 @@ async def test_history_preserved_across_prompts(monkeypatch, tmp_path: Path):
     monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "xdg"))
     monkeypatch.setenv("HOME", str(tmp_path))
     monkeypatch.setattr("pathlib.Path.home", lambda: tmp_path)
+    monkeypatch.setenv("ISAAC_PROMPT_STRATEGY", "handoff")
 
     conn = AsyncMock(spec=AgentSideConnection)
     conn.session_update = AsyncMock()
