@@ -107,3 +107,20 @@ class SessionStore:
             return json.loads(json.dumps(obj, default=lambda o: getattr(o, "__dict__", {})))
         except Exception:
             return {}
+
+    # Strategy-specific persistence -------------------------------------------------
+    def persist_strategy_state(self, session_id: str, data: dict[str, Any]) -> None:
+        path = self.session_dir(session_id) / "strategy.json"
+        try:
+            path.write_text(json.dumps(data), encoding="utf-8")
+        except Exception:
+            return
+
+    def load_strategy_state(self, session_id: str) -> dict[str, Any]:
+        path = self.session_dir(session_id) / "strategy.json"
+        if not path.exists():
+            return {}
+        try:
+            return json.loads(path.read_text(encoding="utf-8"))
+        except Exception:
+            return {}

@@ -728,6 +728,36 @@ class ACPAgent(Agent):
                 continue
             self._record_update(SessionNotification(session_id=session_id, update=chunk))
 
+    async def checkpoint_session(self, session_id: str) -> SessionNotification:
+        """Persist strategy state for later restore."""
+
+        snapshot: dict[str, Any] = {}
+        strategy_snapshot = getattr(self._prompt_strategy, "snapshot", None)
+        if callable(strategy_snapshot):
+            snapshot = strategy_snapshot(session_id)
+        self._session_store.persist_strategy_state(session_id, snapshot)
+        return session_notification(
+            session_id,
+            update_agent_message(text_block("Checkpoint saved.")),
+        )
+
+    async def restore_session_state(self, session_id: str) -> SessionNotification:
+        """Restore strategy state from persisted snapshot."""
+
+        snapshot = self._session_store.load_strategy_state(session_id)
+        if not snapshot:
+            return session_notification(
+                session_id,
+                update_agent_message(text_block("No checkpoint available.")),
+            )
+        restorer = getattr(self._prompt_strategy, "restore_snapshot", None)
+        if callable(restorer):
+            await restorer(session_id, snapshot)
+        return session_notification(
+            session_id,
+            update_agent_message(text_block("Checkpoint restored.")),
+        )
+
     def _current_model_id(self) -> str:
         return model_registry.current_model_id()
 

@@ -10,6 +10,7 @@ from acp.helpers import session_notification, text_block, update_agent_message
 from acp.schema import PromptResponse
 from pydantic_ai import RunContext
 from pydantic_ai.messages import FunctionToolResultEvent  # type: ignore
+from pydantic_ai.run import AgentRunResultEvent  # type: ignore
 
 from isaac.agent import models as model_registry
 from isaac.agent.brain.strategy_runner import StrategyEnv, StrategyPromptRunner
@@ -36,12 +37,16 @@ class SubagentSessionState:
     todo_planner: Any | None = None
     model_id: str | None = None
     history: list[Any] = field(default_factory=list)
+    planner_history: list[Any] = field(default_factory=list)
     model_error: str | None = None
     model_error_notified: bool = False
 
 
 class SubagentPromptStrategy(PromptStrategy):
     """Single-runner strategy that delegates planning to a subagent todo tool."""
+
+    _MAX_HISTORY_MESSAGES = 30
+    _PRESERVE_RECENT_MESSAGES = 8
 
     def __init__(
         self,
@@ -74,6 +79,7 @@ class SubagentPromptStrategy(PromptStrategy):
             self._attach_todo_tool(state)
             state.model_id = model_id
             state.history = []
+            state.planner_history = []
             state.model_error = None
             state.model_error_notified = False
         except Exception as exc:
@@ -105,7 +111,7 @@ class SubagentPromptStrategy(PromptStrategy):
         if state.model_error or state.runner is None:
             return await self._respond_model_error(session_id, state)
 
-        history = list(state.history)
+        history = self._trim_history(state.history, self._MAX_HISTORY_MESSAGES)
         plan_progress: dict[str, Any] | None = {"plan": None, "idx": 0}
         _push_chunk = self._handoff_helper._make_chunk_sender(session_id)  # type: ignore[attr-defined]
         _push_thought = self._handoff_helper._make_thought_sender(session_id)  # type: ignore[attr-defined]
@@ -153,6 +159,8 @@ class SubagentPromptStrategy(PromptStrategy):
                 return handled
             await _maybe_capture_plan(event)
             return await base_handler(event)
+
+        await self._maybe_compact_history(state)
 
         def _store_messages(msgs: Any) -> None:
             try:
@@ -204,10 +212,80 @@ class SubagentPromptStrategy(PromptStrategy):
         state.model_id = state.model_id or model_registry.current_model_id()
         state.model_error = None
         state.model_error_notified = False
+        state.planner_history = []
         self._attach_todo_tool(state)
 
     def session_ids(self) -> list[str]:
         return list(self._sessions.keys())
+
+    def snapshot(self, session_id: str) -> dict[str, Any]:
+        state = self._sessions.get(session_id)
+        if state is None:
+            return {}
+        return {
+            "history": list(state.history),
+            "planner_history": list(state.planner_history),
+            "model_id": state.model_id,
+        }
+
+    async def restore_snapshot(self, session_id: str, snapshot: dict[str, Any]) -> None:
+        state = self._sessions.setdefault(
+            session_id,
+            SubagentSessionState(model_id=model_registry.current_model_id()),
+        )
+        state.history = list(snapshot.get("history") or [])
+        state.planner_history = list(snapshot.get("planner_history") or [])
+        state.model_id = snapshot.get("model_id") or state.model_id
+        self._attach_todo_tool(state)
+
+    async def _maybe_compact_history(self, state: SubagentSessionState) -> None:
+        """Compact older history into a summary when it grows too large."""
+
+        runner = state.runner
+        if runner is None:
+            return
+        if len(state.history) <= self._MAX_HISTORY_MESSAGES:
+            return
+
+        to_compact = state.history[: -self._PRESERVE_RECENT_MESSAGES] or []
+        preserved = state.history[-self._PRESERVE_RECENT_MESSAGES :] if state.history else []
+        if not to_compact:
+            return
+
+        summary_prompt = (
+            "Summarize the earlier conversation for future turns. "
+            "List key tasks, decisions, files touched, and outstanding follow-ups."
+        )
+
+        async def _noop(_: str) -> None:
+            return None
+
+        summary_text = None
+        try:
+            summary_text, _ = await stream_with_runner(
+                runner,
+                summary_prompt,
+                _noop,
+                _noop,
+                asyncio.Event(),
+                history=to_compact,
+                log_context="history_compact",
+            )
+        except Exception:
+            summary_text = None
+
+        summary_content = (summary_text or "").strip()
+        summary_msg = {"role": "system", "content": f"Conversation summary:\n{summary_content}".strip()}
+        state.history = [summary_msg] + preserved
+        state.planner_history = []
+
+    @staticmethod
+    def _trim_history(history: list[Any], limit: int) -> list[Any]:
+        if limit <= 0:
+            return []
+        if len(history) <= limit:
+            return list(history)
+        return list(history[-limit:])
 
     def _attach_todo_tool(self, state: SubagentSessionState) -> None:
         runner = state.runner
@@ -224,8 +302,42 @@ class SubagentPromptStrategy(PromptStrategy):
             if planner is None:
                 return parse_plan_from_text(task)
             plan_prompt = f"{TODO_PLANNER_INSTRUCTIONS.strip()}\n\nTask: {task.strip()}"
-            result = await planner.run(plan_prompt)
-            plan_obj = getattr(result, "data", None) or getattr(result, "output", None) or result
+            plan_history = self._trim_history(state.planner_history, self._MAX_HISTORY_MESSAGES)
+            structured_plan: PlanSteps | None = None
+
+            async def _chunk(_: str) -> None:
+                return None
+
+            async def _thought(_: str) -> None:
+                return None
+
+            async def _capture(event: Any) -> bool:
+                nonlocal structured_plan
+                if isinstance(event, AgentRunResultEvent):
+                    output = getattr(event.result, "output", None)
+                    if isinstance(output, PlanSteps):
+                        structured_plan = output
+                return False
+
+            def _store_planner_messages(msgs: Any) -> None:
+                try:
+                    state.planner_history.extend(list(msgs or []))
+                except Exception:
+                    return
+
+            response, _ = await stream_with_runner(
+                planner,
+                plan_prompt,
+                _chunk,
+                _thought,
+                asyncio.Event(),
+                history=plan_history,
+                on_event=_capture,
+                store_messages=_store_planner_messages,
+                log_context="subagent_planner",
+            )
+
+            plan_obj = structured_plan or response
             if isinstance(plan_obj, PlanSteps):
                 return plan_obj
             if isinstance(plan_obj, str):
@@ -252,6 +364,7 @@ class SubagentPromptStrategy(PromptStrategy):
             state.todo_planner = create_subagent_planner_for_model(state.model_id)
             self._attach_todo_tool(state)
             state.history = []
+            state.planner_history = []
             state.model_error = None
             state.model_error_notified = False
         except Exception as exc:

@@ -146,6 +146,36 @@ def _handle_usage(agent: Any, session_id: str, _command: str, _argument: str) ->
     return session_notification(session_id, update_agent_message(text_block(summary)))
 
 
+@register_slash_command(
+    "/checkpoint",
+    description="Save the current session state (strategy/history).",
+    hint="/checkpoint",
+)
+async def _handle_checkpoint(agent: Any, session_id: str, _command: str, _argument: str) -> SessionNotification:
+    handler = getattr(agent, "checkpoint_session", None)
+    if not callable(handler):
+        return session_notification(
+            session_id,
+            update_agent_message(text_block("Checkpoint not supported.")),
+        )
+    return await handler(session_id)
+
+
+@register_slash_command(
+    "/restore",
+    description="Restore the last saved session checkpoint.",
+    hint="/restore",
+)
+async def _handle_restore(agent: Any, session_id: str, _command: str, _argument: str) -> SessionNotification:
+    handler = getattr(agent, "restore_session_state", None)
+    if not callable(handler):
+        return session_notification(
+            session_id,
+            update_agent_message(text_block("Restore not supported.")),
+        )
+    return await handler(session_id)
+
+
 async def handle_slash_command(agent: Any, session_id: str, prompt: str) -> SessionNotification | None:
     """Handle server-side slash commands (Slash Commands section)."""
     trimmed = prompt.strip()
