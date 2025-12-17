@@ -41,7 +41,7 @@ To test isaac with other ACP clients after code changes without bumping the vers
 ## Code Structure (responsibilities)
 - `src/isaac/agent/` — ACP agent implementation (session lifecycle, prompt handling, tool calls, filesystem/terminal endpoints, slash commands, model registry). Key files:
   - `acp_agent.py`: ACP-facing agent; wiring for sessions, prompts, tools, slash commands, notifications, and the handoff planning/execution flow.
-  - `brain/handoff.py`: Handoff planning/execution helpers.
+  - `brain/strategy_runner.py`: Shared planning/execution runner for prompt strategies.
   - `brain/planner.py`: Plan parsing utilities for converting model text to ACP plan updates.
   - `models.py`: Model registry/config loader; builds executor/planner agents.
   - `tools/`: Local tool implementations plus registry (`TOOL_HANDLERS`, `TOOL_REQUIRED_ARGS`).

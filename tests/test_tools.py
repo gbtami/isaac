@@ -8,7 +8,9 @@ from acp import RequestPermissionResponse, text_block
 from acp.schema import AllowedOutcome
 from unittest.mock import AsyncMock
 
-from isaac.agent.brain.handoff import build_planning_agent
+from isaac.agent.brain.prompt import PLANNER_INSTRUCTIONS, SYSTEM_PROMPT
+from isaac.agent.brain.strategy_plan import PlanSteps
+from isaac.agent.tools import register_readonly_tools
 from isaac.agent.runner import register_tools
 from isaac.agent.tools.apply_patch import apply_patch
 from isaac.agent.tools.code_search import code_search
@@ -167,8 +169,22 @@ async def test_model_tool_call_requests_permission(monkeypatch: pytest.MonkeyPat
     model = TestModel(call_tools=["run_command"], custom_output_text="done")
     ai_runner = PydanticAgent(model)
     register_tools(ai_runner)
-    planning_runner = build_planning_agent(TestModel(call_tools=[]))
-    agent = ACPAgent(conn, ai_runner=ai_runner, planning_runner=planning_runner)
+    planning_runner = PydanticAgent(
+        TestModel(call_tools=[]),
+        system_prompt=SYSTEM_PROMPT,
+        instructions=PLANNER_INSTRUCTIONS,
+        toolsets=(),
+        output_type=PlanSteps,
+    )
+    register_readonly_tools(planning_runner)
+    from isaac.agent.brain import handoff_strategy
+
+    def _build(_model_id: str, _register: object, toolsets=None) -> tuple[object, object]:
+        _ = toolsets
+        return ai_runner, planning_runner
+
+    monkeypatch.setattr(handoff_strategy, "create_agents_for_model", _build)
+    agent = ACPAgent(conn)
     session = await agent.new_session(cwd=str(tmp_path), mcp_servers=[])
 
     response = await agent.prompt(prompt=[text_block("run a command")], session_id=session.session_id)
@@ -204,8 +220,22 @@ async def test_model_run_command_denied_blocks_execution(monkeypatch: pytest.Mon
     model = TestModel(call_tools=["run_command"], custom_output_text="done")
     ai_runner = PydanticAgent(model)
     register_tools(ai_runner)
-    planning_runner = build_planning_agent(TestModel(call_tools=[]))
-    agent = ACPAgent(conn, ai_runner=ai_runner, planning_runner=planning_runner)
+    planning_runner = PydanticAgent(
+        TestModel(call_tools=[]),
+        system_prompt=SYSTEM_PROMPT,
+        instructions=PLANNER_INSTRUCTIONS,
+        toolsets=(),
+        output_type=PlanSteps,
+    )
+    register_readonly_tools(planning_runner)
+    from isaac.agent.brain import handoff_strategy
+
+    def _build(_model_id: str, _register: object, toolsets=None) -> tuple[object, object]:
+        _ = toolsets
+        return ai_runner, planning_runner
+
+    monkeypatch.setattr(handoff_strategy, "create_agents_for_model", _build)
+    agent = ACPAgent(conn)
     session = await agent.new_session(cwd=str(tmp_path), mcp_servers=[])
     agent._session_modes[session.session_id] = "ask"
 

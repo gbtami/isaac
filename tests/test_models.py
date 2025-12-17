@@ -45,7 +45,8 @@ async def test_model_build_failure_surfaces_error(monkeypatch, tmp_path: Path):
     monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "xdg"))
     monkeypatch.setenv("HOME", str(tmp_path))
     monkeypatch.setattr("pathlib.Path.home", lambda: tmp_path)
-    monkeypatch.setattr(model_registry, "build_agent_pair", _raise_model_error)
+    monkeypatch.setattr("isaac.agent.brain.strategy_utils.create_agents_for_model", _raise_model_error)
+    monkeypatch.setattr("isaac.agent.brain.handoff_strategy.create_agents_for_model", _raise_model_error)
 
     conn = AsyncMock(spec=AgentSideConnection)
     conn.session_update = AsyncMock()

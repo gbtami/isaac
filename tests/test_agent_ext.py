@@ -179,7 +179,14 @@ async def test_history_preserved_across_prompts(monkeypatch, tmp_path: Path):
     conn.session_update = AsyncMock()
     planner = _RecordingRunner("Plan:\n- do something")
     executor = _RecordingRunner("done")
-    agent = ACPAgent(conn, ai_runner=executor, planning_runner=planner)
+    from isaac.agent.brain import handoff_strategy
+
+    def _build(_model_id: str, _register: object, toolsets=None) -> tuple[object, object]:
+        _ = toolsets
+        return executor, planner
+
+    monkeypatch.setattr(handoff_strategy, "create_agents_for_model", _build)
+    agent = ACPAgent(conn)
     session = await agent.new_session(cwd=str(tmp_path), mcp_servers=[])
 
     await agent.prompt(prompt=[text_block("remember this line")], session_id=session.session_id)

@@ -13,11 +13,7 @@ import re
 import urllib.request
 import configparser
 from pathlib import Path
-from typing import Any, Callable, Dict
-
-from dotenv import load_dotenv
-
-from pydantic_ai import Agent as PydanticAgent  # type: ignore
+from typing import Any, Dict
 
 from pydantic_ai.models.anthropic import AnthropicModel, AnthropicModelSettings  # type: ignore
 from pydantic_ai.models.cerebras import CerebrasModel  # type: ignore
@@ -35,9 +31,6 @@ from pydantic_ai.providers.ollama import OllamaProvider  # type: ignore
 from pydantic_ai.providers.openai import OpenAIProvider  # type: ignore
 from pydantic_ai.providers.openrouter import OpenRouterProvider  # type: ignore
 
-from isaac.agent.brain.prompt import EXECUTOR_INSTRUCTIONS, SYSTEM_PROMPT
-from isaac.agent.brain.handoff import build_planning_agent
-from isaac.agent.tools import register_readonly_tools
 
 logger = logging.getLogger("acp_server")
 
@@ -292,39 +285,3 @@ def _build_provider_model(model_id: str, model_entry: Dict[str, Any]) -> Any:
 
     # default to test or direct spec
     return model_spec, None
-
-
-def build_agent_pair(
-    model_id: str,
-    register_tools: Callable[[Any], None],
-    *,
-    toolsets: list[Any] | None = None,
-) -> tuple[Any, Any]:
-    """Build executor and planner agents for programmatic hand-off."""
-
-    # Load shared config env first, then allow current working directory to override.
-    load_dotenv(ENV_FILE, override=False)
-    load_dotenv()
-    config = load_models_config()
-    models_cfg = config.get("models", {})
-    if model_id not in models_cfg:
-        raise ValueError(f"Unknown model id: {model_id}")
-    model_entry = models_cfg.get(model_id, {})
-
-    model_obj, model_settings = _build_provider_model(model_id, model_entry)
-    planner_obj, planner_settings = _build_provider_model(model_id, model_entry)
-    logger.info("MODEL (executor): %s", model_obj.model_name)
-    logger.info("MODEL (planner): %s", planner_obj.model_name)
-
-    executor = PydanticAgent(
-        model_obj,
-        toolsets=toolsets or (),
-        system_prompt=SYSTEM_PROMPT,
-        instructions=EXECUTOR_INSTRUCTIONS,
-        model_settings=model_settings,
-    )
-    register_tools(executor)
-
-    planner = build_planning_agent(planner_obj, planner_settings)
-    register_readonly_tools(planner)
-    return executor, planner

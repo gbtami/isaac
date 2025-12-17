@@ -9,6 +9,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import logging
+import os
 import uuid
 from pathlib import Path
 from typing import Any, Dict
@@ -75,28 +76,24 @@ from isaac.agent.agent_terminal import (
     terminal_output,
     wait_for_terminal_exit,
 )
-from isaac.agent.brain.handoff import HandoffEnv, HandoffPromptRunner
+from isaac.agent.brain.strategy_runner import StrategyEnv
 from isaac.agent.constants import TOOL_OUTPUT_LIMIT
 from isaac.agent.fs import read_text_file, write_text_file
 from isaac.agent.mcp_support import build_mcp_toolsets
 from isaac.agent.planner import build_plan_notification, parse_plan_request
 from isaac.agent.prompt_utils import coerce_user_text, extract_prompt_text
-from isaac.agent.runner import register_tools
 from isaac.agent.session_modes import build_mode_state
 from isaac.agent.session_store import SessionStore
 from isaac.agent.slash import available_slash_commands, handle_slash_command
 from isaac.agent.tool_io import await_with_cancel, truncate_text, truncate_tool_output
 from isaac.agent.tools import run_tool
+from isaac.agent.runner import register_tools
 from isaac.agent.usage import format_usage_summary, normalize_usage
+from isaac.agent.brain.strategy_base import ModelBuildError, PromptStrategy
+from isaac.agent.brain.handoff_strategy import HandoffPromptStrategy
+from isaac.agent.brain.subagent_strategy import SubagentPromptStrategy
 
 logger = logging.getLogger("acp_server")
-
-
-def _create_default_runners(toolsets: list[Any] | None = None) -> tuple[Any, Any]:
-    """Build executor/planner runners or let exceptions surface."""
-
-    current = model_registry.current_model_id()
-    return model_registry.build_agent_pair(current, register_tools, toolsets=toolsets or [])
 
 
 class ACPAgent(Agent):
@@ -109,8 +106,7 @@ class ACPAgent(Agent):
         agent_name: str = "isaac",
         agent_title: str = "Isaac ACP Agent",
         agent_version: str = "0.1.0",
-        ai_runner: Any | None = None,
-        planning_runner: Any | None = None,
+        prompt_strategy: PromptStrategy | None = None,
     ) -> None:
         self._conn: AgentSideConnection | None = conn
         self._sessions: set[str] = set()
@@ -118,40 +114,34 @@ class ACPAgent(Agent):
         self._terminals: Dict[str, TerminalState] = {}
         self._session_modes: Dict[str, str] = {}
         self._cancel_events: Dict[str, asyncio.Event] = {}
-        self._session_models: Dict[str, Any | None] = {}
-        self._session_planners: Dict[str, Any | None] = {}
         self._session_model_ids: Dict[str, str] = {}
         self._session_history: Dict[str, list[SessionNotification]] = {}
         self._session_allowed_commands: Dict[str, set[tuple[str, str]]] = {}
         self._session_mcp_servers: Dict[str, Any] = {}
         self._session_usage: Dict[str, Any] = {}
         self._session_toolsets: Dict[str, list[Any]] = {}
-        self._planner_history: Dict[str, list[Any]] = {}
-        self._executor_history: Dict[str, list[Any]] = {}
         self._agent_name = agent_name
         self._agent_title = agent_title
         self._agent_version = agent_version
         self._client_capabilities: Any | None = None
         self._client_info: Any | None = None
-        self._custom_runners = ai_runner is not None or planning_runner is not None
         self._session_commands_advertised: set[str] = set()
-        self._ai_runner = ai_runner
-        self._planning_runner = planning_runner
         self._command_timeout_s = 30.0
         self._tool_output_limit = TOOL_OUTPUT_LIMIT
         self._terminal_output_limit = TOOL_OUTPUT_LIMIT
         self._session_store = SessionStore(Path.home() / ".isaac" / "sessions")
         self._session_last_chunk: Dict[str, str | None] = {}
-        self._session_model_errors: Dict[str, str] = {}
-        self._session_model_error_notified: set[str] = set()
-        self._handoff_runner = self._build_handoff_runner()
+        self._prompt_strategy = prompt_strategy or self._build_prompt_strategy()
 
     def on_connect(self, conn: AgentSideConnection) -> None:  # type: ignore[override]
         """Capture connection when wiring via run_agent/connect_to_agent."""
         self._conn = conn
 
-    def _build_handoff_runner(self) -> HandoffPromptRunner:
-        env = HandoffEnv(
+    def _build_prompt_strategy(self) -> PromptStrategy:
+        """Construct the default planning/execution strategy."""
+
+        strategy_name = (os.getenv("ISAAC_PROMPT_STRATEGY") or "handoff").strip().lower()
+        env = StrategyEnv(
             session_modes=self._session_modes,
             session_last_chunk=self._session_last_chunk,
             send_update=self._send_update,
@@ -163,7 +153,15 @@ class ACPAgent(Agent):
             ),
             set_usage=lambda session_id, usage: self._session_usage.__setitem__(session_id, usage),
         )
-        return HandoffPromptRunner(env)
+        if strategy_name == "subagent":
+            return SubagentPromptStrategy(
+                env=env,
+                register_tools=register_tools,
+            )
+        return HandoffPromptStrategy(
+            env=env,
+            register_tools=register_tools,
+        )
 
     async def initialize(
         self,
@@ -238,12 +236,12 @@ class ACPAgent(Agent):
         self._cancel_events[session_id] = asyncio.Event()
         toolsets = build_mcp_toolsets(mcp_servers)
         self._session_toolsets[session_id] = toolsets
-        await self._init_session_runners(session_id, toolsets)
+        await self._prompt_strategy.init_session(session_id, toolsets)
         self._session_history[session_id] = []
-        self._planner_history[session_id] = []
-        self._executor_history[session_id] = []
         self._session_allowed_commands[session_id] = set()
         self._session_mcp_servers[session_id] = mcp_servers
+        model_id = self._prompt_strategy.model_id(session_id) or self._current_model_id()
+        self._session_model_ids[session_id] = model_id
         self._persist_session_meta(
             session_id,
             cwd_path,
@@ -271,14 +269,14 @@ class ACPAgent(Agent):
         mcp_servers = mcp_servers or stored_meta.get("mcpServers", [])
         toolsets = build_mcp_toolsets(mcp_servers)
         self._session_toolsets[session_id] = toolsets
-        await self._init_session_runners(session_id, toolsets)
+        await self._prompt_strategy.init_session(session_id, toolsets)
         self._session_history.setdefault(session_id, [])
-        self._planner_history.setdefault(session_id, [])
-        self._executor_history.setdefault(session_id, [])
         self._session_allowed_commands.setdefault(session_id, set())
         self._session_mcp_servers[session_id] = mcp_servers
         mode = stored_meta.get("mode") or self._session_modes.get(session_id, "ask")
         self._session_modes[session_id] = mode
+        model_id = self._prompt_strategy.model_id(session_id) or self._current_model_id()
+        self._session_model_ids[session_id] = model_id
         history = self._load_session_history(session_id)
         self._session_history[session_id].extend(history)
         self._persist_session_meta(
@@ -329,31 +327,17 @@ class ACPAgent(Agent):
     async def set_session_model(self, model_id: str, session_id: str, **_: Any) -> SetSessionModelResponse | None:
         """Switch the backing model for a session."""
         logger.info("Received set session model request %s -> %s", session_id, model_id)
-        previous_model_id = model_registry.current_model_id()
+        previous_model_id = self._session_model_ids.get(session_id, model_registry.current_model_id())
         try:
-            toolsets = self._session_toolsets.get(session_id, [])
-            executor, planner = model_registry.build_agent_pair(
+            await self._prompt_strategy.set_session_model(
+                session_id,
                 model_id,
-                register_tools,
-                toolsets=toolsets,
+                toolsets=self._session_toolsets.get(session_id, []),
             )
-            self._session_models[session_id] = executor
-            self._session_planners[session_id] = planner
             self._session_model_ids[session_id] = model_id
-            self._planner_history[session_id] = []
-            self._executor_history[session_id] = []
-            self._session_model_errors.pop(session_id, None)
             with contextlib.suppress(Exception):
                 model_registry.set_current_model(model_id)
-        except Exception as exc:  # pragma: no cover - model build errors
-            logger.error("Failed to set session model: %s", exc)
-            await self._send_update(
-                session_notification(
-                    session_id,
-                    update_agent_message(text_block(f"Model load failed: {exc}")),
-                )
-            )
-            # Preserve the previously persisted model selection on failure.
+        except ModelBuildError:
             with contextlib.suppress(Exception):
                 model_registry.set_current_model(previous_model_id)
             raise
@@ -371,9 +355,6 @@ class ACPAgent(Agent):
         cancel_event.clear()
         # Reset last text chunk tracking for this prompt turn.
         self._session_last_chunk[session_id] = None
-        model_error = self._session_model_errors.get(session_id)
-        if model_error:
-            return await self._respond_model_error(session_id, model_error)
 
         for block in prompt:
             tool_call = getattr(block, "tool_call", None)
@@ -398,38 +379,10 @@ class ACPAgent(Agent):
         if cancel_event.is_set():
             return PromptResponse(stop_reason="cancelled")
 
-        runner = self._session_models.get(session_id) or self._ai_runner
-        planner = self._session_planners.get(session_id) or self._planning_runner or self._ai_runner
-        if runner is None or planner is None:
-            return await self._respond_model_error(session_id, self._session_model_errors.get(session_id))
-
-        planner_history = list(self._planner_history.get(session_id, []))
-        executor_history = list(self._executor_history.get(session_id, []))
-
-        def _store_planner_messages(msgs: Any) -> None:
-            current = self._planner_history.setdefault(session_id, [])
-            try:
-                current.extend(list(msgs or []))
-            except Exception:
-                return
-
-        def _store_executor_messages(msgs: Any) -> None:
-            current = self._executor_history.setdefault(session_id, [])
-            try:
-                current.extend(list(msgs or []))
-            except Exception:
-                return
-
-        return await self._handoff_runner.run(
+        return await self._prompt_strategy.handle_prompt(
             session_id,
             prompt_text,
-            planner_history=planner_history,
-            executor_history=executor_history,
-            cancel_event=cancel_event,
-            runner=runner,
-            planner=planner,
-            store_planner_messages=_store_planner_messages,
-            store_executor_messages=_store_executor_messages,
+            cancel_event,
         )
 
     async def cancel(self, session_id: str, **_: Any) -> None:
@@ -778,35 +731,6 @@ class ACPAgent(Agent):
     def _current_model_id(self) -> str:
         return model_registry.current_model_id()
 
-    async def _init_session_runners(self, session_id: str, toolsets: list[Any] | None = None) -> None:
-        """Initialize runners for a session or surface build failures."""
-        try:
-            if self._custom_runners:
-                executor = self._ai_runner
-                planner = self._planning_runner or self._ai_runner
-            else:
-                executor, planner = _create_default_runners(toolsets)
-            self._session_models[session_id] = executor
-            self._session_planners[session_id] = planner
-            self._session_model_ids[session_id] = self._current_model_id()
-            self._planner_history[session_id] = []
-            self._executor_history[session_id] = []
-            self._session_model_errors.pop(session_id, None)
-            self._session_model_error_notified.discard(session_id)
-        except Exception as exc:
-            msg = f"Model load failed: {exc}"
-            logger.error("Failed to build model for session %s: %s", session_id, exc)
-            self._session_models[session_id] = None
-            self._session_planners[session_id] = None
-            self._session_model_errors[session_id] = msg
-            self._session_model_error_notified.add(session_id)
-            await self._send_update(
-                session_notification(
-                    session_id,
-                    update_agent_message(text_block(msg)),
-                )
-            )
-
     async def ext_method(self, name: str, payload: dict[str, Any]) -> dict[str, Any]:
         """Handle extension methods for model listing/selection."""
         if name == "model/list":
@@ -867,20 +791,6 @@ class ACPAgent(Agent):
         if not path.is_absolute():
             raise RequestError.invalid_request({"message": "cwd must be an absolute path"})
         return path
-
-    async def _respond_model_error(self, session_id: str, message: str | None) -> PromptResponse:
-        """Emit a model error message (once) and end the prompt turn."""
-        msg = message or "Model unavailable for this session."
-        if session_id not in self._session_model_error_notified:
-            await self._send_update(
-                session_notification(
-                    session_id,
-                    update_agent_message(text_block(msg)),
-                )
-            )
-            self._session_model_error_notified.add(session_id)
-        # ACP stop_reason is a closed set; use refusal to signal “can’t proceed”.
-        return PromptResponse(stop_reason="refusal")
 
     async def _send_available_commands(self, session_id: str) -> None:
         """Advertise slash commands using `available_commands_update` per ACP spec."""

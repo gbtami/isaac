@@ -7,8 +7,10 @@ from acp.agent.connection import AgentSideConnection
 from acp import RequestPermissionResponse
 from acp.schema import AllowedOutcome
 from isaac.agent import ACPAgent
-from isaac.agent.brain.handoff import build_planning_agent
+from isaac.agent.brain.prompt import PLANNER_INSTRUCTIONS, SYSTEM_PROMPT
+from isaac.agent.brain.strategy_plan import PlanSteps
 from isaac.agent.runner import register_tools
+from isaac.agent.tools import register_readonly_tools
 from pydantic_ai import Agent as PydanticAgent  # type: ignore
 from pydantic_ai.models.test import TestModel  # type: ignore
 
@@ -17,7 +19,14 @@ def make_function_agent(conn: AgentSideConnection) -> ACPAgent:
     """Helper to build ACPAgent with a deterministic in-process model."""
 
     runner = PydanticAgent(TestModel(call_tools=[]))
-    planning_runner = build_planning_agent(TestModel(call_tools=[]))
+    planning_runner = PydanticAgent(
+        TestModel(call_tools=[]),
+        system_prompt=SYSTEM_PROMPT,
+        instructions=PLANNER_INSTRUCTIONS,
+        toolsets=(),
+        output_type=PlanSteps,
+    )
+    register_readonly_tools(planning_runner)
     register_tools(runner)
     if not inspect.iscoroutinefunction(getattr(conn, "session_update", None)):
         conn.session_update = AsyncMock()
@@ -32,7 +41,19 @@ def make_function_agent(conn: AgentSideConnection) -> ACPAgent:
             pass
         else:
             conn.request_permission = _default_perm  # type: ignore[attr-defined]
-    return ACPAgent(conn, ai_runner=runner, planning_runner=planning_runner)
+    # Patch model builders to use deterministic test agents.
+    from isaac.agent.brain import strategy_utils, handoff_strategy, subagent_strategy
+
+    def _build_model(_model_id: str, _register: object, toolsets=None) -> tuple[object, object]:
+        _ = toolsets
+        return runner, planning_runner
+
+    strategy_utils.create_agents_for_model = _build_model  # type: ignore[assignment]
+    handoff_strategy.create_agents_for_model = _build_model  # type: ignore[assignment]
+    subagent_strategy.create_subagent_for_model = lambda *_args, **_kwargs: runner  # type: ignore[assignment]
+    subagent_strategy.create_subagent_planner_for_model = lambda *_args, **_kwargs: planning_runner  # type: ignore[assignment]
+
+    return ACPAgent(conn)
 
 
 def make_error_agent(conn: AgentSideConnection) -> ACPAgent:
@@ -42,4 +63,16 @@ def make_error_agent(conn: AgentSideConnection) -> ACPAgent:
         async def run_stream_events(self, prompt: str):  # pragma: no cover - simple stub
             raise RuntimeError("rate limited")
 
-    return ACPAgent(conn, ai_runner=ErrorRunner())
+    from isaac.agent.brain import strategy_utils, handoff_strategy, subagent_strategy
+
+    def _build_error(_model_id: str, _register: object, toolsets=None) -> tuple[object, object]:
+        _ = toolsets
+        err = ErrorRunner()
+        return err, err
+
+    strategy_utils.create_agents_for_model = _build_error  # type: ignore[assignment]
+    handoff_strategy.create_agents_for_model = _build_error  # type: ignore[assignment]
+    subagent_strategy.create_subagent_for_model = lambda *_args, **_kwargs: ErrorRunner()  # type: ignore[assignment]
+    subagent_strategy.create_subagent_planner_for_model = lambda *_args, **_kwargs: ErrorRunner()  # type: ignore[assignment]
+
+    return ACPAgent(conn)

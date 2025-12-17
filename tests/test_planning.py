@@ -9,7 +9,9 @@ from acp.schema import AgentMessageChunk, AgentPlanUpdate
 from pydantic_ai.messages import FunctionToolCallEvent, ToolCallPart  # type: ignore
 from pydantic_ai.run import AgentRunResult, AgentRunResultEvent  # type: ignore
 
-from isaac.agent.brain.handoff import HandoffEnv, HandoffPromptRunner, PlanStep, PlanSteps
+from isaac.agent.brain.strategy_runner import StrategyEnv
+from isaac.agent.brain.handoff_runner import HandoffRunner
+from isaac.agent.brain.strategy_plan import PlanStep, PlanSteps
 from tests.utils import make_function_agent
 
 
@@ -41,14 +43,18 @@ class _StreamingExecutor:
 
 
 @pytest.mark.asyncio
-async def test_programmatic_plan_then_execute():
+async def test_programmatic_plan_then_execute(monkeypatch):
     conn = AsyncMock()
     planning_runner = _PlanningRunner("Plan:\n- alpha\n- beta")
     executor = _StreamingExecutor()
     agent = make_function_agent(conn)
-    agent._planning_runner = planning_runner  # type: ignore[attr-defined]
-    agent._ai_runner = executor  # type: ignore[attr-defined]
+    from isaac.agent.brain import handoff_strategy
 
+    def _build(_model_id: str, _register: object, toolsets=None) -> tuple[object, object]:
+        _ = toolsets
+        return executor, planning_runner
+
+    monkeypatch.setattr(handoff_strategy, "create_agents_for_model", _build)
     session_id = "handoff"
     await agent.prompt(prompt=[text_block("do work")], session_id=session_id)
 
@@ -69,14 +75,14 @@ async def test_programmatic_plan_then_execute():
 @pytest.mark.asyncio
 async def test_structured_plan_entries_generate_plan_updates():
     send_update = AsyncMock()
-    env = HandoffEnv(
+    env = StrategyEnv(
         session_modes={},
         session_last_chunk={},
         send_update=send_update,
         request_run_permission=AsyncMock(return_value=True),
         set_usage=lambda *_: None,
     )
-    runner = HandoffPromptRunner(env)
+    runner = HandoffRunner(env)
 
     class _StructuredPlanner:
         async def run_stream_events(
@@ -114,7 +120,7 @@ async def test_structured_plan_entries_generate_plan_updates():
 
 
 @pytest.mark.asyncio
-async def test_structured_plan_reaches_executor_prompt():
+async def test_structured_plan_reaches_executor_prompt(monkeypatch):
     conn = AsyncMock()
     agent = make_function_agent(conn)
 
@@ -151,8 +157,15 @@ async def test_structured_plan_reaches_executor_prompt():
 
             return _gen()
 
-    agent._planning_runner = _StructuredPlanner()  # type: ignore[attr-defined]
-    agent._ai_runner = _RecordingExecutor()  # type: ignore[attr-defined]
+    executor = _RecordingExecutor()
+    planner = _StructuredPlanner()
+    from isaac.agent.brain import handoff_strategy
+
+    def _build(_model_id: str, _register: object, toolsets=None) -> tuple[object, object]:
+        _ = toolsets
+        return executor, planner
+
+    monkeypatch.setattr(handoff_strategy, "create_agents_for_model", _build)
     session_id = "structured-handoff"
 
     await agent.prompt(prompt=[text_block("ship the feature")], session_id=session_id)
@@ -164,9 +177,8 @@ async def test_structured_plan_reaches_executor_prompt():
     assert plan_updates[0].entries[0].priority == "high"
     assert plan_updates[-1].entries and all(e.status == "completed" for e in plan_updates[-1].entries)
 
-    executor_prompts = agent._ai_runner.prompts  # type: ignore[attr-defined]
-    assert executor_prompts
-    prompt_text = executor_prompts[0]
+    assert executor.prompts
+    prompt_text = executor.prompts[0]
     assert "Plan:" in prompt_text
     assert "- alpha" in prompt_text
     assert "- beta" in prompt_text
@@ -186,14 +198,14 @@ def test_plan_parser_handles_steps_list_line():
 async def test_run_command_permission_includes_string_args():
     send_update = AsyncMock()
     request_perm = AsyncMock(return_value=True)
-    env = HandoffEnv(
+    env = StrategyEnv(
         session_modes={"s": "ask"},
         session_last_chunk={},
         send_update=send_update,
         request_run_permission=request_perm,
         set_usage=lambda *_: None,
     )
-    runner = HandoffPromptRunner(env)
+    runner = HandoffRunner(env)
     handler = runner._build_runner_event_handler(
         "s",
         tool_trackers={},
