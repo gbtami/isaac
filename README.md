@@ -1,4 +1,4 @@
-# 🍏 isaac
+# 🍏 Isaac
 
 Isaac is a coding client and agent implementing the [Agent Client Protocol (ACP)](https://agentclientprotocol.com/).
 
