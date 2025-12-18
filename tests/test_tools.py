@@ -11,6 +11,7 @@ from unittest.mock import AsyncMock
 from isaac.agent.brain.prompt import PLANNER_INSTRUCTIONS, SYSTEM_PROMPT
 from isaac.agent.brain.strategy_plan import PlanSteps
 from isaac.agent.tools import register_readonly_tools
+from isaac.agent.tools.fetch_url import fetch_url
 from isaac.agent.runner import register_tools
 from isaac.agent.tools.apply_patch import apply_patch
 from isaac.agent.tools.code_search import code_search
@@ -24,6 +25,7 @@ from tests.utils import make_function_agent
 from pydantic_ai import Agent as PydanticAgent  # type: ignore
 from pydantic_ai.models.test import TestModel  # type: ignore
 from isaac.agent import ACPAgent
+import httpx
 
 
 @pytest.mark.asyncio
@@ -268,3 +270,87 @@ async def test_request_permission_path():
 
     assert allowed is True
     conn.request_permission.assert_awaited()
+
+
+@pytest.mark.asyncio
+async def test_fetch_url_uses_mock_transport(monkeypatch: pytest.MonkeyPatch):
+    calls = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        calls.append(str(request.url))
+        return httpx.Response(200, text="hello world", headers={"content-type": "text/plain"})
+
+    transport = httpx.MockTransport(handler)
+
+    import importlib
+
+    fetch_mod = importlib.import_module("isaac.agent.tools.fetch_url")
+    orig_async_client = fetch_mod.httpx.AsyncClient
+
+    class _MockAsyncClient:
+        def __init__(self, *args, **kwargs):
+            self._client = orig_async_client(transport=transport, follow_redirects=True, timeout=kwargs.get("timeout"))
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *exc):
+            await self._client.aclose()
+
+        def stream(self, method: str, url: str, headers=None):
+            return self._client.stream(method, url, headers=headers)
+
+    monkeypatch.setattr(fetch_mod.httpx, "AsyncClient", _MockAsyncClient)
+    await fetch_mod._clear_fetch_cache()
+
+    result = await fetch_url("https://example.com")
+
+    assert result["error"] is None
+    assert "hello world" in result["content"]
+    assert result["status_code"] == 200
+    assert not result["truncated"]
+    assert calls and "example.com" in calls[0]
+
+
+@pytest.mark.asyncio
+async def test_fetch_url_truncates(monkeypatch: pytest.MonkeyPatch):
+    body = "x" * 50
+
+    def handler(_: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, text=body)
+
+    transport = httpx.MockTransport(handler)
+
+    import importlib
+
+    fetch_mod = importlib.import_module("isaac.agent.tools.fetch_url")
+    orig_async_client = fetch_mod.httpx.AsyncClient
+
+    class _MockAsyncClient:
+        def __init__(self, *args, **kwargs):
+            self._client = orig_async_client(transport=transport, follow_redirects=True, timeout=kwargs.get("timeout"))
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *exc):
+            await self._client.aclose()
+
+        def stream(self, method: str, url: str, headers=None):
+            return self._client.stream(method, url, headers=headers)
+
+    monkeypatch.setattr(fetch_mod.httpx, "AsyncClient", _MockAsyncClient)
+    await fetch_mod._clear_fetch_cache()
+
+    result = await fetch_url("https://example.com", max_bytes=10)
+
+    assert result["error"] is None
+    assert result["truncated"] is True
+    assert len(result["content"]) <= 10
+
+
+@pytest.mark.asyncio
+async def test_fetch_url_blocks_bad_scheme():
+    result = await fetch_url("file:///etc/passwd")
+    assert result["error"]
+    assert "https" in result["error"].lower()

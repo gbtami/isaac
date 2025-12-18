@@ -111,6 +111,8 @@ class SubagentPromptStrategy(PromptStrategy):
         if state.model_error or state.runner is None:
             return await self._respond_model_error(session_id, state)
 
+        # Reset planner_history per prompt to avoid leaking prior plan content into new plans.
+        state.planner_history = []
         history = self._trim_history(state.history, self._MAX_HISTORY_MESSAGES)
         plan_progress: dict[str, Any] | None = {"plan": None, "idx": 0}
         _push_chunk = self._handoff_helper._make_chunk_sender(session_id)  # type: ignore[attr-defined]
@@ -118,6 +120,13 @@ class SubagentPromptStrategy(PromptStrategy):
 
         tool_trackers: Dict[str, Any] = {}
         run_command_ctx_tokens: Dict[str, Any] = {}
+
+        def _record_history(msg: dict[str, Any]) -> None:
+            content = str(msg.get("content") or "").strip()
+            if not content:
+                return
+            role = str(msg.get("role") or "assistant")
+            state.history.append({"role": role, "content": content})
 
         async def _maybe_capture_plan(event: Any) -> None:
             if not isinstance(event, FunctionToolResultEvent):
@@ -140,6 +149,7 @@ class SubagentPromptStrategy(PromptStrategy):
             tool_trackers,
             run_command_ctx_tokens,
             plan_progress,
+            record_history=_record_history,
         )
 
         async def _on_event(event: Any) -> bool:
@@ -254,7 +264,7 @@ class SubagentPromptStrategy(PromptStrategy):
 
         summary_prompt = (
             "Summarize the earlier conversation for future turns. "
-            "List key tasks, decisions, files touched, and outstanding follow-ups."
+            "List key tasks, decisions, files touched, commands run, and outstanding follow-ups."
         )
 
         async def _noop(_: str) -> None:
@@ -302,7 +312,7 @@ class SubagentPromptStrategy(PromptStrategy):
             if planner is None:
                 return parse_plan_from_text(task)
             plan_prompt = f"{TODO_PLANNER_INSTRUCTIONS.strip()}\n\nTask: {task.strip()}"
-            plan_history = self._trim_history(state.planner_history, self._MAX_HISTORY_MESSAGES)
+            base_history = self._trim_history(state.history, self._MAX_HISTORY_MESSAGES)
             structured_plan: PlanSteps | None = None
 
             async def _chunk(_: str) -> None:
@@ -321,9 +331,10 @@ class SubagentPromptStrategy(PromptStrategy):
 
             def _store_planner_messages(msgs: Any) -> None:
                 try:
-                    state.planner_history.extend(list(msgs or []))
+                    combined = base_history + list(msgs or [])
+                    state.planner_history = self._trim_history(combined, self._MAX_HISTORY_MESSAGES)
                 except Exception:
-                    return
+                    state.planner_history = base_history
 
             response, _ = await stream_with_runner(
                 planner,
@@ -331,7 +342,7 @@ class SubagentPromptStrategy(PromptStrategy):
                 _chunk,
                 _thought,
                 asyncio.Event(),
-                history=plan_history,
+                history=base_history,
                 on_event=_capture,
                 store_messages=_store_planner_messages,
                 log_context="subagent_planner",

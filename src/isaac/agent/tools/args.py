@@ -139,3 +139,23 @@ class CodeSearchArgs(BaseModel):
         None,
         description="Timeout in seconds",
     )
+
+
+class FetchUrlArgs(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    url: str = Field(
+        ...,
+        min_length=1,
+        description="HTTP or HTTPS URL to fetch",
+    )
+    max_bytes: int = Field(
+        20_000,
+        description="Maximum bytes to read from the response body",
+        ge=1,
+    )
+    timeout: float | None = Field(
+        10.0,
+        description="Request timeout in seconds",
+        gt=0,
+    )

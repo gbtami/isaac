@@ -16,6 +16,7 @@ from .file_summary import file_summary
 from .list_files import list_files
 from .read_file import read_file
 from .run_command import run_command
+from .fetch_url import fetch_url
 from .args import (
     ApplyPatchArgs,
     CodeSearchArgs,
@@ -24,6 +25,7 @@ from .args import (
     ListFilesArgs,
     ReadFileArgs,
     RunCommandArgs,
+    FetchUrlArgs,
 )
 
 
@@ -51,6 +53,7 @@ TOOL_HANDLERS: Dict[str, ToolHandler] = {
     "code_search": code_search,
     "apply_patch": apply_patch,
     "file_summary": file_summary,
+    "fetch_url": fetch_url,
 }
 
 # Pydantic argument models for each tool, used for schema generation and validation.
@@ -62,6 +65,7 @@ TOOL_ARG_MODELS: Dict[str, Type[Any]] = {
     "apply_patch": ApplyPatchArgs,
     "file_summary": FileSummaryArgs,
     "code_search": CodeSearchArgs,
+    "fetch_url": FetchUrlArgs,
 }
 
 TOOL_DESCRIPTIONS: Dict[str, str] = {
@@ -72,6 +76,7 @@ TOOL_DESCRIPTIONS: Dict[str, str] = {
     "apply_patch": "Apply a unified diff patch to a file",
     "file_summary": "Summarize a file (head/tail and line count)",
     "code_search": "Search for a pattern in files using ripgrep",
+    "fetch_url": "Fetch a URL (https only) with size/time limits; useful for docs and API refs.",
 }
 
 DEFAULT_TOOL_TIMEOUT_S = 10.0
@@ -83,6 +88,7 @@ READ_ONLY_TOOLS = {
     "read_file",
     "file_summary",
     "code_search",
+    "fetch_url",
 }
 
 TOOL_REQUIRED_ARGS: Dict[str, list[str]] = {
@@ -231,3 +237,12 @@ def register_readonly_tools(agent: Any) -> None:
             case_sensitive=case_sensitive,
             timeout=timeout,
         )
+
+    @agent.tool(name="fetch_url", timeout=DEFAULT_TOOL_TIMEOUT_S)  # type: ignore[misc]
+    async def fetch_url_tool(
+        ctx: RunContext[Any],
+        url: str,
+        max_bytes: int = 20_000,
+        timeout: float | None = 10.0,
+    ) -> Any:
+        return await run_tool("fetch_url", ctx=ctx, url=url, max_bytes=max_bytes, timeout=timeout)

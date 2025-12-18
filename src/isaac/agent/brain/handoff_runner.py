@@ -39,6 +39,7 @@ class HandoffRunner(StrategyPromptRunner):
         planner: Any,
         store_planner_messages: Callable[[Any], None],
         store_executor_messages: Callable[[Any], None],
+        record_executor_history: Callable[[dict[str, str]], None] | None = None,
     ) -> Any:
         plan_update, plan_text, plan_usage = await self._run_planning_phase(
             session_id,
@@ -64,6 +65,7 @@ class HandoffRunner(StrategyPromptRunner):
             history=executor_history,
             cancel_event=cancel_event,
             store_model_messages=store_executor_messages,
+            record_history=record_executor_history,
             plan_update=plan_update,
             plan_response=plan_text,
             plan_usage=plan_usage,
@@ -176,6 +178,7 @@ class HandoffRunner(StrategyPromptRunner):
         history: Any,
         cancel_event: asyncio.Event,
         store_model_messages: Callable[[Any], None],
+        record_history: Callable[[dict[str, str]], None] | None = None,
         plan_update: Any | None = None,
         plan_response: str | None = None,
         plan_usage: Any | None = None,
@@ -192,6 +195,7 @@ class HandoffRunner(StrategyPromptRunner):
             tool_trackers,
             run_command_ctx_tokens,
             plan_progress,
+            record_history=record_history,
         )
 
         response_text, usage = await stream_with_runner(

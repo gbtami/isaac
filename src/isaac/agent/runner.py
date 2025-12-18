@@ -140,6 +140,19 @@ def register_tools(agent: Any) -> None:
             timeout=timeout,
         )
 
+    @agent.tool(name="fetch_url", timeout=DEFAULT_TOOL_TIMEOUT_S)  # type: ignore[misc]
+    async def fetch_url_tool(
+        ctx: RunContext[Any],
+        url: str,
+        max_bytes: int = 20_000,
+        timeout: float | None = 10.0,
+    ) -> Any:
+        logger.info(
+            "Pydantic tool invoked: fetch_url args=%s",
+            {"url": url, "max_bytes": max_bytes, "timeout": timeout},
+        )
+        return await run_tool("fetch_url", ctx=ctx, url=url, max_bytes=max_bytes, timeout=timeout)
+
 
 async def stream_with_runner(
     runner: Any,

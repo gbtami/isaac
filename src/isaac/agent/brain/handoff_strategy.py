@@ -111,7 +111,11 @@ class HandoffPromptStrategy(PromptStrategy):
 
         def _store_executor_messages(msgs: Any) -> None:
             try:
-                state.executor_history.extend(list(msgs or []))
+                if isinstance(msgs, dict):
+                    items = [msgs]
+                else:
+                    items = list(msgs or [])
+                state.executor_history.extend(items)
             except Exception:
                 return
 
@@ -125,6 +129,7 @@ class HandoffPromptStrategy(PromptStrategy):
             planner=planner,
             store_planner_messages=_store_planner_messages,
             store_executor_messages=_store_executor_messages,
+            record_executor_history=_store_executor_messages,
         )
 
     def model_id(self, session_id: str) -> str | None:

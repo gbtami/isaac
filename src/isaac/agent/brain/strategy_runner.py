@@ -76,6 +76,7 @@ class StrategyPromptRunner:
         tool_trackers: Dict[str, ToolCallTracker],
         run_command_ctx_tokens: Dict[str, Any],
         plan_progress: dict[str, Any] | None = None,
+        record_history: Callable[[dict[str, str]], None] | None = None,
     ) -> Callable[[Any], Awaitable[bool]]:
         async def _handle_runner_event(event: Any) -> bool:
             if isinstance(event, FunctionToolCallEvent):
@@ -165,6 +166,12 @@ class StrategyPromptRunner:
                 )
                 await self.env.send_update(session_notification(session_id, progress))
 
+                if record_history:
+                    summary = self._tool_history_summary(tool_name, raw_output, status)
+                    if summary:
+                        with contextlib.suppress(Exception):
+                            record_history({"role": "assistant", "content": summary})
+
                 if plan_progress and plan_progress.get("plan") and not raw_output.get("error"):
                     entries = getattr(plan_progress["plan"], "entries", []) or []
                     if entries:
@@ -195,3 +202,49 @@ class StrategyPromptRunner:
         from acp.schema import PromptResponse  # local import to avoid cycles
 
         return PromptResponse(stop_reason="end_turn")
+
+    @staticmethod
+    def _tool_history_summary(tool_name: str, raw_output: dict[str, Any], status: str) -> str | None:
+        content = raw_output.get("content")
+        summary_prefix = f"{tool_name} ({status})"
+        if tool_name == "run_command":
+            cmd = raw_output.get("command") or raw_output.get("cmd")
+            cwd = raw_output.get("cwd")
+            cmd_str = str(cmd).strip() if cmd else ""
+            cwd_str = f" (cwd: {cwd})" if cwd else ""
+            if cmd_str:
+                return f"Ran command: {cmd_str}{cwd_str} [{status}]"
+            return f"Ran command [{status}]"
+        if tool_name in {"edit_file", "apply_patch"}:
+            path = raw_output.get("path")
+            path_str = f" {path}" if path else ""
+            return f"Updated file{path_str} [{status}]"
+        if tool_name == "read_file":
+            path = raw_output.get("path")
+            if path:
+                return f"Read file {path} [{status}]"
+        if tool_name == "list_files":
+            root = raw_output.get("directory") or raw_output.get("path")
+            if root:
+                return f"Listed files in {root} [{status}]"
+        if tool_name == "file_summary":
+            path = raw_output.get("path")
+            if path:
+                return f"Summarized file {path} [{status}]"
+        if tool_name == "code_search":
+            pattern = raw_output.get("pattern")
+            directory = raw_output.get("directory")
+            if pattern:
+                where = f" in {directory}" if directory else ""
+                return f"Searched for '{pattern}'{where} [{status}]"
+        if tool_name == "fetch_url":
+            fetched = raw_output.get("url") or raw_output.get("source") or raw_output.get("request_url")
+            status_code = raw_output.get("status_code")
+            detail = f" ({status_code})" if status_code else ""
+            if fetched:
+                return f"Fetched URL {fetched}{detail} [{status}]"
+        if tool_name:
+            return f"{summary_prefix}"
+        if content:
+            return f"Tool result [{status}]: {content}"
+        return None
