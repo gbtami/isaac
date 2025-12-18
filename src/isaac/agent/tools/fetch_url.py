@@ -11,7 +11,13 @@ from aiocache import SimpleMemoryCache
 
 
 SAFE_SCHEMES = {"https"}
-_CACHE = SimpleMemoryCache(maxsize=32)
+
+# TODO:
+# _CACHE = SimpleMemoryCache(maxsize=32)
+# maxsize throws this exception
+# TypeError: BaseCache.__init__() got an unexpected keyword argument 'maxsize'
+
+_CACHE = SimpleMemoryCache()
 
 
 def _blocked_host(host: str | None) -> bool:
