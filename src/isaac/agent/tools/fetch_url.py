@@ -7,34 +7,7 @@ from typing import Any, Dict
 from urllib.parse import urlparse
 
 import httpx
-
-try:
-    from aiocache import SimpleMemoryCache
-except Exception:  # pragma: no cover - fallback when aiocache unavailable
-
-    class SimpleMemoryCache:  # type: ignore[override]
-        def __init__(self, maxsize: int = 32, *args: Any, **kwargs: Any) -> None:
-            self._store: dict[Any, Any] = {}
-            self._order: list[Any] = []
-            self.maxsize = maxsize
-
-        async def get(self, key: Any) -> Any:
-            if key not in self._store:
-                return None
-            self._order = [k for k in self._order if k != key] + [key]
-            return self._store[key]
-
-        async def set(self, key: Any, value: Any) -> None:
-            if key not in self._store:
-                self._order.append(key)
-            self._store[key] = value
-            if len(self._order) > self.maxsize:
-                oldest = self._order.pop(0)
-                self._store.pop(oldest, None)
-
-        async def clear(self) -> None:
-            self._store.clear()
-            self._order.clear()
+from aiocache import SimpleMemoryCache
 
 
 SAFE_SCHEMES = {"https"}
