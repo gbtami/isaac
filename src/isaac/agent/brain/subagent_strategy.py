@@ -59,21 +59,25 @@ class SubagentPromptStrategy(PromptStrategy):
         self._handoff_helper = StrategyPromptRunner(env)
         self._sessions: Dict[str, SubagentSessionState] = {}
 
-    async def init_session(self, session_id: str, toolsets: list[Any]) -> None:
+    async def init_session(self, session_id: str, toolsets: list[Any], system_prompt: str | None = None) -> None:
         state = self._sessions.setdefault(
             session_id,
             SubagentSessionState(model_id=model_registry.current_model_id()),
         )
-        await self._build_runner(session_id, state, toolsets)
+        await self._build_runner(session_id, state, toolsets, system_prompt=system_prompt)
 
-    async def set_session_model(self, session_id: str, model_id: str, toolsets: list[Any]) -> None:
+    async def set_session_model(
+        self, session_id: str, model_id: str, toolsets: list[Any], system_prompt: str | None = None
+    ) -> None:
         state = self._sessions.setdefault(
             session_id,
             SubagentSessionState(model_id=model_registry.current_model_id()),
         )
         try:
-            executor = create_subagent_for_model(model_id, self._register_tools, toolsets=toolsets)
-            planner = create_subagent_planner_for_model(model_id)
+            executor = create_subagent_for_model(
+                model_id, self._register_tools, toolsets=toolsets, system_prompt=system_prompt
+            )
+            planner = create_subagent_planner_for_model(model_id, system_prompt=system_prompt)
             state.runner = executor
             state.todo_planner = planner
             self._attach_todo_tool(state)
@@ -363,16 +367,18 @@ class SubagentPromptStrategy(PromptStrategy):
         session_id: str,
         state: SubagentSessionState,
         toolsets: list[Any] | None = None,
+        system_prompt: str | None = None,
     ) -> None:
         try:
             executor = create_subagent_for_model(
                 model_registry.current_model_id(),
                 self._register_tools,
                 toolsets=toolsets,
+                system_prompt=system_prompt,
             )
             state.model_id = model_registry.current_model_id()
             state.runner = executor
-            state.todo_planner = create_subagent_planner_for_model(state.model_id)
+            state.todo_planner = create_subagent_planner_for_model(state.model_id, system_prompt=system_prompt)
             self._attach_todo_tool(state)
             state.history = []
             state.planner_history = []

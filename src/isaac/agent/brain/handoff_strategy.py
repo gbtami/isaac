@@ -44,22 +44,26 @@ class HandoffPromptStrategy(PromptStrategy):
         self._handoff_runner = HandoffRunner(env)
         self._sessions: Dict[str, PromptSessionState] = {}
 
-    async def init_session(self, session_id: str, toolsets: list[Any]) -> None:
+    async def init_session(self, session_id: str, toolsets: list[Any], system_prompt: str | None = None) -> None:
         """Initialize per-session runner/planner state."""
         state = self._sessions.setdefault(
             session_id,
             PromptSessionState(model_id=model_registry.current_model_id()),
         )
-        await self._build_runners(session_id, state, toolsets)
+        await self._build_runners(session_id, state, toolsets, system_prompt=system_prompt)
 
-    async def set_session_model(self, session_id: str, model_id: str, toolsets: list[Any]) -> None:
+    async def set_session_model(
+        self, session_id: str, model_id: str, toolsets: list[Any], system_prompt: str | None = None
+    ) -> None:
         """Switch the backing model for a session."""
         state = self._sessions.setdefault(
             session_id,
             PromptSessionState(model_id=model_registry.current_model_id()),
         )
         try:
-            executor, planner = create_agents_for_model(model_id, self._register_tools, toolsets=toolsets)
+            executor, planner = create_agents_for_model(
+                model_id, self._register_tools, toolsets=toolsets, system_prompt=system_prompt
+            )
             state.runner = executor
             state.planner = planner
             state.model_id = model_id
@@ -156,12 +160,14 @@ class HandoffPromptStrategy(PromptStrategy):
         session_id: str,
         state: PromptSessionState,
         toolsets: list[Any] | None = None,
+        system_prompt: str | None = None,
     ) -> None:
         try:
             executor, planner = create_agents_for_model(
                 model_registry.current_model_id(),
                 self._register_tools,
                 toolsets=toolsets,
+                system_prompt=system_prompt,
             )
             state.model_id = model_registry.current_model_id()
             state.runner = executor

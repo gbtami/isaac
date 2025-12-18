@@ -181,7 +181,7 @@ async def test_model_tool_call_requests_permission(monkeypatch: pytest.MonkeyPat
     register_readonly_tools(planning_runner)
     from isaac.agent.brain import handoff_strategy
 
-    def _build(_model_id: str, _register: object, toolsets=None) -> tuple[object, object]:
+    def _build(_model_id: str, _register: object, toolsets=None, **kwargs: object) -> tuple[object, object]:
         _ = toolsets
         return ai_runner, planning_runner
 
@@ -233,7 +233,7 @@ async def test_model_run_command_denied_blocks_execution(monkeypatch: pytest.Mon
     register_readonly_tools(planning_runner)
     from isaac.agent.brain import handoff_strategy
 
-    def _build(_model_id: str, _register: object, toolsets=None) -> tuple[object, object]:
+    def _build(_model_id: str, _register: object, toolsets=None, **kwargs: object) -> tuple[object, object]:
         _ = toolsets
         return ai_runner, planning_runner
 

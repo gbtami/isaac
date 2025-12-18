@@ -51,7 +51,7 @@ async def test_programmatic_plan_then_execute(monkeypatch):
     agent = make_function_agent(conn)
     from isaac.agent.brain import handoff_strategy
 
-    def _build(_model_id: str, _register: object, toolsets=None) -> tuple[object, object]:
+    def _build(_model_id: str, _register: object, toolsets=None, **kwargs: object) -> tuple[object, object]:
         _ = toolsets
         return executor, planning_runner
 
@@ -160,7 +160,7 @@ async def test_structured_plan_reaches_executor_prompt(monkeypatch):
     planner = _StructuredPlanner()
     from isaac.agent.brain import handoff_strategy
 
-    def _build(_model_id: str, _register: object, toolsets=None) -> tuple[object, object]:
+    def _build(_model_id: str, _register: object, toolsets=None, **kwargs: object) -> tuple[object, object]:
         _ = toolsets
         return executor, planner
 
@@ -224,7 +224,7 @@ async def test_single_step_plan_skips_plan_updates(monkeypatch):
     planner = _SingleStepPlanner()
     from isaac.agent.brain import handoff_strategy
 
-    def _build(_model_id: str, _register: object, toolsets=None) -> tuple[object, object]:
+    def _build(_model_id: str, _register: object, toolsets=None, **kwargs: object) -> tuple[object, object]:
         _ = toolsets
         return executor, planner
 

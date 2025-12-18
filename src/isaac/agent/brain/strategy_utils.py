@@ -24,7 +24,9 @@ from isaac.agent.tools import register_readonly_tools
 from isaac.agent.models import ENV_FILE, load_models_config, _build_provider_model
 
 
-def create_agents_for_model(model_id: str, register_tools: Any, toolsets: list[Any] | None = None) -> tuple[Any, Any]:
+def create_agents_for_model(
+    model_id: str, register_tools: Any, toolsets: list[Any] | None = None, system_prompt: str | None = None
+) -> tuple[Any, Any]:
     """Build executor and planner agents for a model id."""
 
     load_dotenv(ENV_FILE, override=False)
@@ -41,7 +43,7 @@ def create_agents_for_model(model_id: str, register_tools: Any, toolsets: list[A
     executor = PydanticAgent(
         model_obj,
         toolsets=toolsets or (),
-        system_prompt=SYSTEM_PROMPT,
+        system_prompt=system_prompt or SYSTEM_PROMPT,
         instructions=EXECUTOR_INSTRUCTIONS,
         model_settings=model_settings,
     )
@@ -49,7 +51,7 @@ def create_agents_for_model(model_id: str, register_tools: Any, toolsets: list[A
 
     planner = PydanticAgent(
         planner_obj,
-        system_prompt=SYSTEM_PROMPT,
+        system_prompt=system_prompt or SYSTEM_PROMPT,
         instructions=PLANNER_INSTRUCTIONS,
         model_settings=planner_settings,
         toolsets=(),
@@ -59,7 +61,9 @@ def create_agents_for_model(model_id: str, register_tools: Any, toolsets: list[A
     return executor, planner
 
 
-def create_subagent_for_model(model_id: str, register_tools: Any, toolsets: list[Any] | None = None) -> Any:
+def create_subagent_for_model(
+    model_id: str, register_tools: Any, toolsets: list[Any] | None = None, system_prompt: str | None = None
+) -> Any:
     """Build a single-runner agent for subagent mode."""
 
     load_dotenv(ENV_FILE, override=False)
@@ -75,7 +79,7 @@ def create_subagent_for_model(model_id: str, register_tools: Any, toolsets: list
     runner = PydanticAgent(
         model_obj,
         toolsets=toolsets or (),
-        system_prompt=SYSTEM_PROMPT,
+        system_prompt=system_prompt or SYSTEM_PROMPT,
         instructions=SUBAGENT_INSTRUCTIONS,
         model_settings=model_settings,
     )
@@ -83,7 +87,7 @@ def create_subagent_for_model(model_id: str, register_tools: Any, toolsets: list
     return runner
 
 
-def create_subagent_planner_for_model(model_id: str) -> Any:
+def create_subagent_planner_for_model(model_id: str, system_prompt: str | None = None) -> Any:
     """Build a delegate planner agent for the subagent todo tool."""
 
     load_dotenv(ENV_FILE, override=False)
@@ -98,7 +102,7 @@ def create_subagent_planner_for_model(model_id: str) -> Any:
 
     planner = PydanticAgent(
         planner_obj,
-        system_prompt=SYSTEM_PROMPT,
+        system_prompt=system_prompt or SYSTEM_PROMPT,
         instructions=TODO_PLANNER_INSTRUCTIONS,
         model_settings=planner_settings,
         toolsets=(),

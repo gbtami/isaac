@@ -182,7 +182,7 @@ async def test_history_preserved_across_prompts(monkeypatch, tmp_path: Path):
     executor = _RecordingRunner("done")
     from isaac.agent.brain import handoff_strategy
 
-    def _build(_model_id: str, _register: object, toolsets=None) -> tuple[object, object]:
+    def _build(_model_id: str, _register: object, toolsets=None, **kwargs: object) -> tuple[object, object]:
         _ = toolsets
         return executor, planner
 

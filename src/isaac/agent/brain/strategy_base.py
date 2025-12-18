@@ -15,9 +15,11 @@ class ModelBuildError(RuntimeError):
 class PromptStrategy(Protocol):
     """Interface for per-session prompt processing strategies."""
 
-    async def init_session(self, session_id: str, toolsets: list[Any]) -> None: ...
+    async def init_session(self, session_id: str, toolsets: list[Any], system_prompt: str | None = None) -> None: ...
 
-    async def set_session_model(self, session_id: str, model_id: str, toolsets: list[Any]) -> None: ...
+    async def set_session_model(
+        self, session_id: str, model_id: str, toolsets: list[Any], system_prompt: str | None = None
+    ) -> None: ...
 
     async def handle_prompt(
         self,

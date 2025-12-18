@@ -82,6 +82,7 @@ from isaac.agent.fs import read_text_file, write_text_file
 from isaac.agent.mcp_support import build_mcp_toolsets
 from isaac.agent.planner import build_plan_notification, parse_plan_request
 from isaac.agent.prompt_utils import coerce_user_text, extract_prompt_text
+from isaac.agent.brain.prompt import SYSTEM_PROMPT
 from isaac.agent.session_modes import build_mode_state
 from isaac.agent.session_store import SessionStore
 from isaac.agent.slash import available_slash_commands, handle_slash_command
@@ -133,6 +134,7 @@ class ACPAgent(Agent):
         self._session_store = SessionStore(Path.home() / ".isaac" / "sessions")
         self._session_last_chunk: Dict[str, str | None] = {}
         self._prompt_strategy = prompt_strategy or self._build_prompt_strategy()
+        self._session_system_prompts: Dict[str, str | None] = {}
 
     def on_connect(self, conn: AgentSideConnection) -> None:  # type: ignore[override]
         """Capture connection when wiring via run_agent/connect_to_agent."""
@@ -222,6 +224,18 @@ class ACPAgent(Agent):
             raise RuntimeError("Connection missing request_permission handler")
         return await requester(options=options, session_id=session_id, tool_call=tool_call)
 
+    def _build_session_system_prompt(self, cwd: Path) -> str | None:
+        """Build a per-session system prompt with AGENTS.md prepended if present."""
+
+        base_prompt = SYSTEM_PROMPT
+        try:
+            agents_path = cwd / "AGENTS.md"
+            if agents_path.is_file():
+                return f"{base_prompt}\n\n{agents_path.read_text(encoding='utf-8', errors='ignore')}"
+        except Exception:
+            return base_prompt
+        return base_prompt
+
     async def new_session(
         self,
         cwd: str,
@@ -234,10 +248,12 @@ class ACPAgent(Agent):
         self._sessions.add(session_id)
         cwd_path = self._require_absolute_cwd(cwd)
         self._session_cwds[session_id] = cwd_path
+        session_system_prompt = self._build_session_system_prompt(cwd_path)
+        self._session_system_prompts[session_id] = session_system_prompt
         self._cancel_events[session_id] = asyncio.Event()
         toolsets = build_mcp_toolsets(mcp_servers)
         self._session_toolsets[session_id] = toolsets
-        await self._prompt_strategy.init_session(session_id, toolsets)
+        await self._prompt_strategy.init_session(session_id, toolsets, system_prompt=session_system_prompt)
         self._session_history[session_id] = []
         self._session_allowed_commands[session_id] = set()
         self._session_mcp_servers[session_id] = mcp_servers
@@ -266,11 +282,13 @@ class ACPAgent(Agent):
         stored_meta = self._load_session_meta(session_id)
         cwd_path = self._require_absolute_cwd(cwd)
         self._session_cwds[session_id] = cwd_path
+        session_system_prompt = self._build_session_system_prompt(cwd_path)
+        self._session_system_prompts[session_id] = session_system_prompt
         self._cancel_events.setdefault(session_id, asyncio.Event())
         mcp_servers = mcp_servers or stored_meta.get("mcpServers", [])
         toolsets = build_mcp_toolsets(mcp_servers)
         self._session_toolsets[session_id] = toolsets
-        await self._prompt_strategy.init_session(session_id, toolsets)
+        await self._prompt_strategy.init_session(session_id, toolsets, system_prompt=session_system_prompt)
         self._session_history.setdefault(session_id, [])
         self._session_allowed_commands.setdefault(session_id, set())
         self._session_mcp_servers[session_id] = mcp_servers
@@ -334,6 +352,7 @@ class ACPAgent(Agent):
                 session_id,
                 model_id,
                 toolsets=self._session_toolsets.get(session_id, []),
+                system_prompt=self._session_system_prompts.get(session_id),
             )
             self._session_model_ids[session_id] = model_id
             with contextlib.suppress(Exception):

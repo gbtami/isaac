@@ -44,7 +44,7 @@ def make_function_agent(conn: AgentSideConnection) -> ACPAgent:
     # Patch model builders to use deterministic test agents.
     from isaac.agent.brain import strategy_utils, handoff_strategy, subagent_strategy
 
-    def _build_model(_model_id: str, _register: object, toolsets=None) -> tuple[object, object]:
+    def _build_model(_model_id: str, _register: object, toolsets=None, **kwargs: object) -> tuple[object, object]:
         _ = toolsets
         return runner, planning_runner
 
@@ -65,7 +65,7 @@ def make_error_agent(conn: AgentSideConnection) -> ACPAgent:
 
     from isaac.agent.brain import strategy_utils, handoff_strategy, subagent_strategy
 
-    def _build_error(_model_id: str, _register: object, toolsets=None) -> tuple[object, object]:
+    def _build_error(_model_id: str, _register: object, toolsets=None, **kwargs: object) -> tuple[object, object]:
         _ = toolsets
         err = ErrorRunner()
         return err, err

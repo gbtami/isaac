@@ -96,6 +96,11 @@ class StrategyPromptRunner:
                 )
                 await self.env.send_update(session_notification(session_id, start))
                 tool_call_inputs[event.tool_call_id] = args
+                if record_history:
+                    summary = self._tool_history_summary(tool_name, {}, "in_progress", raw_input=args)
+                    if summary:
+                        with contextlib.suppress(Exception):
+                            record_history({"role": "assistant", "content": summary})
                 if tool_name == "run_command":
                     allowed = True
                     mode = self.env.session_modes.get(session_id, "ask")
@@ -127,6 +132,12 @@ class StrategyPromptRunner:
                         await self.env.send_update(session_notification(session_id, denied))
                         return True
                 return True
+                # Record call intent in history.
+                if record_history:
+                    summary = self._tool_history_summary(tool_name, {}, "in_progress", raw_input=args)
+                    if summary:
+                        with contextlib.suppress(Exception):
+                            record_history({"role": "assistant", "content": summary})
 
             if isinstance(event, FunctionToolResultEvent):
                 token = run_command_ctx_tokens.pop(event.tool_call_id, None)

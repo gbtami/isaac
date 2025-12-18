@@ -71,11 +71,11 @@ async def test_subagent_todo_plan_updates(tmp_path, monkeypatch):
     )
     from isaac.agent.brain import subagent_strategy
 
-    def _build(_model_id: str, _register: object, toolsets=None):
+    def _build(_model_id: str, _register: object, toolsets=None, **kwargs: object):
         _ = toolsets
         return runner
 
-    def _build_planner(_model_id: str):
+    def _build_planner(_model_id: str, **kwargs: object):
         return _PlannerStub()
 
     monkeypatch.setattr(subagent_strategy, "create_subagent_for_model", _build)
@@ -140,11 +140,11 @@ async def test_subagent_plan_refreshes_each_prompt(tmp_path, monkeypatch):
     )
     from isaac.agent.brain import subagent_strategy
 
-    def _build(_model_id: str, _register: object, toolsets=None):
+    def _build(_model_id: str, _register: object, toolsets=None, **kwargs: object):
         _ = toolsets
         return runner
 
-    def _build_planner(_model_id: str):
+    def _build_planner(_model_id: str, **kwargs: object):
         return planner
 
     monkeypatch.setattr(subagent_strategy, "create_subagent_for_model", _build)
@@ -323,12 +323,12 @@ async def test_subagent_records_tool_history(tmp_path, monkeypatch):
     )
     from isaac.agent.brain import subagent_strategy
 
-    def _build(_model_id: str, _register: object, toolsets=None):
+    def _build(_model_id: str, _register: object, toolsets=None, **kwargs: object):
         _ = toolsets
         return runner
 
     monkeypatch.setattr(subagent_strategy, "create_subagent_for_model", _build)
-    monkeypatch.setattr(subagent_strategy, "create_subagent_planner_for_model", lambda *_: object())
+    monkeypatch.setattr(subagent_strategy, "create_subagent_planner_for_model", lambda *_args, **_kwargs: object())
 
     strategy = SubagentPromptStrategy(env, register_tools=lambda *_: None)
     agent = ACPAgent(conn, prompt_strategy=strategy)
