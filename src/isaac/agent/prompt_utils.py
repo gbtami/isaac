@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from typing import Any
 
+from acp.schema import EmbeddedResourceContentBlock, ResourceContentBlock
+
 
 def extract_prompt_text(blocks: list[Any]) -> str:
     parts: list[str] = []
@@ -13,8 +15,18 @@ def extract_prompt_text(blocks: list[Any]) -> str:
             parts.append(text_val)
             continue
         resource = getattr(block, "resource", None)
-        if resource and hasattr(resource, "text") and getattr(resource, "text", None):
-            parts.append(str(resource.text))
+        if resource:
+            text = getattr(resource, "text", None)
+            if isinstance(text, str) and text:
+                parts.append(text)
+                continue
+            uri = getattr(resource, "uri", None)
+            if uri:
+                parts.append(f"[resource:{uri}]")
+                continue
+        if isinstance(block, ResourceContentBlock):
+            if block.uri:
+                parts.append(f"[resource:{block.uri}]")
             continue
         uri = getattr(block, "uri", None)
         if uri:
@@ -41,4 +53,8 @@ def coerce_user_text(block: Any) -> str | None:
         text = getattr(resource, "text", None)
         if isinstance(text, str):
             return text
+    if isinstance(block, EmbeddedResourceContentBlock):
+        res = getattr(block, "resource", None)
+        if res and isinstance(getattr(res, "text", None), str):
+            return getattr(res, "text")
     return None

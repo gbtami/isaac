@@ -186,7 +186,7 @@ class ACPAgent(Agent):
         capabilities = AgentCapabilities(
             load_session=True,
             prompt_capabilities=PromptCapabilities(
-                embedded_context=False,
+                embedded_context=True,
                 image=False,
                 audio=False,
             ),

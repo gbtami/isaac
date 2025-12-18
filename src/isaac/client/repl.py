@@ -4,11 +4,15 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 import sys
+from pathlib import Path
 
 from acp import ClientSideConnection, text_block
+from acp.schema import EmbeddedResourceContentBlock, ResourceContentBlock, TextResourceContents
 from prompt_toolkit import PromptSession  # type: ignore
 from prompt_toolkit.key_binding import KeyBindings  # type: ignore
+from typing import Any
 
 from isaac.client.session_state import SessionUIState
 from isaac.client.status_box import render_status_box
@@ -59,8 +63,10 @@ async def interactive_loop(conn: ClientSideConnection, session_id: str, state: S
             if handled:
                 continue
 
+        blocks = _build_prompt_blocks(line)
+
         try:
-            await conn.prompt(prompt=[text_block(line)], session_id=session_id)
+            await conn.prompt(prompt=blocks, session_id=session_id)
         except Exception as exc:  # noqa: BLE001
             logging.error("Prompt failed: %s", exc)
         if state.pending_newline:
@@ -68,3 +74,39 @@ async def interactive_loop(conn: ClientSideConnection, session_id: str, state: S
             state.pending_newline = False
 
     # Unknown slash commands fall through to the agent for server-side handling.
+
+
+def _build_prompt_blocks(line: str) -> list[Any]:
+    """Build ACP content blocks from user input, embedding @file references."""
+
+    blocks: list[Any] = [text_block(line)]
+    refs = [word[1:] for word in line.split() if word.startswith("@") and len(word) > 1]
+    for ref in refs:
+        path = Path(ref)
+        if not path.is_absolute():
+            path = Path(os.getcwd()) / path
+        if not path.exists() or not path.is_file():
+            continue
+        try:
+            size = path.stat().st_size
+        except Exception:
+            size = 0
+        uri = path.resolve().as_uri()
+        if size <= 20_000:  # embed small text files
+            try:
+                text = path.read_text(encoding="utf-8", errors="replace")
+            except Exception:
+                continue
+            res = TextResourceContents(text=text, uri=uri, mime_type="text/plain")
+            blocks.append(EmbeddedResourceContentBlock(resource=res, type="resource"))
+        else:
+            blocks.append(
+                ResourceContentBlock(
+                    name=path.name,
+                    uri=uri,
+                    size=size,
+                    mime_type="text/plain",
+                    type="resource_link",
+                )
+            )
+    return blocks
