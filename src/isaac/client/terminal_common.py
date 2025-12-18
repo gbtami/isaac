@@ -1,7 +1,4 @@
-"""Shared helpers for ACP terminal handling on both agent and client sides.
-
-See terminal spec: https://agentclientprotocol.com/protocol/terminals
-"""
+"""Client-side terminal helpers (decoupled from agent package)."""
 
 from __future__ import annotations
 

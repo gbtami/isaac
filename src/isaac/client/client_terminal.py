@@ -25,7 +25,7 @@ from acp import (
     WaitForTerminalExitResponse,
 )
 
-from isaac.shared.terminal_common import TerminalState, build_exit_status, read_nonblocking
+from isaac.client.terminal_common import TerminalState, build_exit_status, read_nonblocking
 
 
 class ClientTerminalManager:

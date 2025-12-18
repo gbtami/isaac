@@ -94,6 +94,7 @@ from isaac.agent.brain.handoff_strategy import HandoffPromptStrategy
 from isaac.agent.brain.subagent_strategy import SubagentPromptStrategy
 
 logger = logging.getLogger("acp_server")
+DEFAULT_COMMAND_TIMEOUT_S = 30.0
 
 
 class ACPAgent(Agent):
@@ -126,7 +127,7 @@ class ACPAgent(Agent):
         self._client_capabilities: Any | None = None
         self._client_info: Any | None = None
         self._session_commands_advertised: set[str] = set()
-        self._command_timeout_s = 30.0
+        self._command_timeout_s = DEFAULT_COMMAND_TIMEOUT_S
         self._tool_output_limit = TOOL_OUTPUT_LIMIT
         self._terminal_output_limit = TOOL_OUTPUT_LIMIT
         self._session_store = SessionStore(Path.home() / ".isaac" / "sessions")

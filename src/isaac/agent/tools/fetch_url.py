@@ -12,11 +12,10 @@ from aiocache import SimpleMemoryCache
 
 SAFE_SCHEMES = {"https"}
 
-# TODO:
-# _CACHE = SimpleMemoryCache(maxsize=32)
-# maxsize throws this exception
-# TypeError: BaseCache.__init__() got an unexpected keyword argument 'maxsize'
-
+DEFAULT_FETCH_MAX_BYTES = 20_000
+DEFAULT_FETCH_TIMEOUT = 30.0
+FETCH_CACHE_MAX_SIZE = 32
+# aiocache.SimpleMemoryCache in this version does not accept maxsize; keep default size.
 _CACHE = SimpleMemoryCache()
 
 
@@ -36,7 +35,9 @@ def _blocked_host(host: str | None) -> bool:
     return False
 
 
-async def fetch_url(url: str, max_bytes: int = 20_000, timeout: float | None = 10.0) -> Dict[str, Any]:
+async def fetch_url(
+    url: str, max_bytes: int = DEFAULT_FETCH_MAX_BYTES, timeout: float | None = DEFAULT_FETCH_TIMEOUT
+) -> Dict[str, Any]:
     """Fetch a URL with basic safety guards and size limits."""
 
     parsed = urlparse(url)

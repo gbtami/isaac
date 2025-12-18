@@ -18,6 +18,8 @@ from isaac.client.session_state import SessionUIState
 from isaac.client.status_box import render_status_box
 from isaac.client.slash import handle_slash_command
 
+EMBED_FILE_MAX_BYTES = 20_000
+
 
 async def interactive_loop(conn: ClientSideConnection, session_id: str, state: SessionUIState) -> None:
     """Interactive REPL that drives session/prompt per ACP prompt turn rules."""
@@ -92,7 +94,7 @@ def _build_prompt_blocks(line: str) -> list[Any]:
         except Exception:
             size = 0
         uri = path.resolve().as_uri()
-        if size <= 20_000:  # embed small text files
+        if size <= EMBED_FILE_MAX_BYTES:  # embed small text files
             try:
                 text = path.read_text(encoding="utf-8", errors="replace")
             except Exception:

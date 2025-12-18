@@ -8,6 +8,7 @@ These models serve two purposes:
 from __future__ import annotations
 
 from pydantic import BaseModel, ConfigDict, Field
+from .fetch_url import DEFAULT_FETCH_MAX_BYTES, DEFAULT_FETCH_TIMEOUT
 
 
 class ListFilesArgs(BaseModel):
@@ -150,12 +151,12 @@ class FetchUrlArgs(BaseModel):
         description="HTTP or HTTPS URL to fetch",
     )
     max_bytes: int = Field(
-        20_000,
+        DEFAULT_FETCH_MAX_BYTES,
         description="Maximum bytes to read from the response body",
         ge=1,
     )
     timeout: float | None = Field(
-        10.0,
+        DEFAULT_FETCH_TIMEOUT,
         description="Request timeout in seconds",
         gt=0,
     )

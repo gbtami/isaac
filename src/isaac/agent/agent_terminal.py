@@ -24,7 +24,7 @@ from acp import (
 )
 
 from isaac.agent.fs import resolve_path_for_session
-from isaac.shared.terminal_common import TerminalState, build_exit_status, read_nonblocking
+from isaac.agent.terminal_common import TerminalState, build_exit_status, read_nonblocking
 
 
 async def create_terminal(

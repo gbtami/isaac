@@ -6,6 +6,9 @@ from pydantic_ai import RunContext
 
 import pathspec  # type: ignore
 
+MAX_LIST_ENTRIES = 500
+MAX_LIST_CHARS = 20000
+
 
 def _resolve(base: Optional[str], target: str) -> Path:
     p = Path(target)
@@ -29,8 +32,8 @@ async def list_files(
     Returns:
         dict: A dictionary containing 'content' (string listing) and 'error' (string or None).
     """
-    max_entries = 500
-    max_chars = 20000
+    max_entries = MAX_LIST_ENTRIES
+    max_chars = MAX_LIST_CHARS
     path = _resolve(cwd, directory)
     if not path.exists():
         return {"content": "", "error": f"Directory '{directory}' does not exist."}

@@ -21,6 +21,7 @@ from pydantic_ai.messages import (  # type: ignore
 from pydantic_ai.run import AgentRunResultEvent  # type: ignore
 
 from isaac.agent.tools import DEFAULT_TOOL_TIMEOUT_S, RUN_COMMAND_TIMEOUT_S, run_tool
+from isaac.agent.tools.fetch_url import DEFAULT_FETCH_MAX_BYTES, DEFAULT_FETCH_TIMEOUT
 
 HISTORY_LOG_MAX = 8000
 
@@ -140,12 +141,12 @@ def register_tools(agent: Any) -> None:
             timeout=timeout,
         )
 
-    @agent.tool(name="fetch_url", timeout=DEFAULT_TOOL_TIMEOUT_S)  # type: ignore[misc]
+    @agent.tool(name="fetch_url", timeout=DEFAULT_FETCH_TIMEOUT)  # type: ignore[misc]
     async def fetch_url_tool(
         ctx: RunContext[Any],
         url: str,
-        max_bytes: int = 20_000,
-        timeout: float | None = 10.0,
+        max_bytes: int = DEFAULT_FETCH_MAX_BYTES,
+        timeout: float | None = DEFAULT_FETCH_TIMEOUT,
     ) -> Any:
         logger.info(
             "Pydantic tool invoked: fetch_url args=%s",

@@ -16,7 +16,7 @@ from .file_summary import file_summary
 from .list_files import list_files
 from .read_file import read_file
 from .run_command import run_command
-from .fetch_url import fetch_url
+from .fetch_url import DEFAULT_FETCH_MAX_BYTES, DEFAULT_FETCH_TIMEOUT, fetch_url
 from .args import (
     ApplyPatchArgs,
     CodeSearchArgs,
@@ -238,11 +238,11 @@ def register_readonly_tools(agent: Any) -> None:
             timeout=timeout,
         )
 
-    @agent.tool(name="fetch_url", timeout=DEFAULT_TOOL_TIMEOUT_S)  # type: ignore[misc]
+    @agent.tool(name="fetch_url", timeout=DEFAULT_FETCH_TIMEOUT)  # type: ignore[misc]
     async def fetch_url_tool(
         ctx: RunContext[Any],
         url: str,
-        max_bytes: int = 20_000,
-        timeout: float | None = 10.0,
+        max_bytes: int = DEFAULT_FETCH_MAX_BYTES,
+        timeout: float | None = DEFAULT_FETCH_TIMEOUT,
     ) -> Any:
         return await run_tool("fetch_url", ctx=ctx, url=url, max_bytes=max_bytes, timeout=timeout)
