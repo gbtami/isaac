@@ -7,6 +7,7 @@ from typing import Any
 import pytest
 
 from isaac.agent.runner import stream_with_runner
+from isaac.agent.brain.strategy_runner import StrategyPromptRunner
 
 
 class _CapturingRunner:
@@ -46,3 +47,13 @@ async def test_stream_with_runner_replaces_system_prompt_in_history() -> None:
     assert runner.captured_history is not None
     assert runner.captured_history[0] == {"role": "system", "content": "OLD_SYSTEM_PROMPT"}
     assert any(msg.get("content") == "hi" for msg in runner.captured_history)
+
+
+def test_tool_history_summary_uses_inputs() -> None:
+    summary = StrategyPromptRunner._tool_history_summary(
+        "list_files",
+        raw_output={"content": "ok"},
+        status="completed",
+        raw_input={"directory": "/tmp/demo"},
+    )
+    assert summary and "/tmp/demo" in summary

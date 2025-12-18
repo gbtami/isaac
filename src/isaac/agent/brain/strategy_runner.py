@@ -78,6 +78,8 @@ class StrategyPromptRunner:
         plan_progress: dict[str, Any] | None = None,
         record_history: Callable[[dict[str, str]], None] | None = None,
     ) -> Callable[[Any], Awaitable[bool]]:
+        tool_call_inputs: Dict[str, Dict[str, Any]] = {}
+
         async def _handle_runner_event(event: Any) -> bool:
             if isinstance(event, FunctionToolCallEvent):
                 tool_name = getattr(event.part, "tool_name", None) or ""
@@ -92,6 +94,7 @@ class StrategyPromptRunner:
                     raw_input={"tool": tool_name, **args},
                 )
                 await self.env.send_update(session_notification(session_id, start))
+                tool_call_inputs[event.tool_call_id] = args
                 if tool_name == "run_command":
                     allowed = True
                     mode = self.env.session_modes.get(session_id, "ask")
@@ -131,6 +134,7 @@ class StrategyPromptRunner:
                 tracker = tool_trackers.pop(event.tool_call_id, None) or ToolCallTracker(
                     id_factory=lambda: event.tool_call_id
                 )
+                call_input = tool_call_inputs.pop(event.tool_call_id, {})
                 result_part = event.result
                 tool_name = getattr(result_part, "tool_name", None) or ""
                 if tool_name == "run_command":
@@ -167,7 +171,7 @@ class StrategyPromptRunner:
                 await self.env.send_update(session_notification(session_id, progress))
 
                 if record_history:
-                    summary = self._tool_history_summary(tool_name, raw_output, status)
+                    summary = self._tool_history_summary(tool_name, raw_output, status, raw_input=call_input)
                     if summary:
                         with contextlib.suppress(Exception):
                             record_history({"role": "assistant", "content": summary})
@@ -204,36 +208,38 @@ class StrategyPromptRunner:
         return PromptResponse(stop_reason="end_turn")
 
     @staticmethod
-    def _tool_history_summary(tool_name: str, raw_output: dict[str, Any], status: str) -> str | None:
+    def _tool_history_summary(
+        tool_name: str, raw_output: dict[str, Any], status: str, raw_input: dict[str, Any] | None = None
+    ) -> str | None:
         content = raw_output.get("content")
         summary_prefix = f"{tool_name} ({status})"
         if tool_name == "run_command":
-            cmd = raw_output.get("command") or raw_output.get("cmd")
-            cwd = raw_output.get("cwd")
+            cmd = raw_output.get("command") or raw_output.get("cmd") or (raw_input or {}).get("command")
+            cwd = raw_output.get("cwd") or (raw_input or {}).get("cwd")
             cmd_str = str(cmd).strip() if cmd else ""
             cwd_str = f" (cwd: {cwd})" if cwd else ""
             if cmd_str:
                 return f"Ran command: {cmd_str}{cwd_str} [{status}]"
             return f"Ran command [{status}]"
         if tool_name in {"edit_file", "apply_patch"}:
-            path = raw_output.get("path")
+            path = raw_output.get("path") or (raw_input or {}).get("path")
             path_str = f" {path}" if path else ""
             return f"Updated file{path_str} [{status}]"
         if tool_name == "read_file":
-            path = raw_output.get("path")
+            path = raw_output.get("path") or (raw_input or {}).get("path")
             if path:
                 return f"Read file {path} [{status}]"
         if tool_name == "list_files":
-            root = raw_output.get("directory") or raw_output.get("path")
+            root = raw_output.get("directory") or raw_output.get("path") or (raw_input or {}).get("directory")
             if root:
                 return f"Listed files in {root} [{status}]"
         if tool_name == "file_summary":
-            path = raw_output.get("path")
+            path = raw_output.get("path") or (raw_input or {}).get("path")
             if path:
                 return f"Summarized file {path} [{status}]"
         if tool_name == "code_search":
-            pattern = raw_output.get("pattern")
-            directory = raw_output.get("directory")
+            pattern = raw_output.get("pattern") or (raw_input or {}).get("pattern")
+            directory = raw_output.get("directory") or (raw_input or {}).get("directory")
             if pattern:
                 where = f" in {directory}" if directory else ""
                 return f"Searched for '{pattern}'{where} [{status}]"
