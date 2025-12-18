@@ -15,7 +15,7 @@ from acp.helpers import (
     update_agent_message,
     update_agent_thought,
 )
-from acp.schema import SessionNotification
+from acp.schema import SessionNotification, ToolKind
 from pydantic_ai.messages import FunctionToolCallEvent, FunctionToolResultEvent, RetryPromptPart
 from isaac.agent.brain.strategy_utils import coerce_tool_args, plan_with_status
 from isaac.agent.tools.run_command import (
@@ -90,6 +90,7 @@ class StrategyPromptRunner:
                 start = tracker.start(
                     external_id=event.tool_call_id,
                     title=tool_name,
+                    kind=self._tool_kind(tool_name),
                     status="in_progress",
                     raw_input={"tool": tool_name, **args},
                 )
@@ -254,3 +255,20 @@ class StrategyPromptRunner:
         if content:
             return f"Tool result [{status}]: {content}"
         return None
+
+    @staticmethod
+    def _tool_kind(tool_name: str) -> ToolKind:
+        name = tool_name.lower().strip()
+        if name in {"read_file", "list_files", "file_summary"}:
+            return "read"
+        if name in {"edit_file", "apply_patch"}:
+            return "edit"
+        if name in {"code_search"}:
+            return "search"
+        if name in {"run_command"}:
+            return "execute"
+        if name in {"fetch_url"}:
+            return "fetch"
+        if name in {"todo"}:
+            return "think"
+        return "other"

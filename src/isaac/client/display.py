@@ -20,10 +20,22 @@ def print_mode_update(mode: str) -> None:
     console.print(Text(f"[mode -> {mode}]", style="magenta"))
 
 
-def print_tool(status: str, message: str) -> None:
+TOOL_KIND_ICONS = {
+    "read": "📖",
+    "edit": "✏️",
+    "search": "🔎",
+    "execute": "💻",
+    "fetch": "🌐",
+    "think": "🧠",
+    "other": "🛠️",
+}
+
+
+def print_tool(status: str, message: str, *, kind: str | None = None) -> None:
     normalized = status.lower()
     style = "green" if normalized == "completed" else "yellow" if normalized in {"in_progress", "start"} else "red"
-    console.print(Text(f"| Tool[{status}]: {message}", style=style))
+    icon = TOOL_KIND_ICONS.get((kind or "").lower(), TOOL_KIND_ICONS["other"])
+    console.print(Text(f"{icon} | Tool[{status}]: {message}", style=style))
 
 
 def print_agent_text(text: str) -> None:

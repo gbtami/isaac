@@ -36,7 +36,7 @@ async def interactive_loop(conn: ClientSideConnection, session_id: str, state: S
                 print()
                 state.pending_newline = False
             usage_suffix = f" [{state.usage_summary}]" if state.usage_summary else ""
-            line = await session.prompt_async(f"{state.current_mode}|{state.current_model}{usage_suffix}> ")
+            line = await session.prompt_async(f"🍏 {state.current_mode}|{state.current_model}{usage_suffix}> ")
             if line == CANCEL_TOKEN:
                 state.cancel_requested = True
                 await conn.cancel(session_id=session_id)

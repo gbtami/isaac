@@ -195,12 +195,13 @@ class ACPClient(Client):
                 print()
                 self._state.pending_newline = False
             title = getattr(update, "title", "")
+            kind = getattr(update, "kind", None)
             raw_in = getattr(update, "raw_input", {}) or {}
             cmd = None
             if raw_in.get("tool") == "run_command":
                 cmd = raw_in.get("command")
             suffix = f" cmd=`{cmd}`" if cmd else ""
-            print_tool("start", f"{title}{suffix}")
+            print_tool("start", f"{title}{suffix}", kind=str(kind) if kind else None)
             return
         if isinstance(update, ToolCallProgress):
             if self._state.pending_newline:
@@ -229,10 +230,10 @@ class ACPClient(Client):
                 if truncated:
                     summary_bits.append("truncated")
                 summary = " ".join(summary_bits) if summary_bits else "done"
-                print_tool(update.status, summary)
+                print_tool(update.status, summary, kind=str(getattr(update, "kind", "")) or None)
             else:
                 text = raw_out.get("content") or raw_out.get("error") or ""
-                print_tool(update.status, text)
+                print_tool(update.status, text, kind=str(getattr(update, "kind", "")) or None)
             if getattr(update, "content", None):
                 for item in update.content or []:
                     inner = getattr(item, "content", None)

@@ -5,6 +5,7 @@ from collections.abc import AsyncIterator
 from typing import Any
 
 import pytest
+from pydantic_ai.messages import FunctionToolCallEvent, ToolCallPart  # type: ignore
 
 from isaac.agent.runner import stream_with_runner
 from isaac.agent.brain.strategy_runner import StrategyPromptRunner
@@ -57,3 +58,33 @@ def test_tool_history_summary_uses_inputs() -> None:
         raw_input={"directory": "/tmp/demo"},
     )
     assert summary and "/tmp/demo" in summary
+
+
+@pytest.mark.asyncio
+async def test_tool_kinds_in_updates():
+    captured: list[Any] = []
+
+    async def _send(update, **_: Any):
+        captured.append(update.update)
+
+    class Env:
+        session_modes: dict[str, str] = {}
+        session_last_chunk: dict[str, str | None] = {}
+
+        async def send_update(self, update, **_: Any):
+            await _send(update)
+
+        async def request_run_permission(self, *_args: Any, **_kwargs: Any) -> bool:
+            return True
+
+        def set_usage(self, *_args: Any, **_kwargs: Any) -> None:  # pragma: no cover - not used
+            return None
+
+    env = StrategyPromptRunner(env=Env())
+    handler = env._build_runner_event_handler("s1", {}, {}, None)
+    event = FunctionToolCallEvent(
+        part=ToolCallPart(tool_name="list_files", args={"directory": "/tmp"}, tool_call_id="tc1")
+    )
+    await handler(event)
+    kinds = [getattr(u, "kind", None) for u in captured if u]
+    assert "read" in kinds
