@@ -100,12 +100,12 @@ def _render_text(text: str, style: str | None) -> Text:
     return Text(text)
 
 
-def print_agent_text(text: str) -> bool:
-    return _render_and_print(_render_text(text, "green"), end="")
+def print_agent_text(text: str) -> None:
+    _render_and_print(_render_text(text, None), end="")
 
 
-def print_thought(text: str) -> bool:
-    return _render_and_print(_render_text(text, "cyan dim"), end="")
+def print_thought(text: str) -> None:
+    _render_and_print(_render_text(text, "#aaaaaa"), end="")
 
 
 def print_diff(text: str) -> None:
@@ -114,15 +114,14 @@ def print_diff(text: str) -> None:
 
 
 def print_plan(entries: Iterable[Any]) -> None:
-    """Render plan entries with status/priority."""
+    """Render plan entries with a status dot."""
     table = Table(show_header=False, box=None, border_style="cyan")
     table.add_column("", width=2, style="cyan")
-    table.add_column("Priority", width=9, style="yellow")
     table.add_column("Item", style="white")
-    status_icons = {
-        "completed": ("[✓]", "green"),
-        "in_progress": ("[~]", "yellow"),
-        "pending": ("[ ]", "cyan"),
+    status_styles = {
+        "completed": "green",
+        "in_progress": "yellow blink",
+        "pending": "cyan",
     }
 
     def _format_content(raw: Any) -> str:
@@ -140,10 +139,9 @@ def print_plan(entries: Iterable[Any]) -> None:
 
     for entry in entries:
         status = getattr(entry, "status", "pending") or "pending"
-        icon, color = status_icons.get(status, ("[ ]", "cyan"))
-        priority = getattr(entry, "priority", "medium") or "medium"
+        style = status_styles.get(status, "cyan")
         content = _format_content(getattr(entry, "content", "") or "")
-        table.add_row(Text(icon, style=color), priority, content)
+        table.add_row(Text("•", style=style), content)
     _render_and_print(table)
 
 

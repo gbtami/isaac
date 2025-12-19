@@ -17,6 +17,7 @@ from prompt_toolkit.formatted_text import ANSI  # type: ignore
 from prompt_toolkit.key_binding import KeyBindings  # type: ignore
 from prompt_toolkit.patch_stdout import patch_stdout  # type: ignore
 from prompt_toolkit.shortcuts import print_formatted_text  # type: ignore
+from prompt_toolkit.styles import Style  # type: ignore
 
 from isaac.client.display import create_thinking_status
 from isaac.client.session_state import SessionUIState
@@ -24,6 +25,17 @@ from isaac.client.status_box import build_status_toolbar, build_welcome_banner, 
 from isaac.client.slash import SLASH_HANDLERS, handle_slash_command
 
 EMBED_FILE_MAX_BYTES = 20_000
+PROMPT_STYLE = Style.from_dict(
+    {
+        "": "bg:#3a3a3a #ffffff",
+        "prompt": "bg:#3a3a3a #ffffff",
+        "prompt.symbol": "bg:#3a3a3a ansigreen",
+        "prompt.user": "bg:#3a3a3a #ffffff",
+        "prompt.sep": "bg:#3a3a3a #ffffff",
+        "prompt.cwd": "bg:#3a3a3a #ffffff",
+        "prompt.sig": "bg:#3a3a3a #ffffff",
+    }
+)
 
 
 async def interactive_loop(conn: ClientSideConnection, session_id: str, state: SessionUIState) -> None:
@@ -45,6 +57,7 @@ async def interactive_loop(conn: ClientSideConnection, session_id: str, state: S
     session: PromptSession = PromptSession(
         key_bindings=kb,
         bottom_toolbar=lambda: build_status_toolbar(state),
+        style=PROMPT_STYLE,
     )
     if state.thinking_status is None:
         state.thinking_status = create_thinking_status()
