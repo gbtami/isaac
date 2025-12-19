@@ -59,8 +59,6 @@ class ACPClient(Client):
         self._last_prompt = ""
         self._state = state
         self._terminal_manager = ClientTerminalManager()
-        self._pending_newline = False
-        self._pending_newline = False
         self._logger = logging.getLogger("acp_client")
 
     async def request_permission(
@@ -73,6 +71,8 @@ class ACPClient(Client):
         """Prompt the user for a permission choice (Prompt Turn permission flow)."""
         if self._state.cancel_requested:
             return RequestPermissionResponse(outcome=DeniedOutcome(outcome="cancelled"))
+        if self._state.thinking_status is not None:
+            self._state.thinking_status.stop()
         raw_input = getattr(tool_call, "raw_input", None) or {}
         if raw_input.get("tool") == "run_command" and raw_input.get("command"):
             cwd = raw_input.get("cwd")
@@ -161,19 +161,17 @@ class ACPClient(Client):
         return await self.kill_terminal_command(*args, **kwargs)
 
     async def session_update(self, session_id: str, update: SessionNotification | Any, **_: Any) -> None:
+        if self._state.thinking_status is not None:
+            self._state.thinking_status.stop()
         update_obj = update if not isinstance(update, SessionNotification) else update.update
         update = update_obj or update
         if isinstance(update, CurrentModeUpdate):
             self._state.current_mode = update.current_mode_id
+            self._state.notify_changed()
             print_mode_update(self._state.current_mode)
             return
         if isinstance(update, AvailableCommandsUpdate):
-            try:
-                from isaac.client.slash import SLASH_HANDLERS
-
-                local_slashes = set(SLASH_HANDLERS.keys())
-            except Exception:
-                local_slashes = set()
+            local_slashes = self._state.local_slash_commands
             cmds = {}
             for cmd in update.available_commands or []:
                 name = f"/{cmd.name}"
@@ -191,9 +189,6 @@ class ACPClient(Client):
             self._state.available_agent_commands = cmds
             return
         if isinstance(update, ToolCallStart):
-            if self._state.pending_newline:
-                print()
-                self._state.pending_newline = False
             title = getattr(update, "title", "")
             kind = getattr(update, "kind", None)
             raw_in = getattr(update, "raw_input", {}) or {}
@@ -204,9 +199,6 @@ class ACPClient(Client):
             print_tool("start", f"{title}{suffix}", kind=str(kind) if kind else None)
             return
         if isinstance(update, ToolCallProgress):
-            if self._state.pending_newline:
-                print()
-                self._state.pending_newline = False
             raw_out = getattr(update, "raw_output", {}) or {}
             for block in update.content or []:
                 if isinstance(block, FileEditToolCallContent) or getattr(block, "type", "") == "diff":
@@ -234,16 +226,15 @@ class ACPClient(Client):
             else:
                 text = raw_out.get("content") or raw_out.get("error") or ""
                 print_tool(update.status, text, kind=str(getattr(update, "kind", "")) or None)
-            if getattr(update, "content", None):
-                for item in update.content or []:
-                    inner = getattr(item, "content", None)
-                    if hasattr(inner, "text") and getattr(inner, "text", None):
-                        payload = str(inner.text)
-                        if raw_out.get("tool") == "edit_file" and raw_out.get("diff"):
-                            print_diff(raw_out["diff"])
-                        else:
-                            print_agent_text(payload)
-                        self._state.pending_newline = True
+                if getattr(update, "content", None):
+                    for item in update.content or []:
+                        inner = getattr(item, "content", None)
+                        if hasattr(inner, "text") and getattr(inner, "text", None):
+                            payload = str(inner.text)
+                            if raw_out.get("tool") == "edit_file" and raw_out.get("diff"):
+                                print_diff(raw_out["diff"])
+                            else:
+                                print_agent_text(payload)
             return
         if isinstance(update, AgentPlanUpdate):
             print_plan(update.entries or [])
@@ -253,11 +244,7 @@ class ACPClient(Client):
                 return
             content = getattr(update, "content", None)
             if content is not None and getattr(content, "text", None):
-                if self._state.pending_newline:
-                    print()
-                    self._state.pending_newline = False
                 print_thought(content.text)
-                self._state.pending_newline = True
             return
         if not isinstance(update, AgentMessageChunk):
             return
@@ -269,8 +256,8 @@ class ACPClient(Client):
             display_text = content.text
             if self._state.collect_models:
                 self._state.model_buffer = (self._state.model_buffer or []) + [display_text]
+            self._maybe_update_usage_summary(display_text)
             print_agent_text(display_text)
-            self._state.pending_newline = True
             return
         elif isinstance(content, ImageContentBlock):
             display_text = "<image>"
@@ -282,7 +269,18 @@ class ACPClient(Client):
             display_text = "<resource>"
         else:
             display_text = "<content>"
-        print_agent_text(f"{prefix} {display_text}" if prefix else display_text)
+        rendered = f"{prefix} {display_text}" if prefix else display_text
+        print_agent_text(rendered)
+
+    def _maybe_update_usage_summary(self, text: str) -> None:
+        if text.startswith("Usage:"):
+            self._state.usage_summary = text
+            self._state.notify_changed()
+            return
+        if text.startswith("Usage not available") or text.startswith("Usage data unavailable"):
+            self._state.usage_summary = text
+            self._state.notify_changed()
+            return
 
 
 async def set_mode(
@@ -293,4 +291,5 @@ async def set_mode(
 ) -> None:
     await conn.set_session_mode(mode_id=mode, session_id=session_id)
     state.current_mode = mode
+    state.notify_changed()
     print_mode_update(state.current_mode)

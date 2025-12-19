@@ -11,7 +11,6 @@ from acp import ClientSideConnection
 
 from isaac.client.acp_client import set_mode
 from isaac.client.session_state import SessionUIState
-from isaac.client.status_box import render_status_box
 from isaac.client.thinking import toggle_thinking
 
 logger = logging.getLogger(__name__)
@@ -62,18 +61,6 @@ def _handle_help(
     return True
 
 
-@register_slash_command("/status", description="Show current mode, model, and MCP servers.", hint="/status")
-def _handle_status(
-    _conn: ClientSideConnection,
-    _session_id: str,
-    state: SessionUIState,
-    _permission_reset: Callable[[], None],
-    _argument: str,
-) -> bool:
-    print(render_status_box(state))
-    return True
-
-
 @register_slash_command("/model", description="Set model to the given id.", hint="/model <id>")
 async def _handle_model(
     conn: ClientSideConnection,
@@ -92,12 +79,14 @@ async def _handle_model(
             print(f"[failed to set model: {resp['error']}]")
             return True
         state.current_model = selection
+        state.notify_changed()
         print(f"[model set to {selection}]")
         return True
     except Exception as exc:
         try:
             await conn.set_session_model(model_id=selection, session_id=session_id)
             state.current_model = selection
+            state.notify_changed()
             print(f"[model set to {selection}]")
         except Exception as inner_exc:  # noqa: BLE001
             print(f"[failed to set model: {inner_exc or exc}]")

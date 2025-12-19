@@ -5,19 +5,73 @@ from __future__ import annotations
 from typing import Any, Iterable
 import ast
 import contextlib
+from io import StringIO
+from threading import Lock
 
+from prompt_toolkit.formatted_text import ANSI  # type: ignore
+from prompt_toolkit.shortcuts import print_formatted_text  # type: ignore
 from rich.console import Console
+from rich.status import Status
 from rich.syntax import Syntax
 from rich.table import Table
 from rich.text import Text
 import difflib
 
 # Use a rich console with colors enabled; prompt_toolkit handles stdout patching.
-console = Console(force_terminal=True, color_system="standard", markup=False, highlight=False)
+_status_console = Console(force_terminal=True, color_system="standard", markup=False, highlight=False)
+_render_buffer = StringIO()
+_render_console = Console(
+    file=_render_buffer,
+    force_terminal=True,
+    color_system="standard",
+    markup=False,
+    highlight=False,
+)
+_render_lock = Lock()
+
+
+class ThinkingStatus:
+    def __init__(self, console: Console) -> None:
+        self._console = console
+        self._lock = Lock()
+        self._status: Status | None = None
+
+    def start(self, text: str = "Thinking...") -> None:
+        with self._lock:
+            if self._status is not None:
+                return
+            self._status = self._console.status(Text(text, style="cyan"))
+            self._status.start()
+
+    def stop(self) -> None:
+        with self._lock:
+            if self._status is None:
+                return
+            self._status.stop()
+            self._status = None
+
+
+def create_thinking_status() -> ThinkingStatus:
+    return ThinkingStatus(_status_console)
+
+
+def _render_and_print(*args: Any, **kwargs: Any) -> bool:
+    end = kwargs.get("end")
+    if end is None:
+        kwargs["end"] = "\n"
+    with _render_lock:
+        _render_buffer.seek(0)
+        _render_buffer.truncate(0)
+        _render_console.print(*args, **kwargs)
+        output = _render_buffer.getvalue()
+    if output:
+        print_formatted_text(ANSI(output), end="")
+        return output.endswith("\n")
+    return False
 
 
 def print_mode_update(mode: str) -> None:
-    console.print(Text(f"[mode -> {mode}]", style="magenta"))
+    _render_and_print(Text(f"[mode -> {mode}]", style="magenta"))
 
 
 TOOL_KIND_ICONS = {
@@ -35,20 +89,28 @@ def print_tool(status: str, message: str, *, kind: str | None = None) -> None:
     normalized = status.lower()
     style = "green" if normalized == "completed" else "yellow" if normalized in {"in_progress", "start"} else "red"
     icon = TOOL_KIND_ICONS.get((kind or "").lower(), TOOL_KIND_ICONS["other"])
-    console.print(Text(f"{icon} | Tool[{status}]: {message}", style=style))
+    _render_and_print(Text(f"{icon} | Tool[{status}]: {message}", style=style))
 
 
-def print_agent_text(text: str) -> None:
-    console.print(Text(text, style="green"), end="")
+def _render_text(text: str, style: str | None) -> Text:
+    if "\x1b" in text:
+        return Text.from_ansi(text)
+    if style:
+        return Text(text, style=style)
+    return Text(text)
 
 
-def print_thought(text: str) -> None:
-    console.print(Text(text, style="cyan dim"), end="")
+def print_agent_text(text: str) -> bool:
+    return _render_and_print(_render_text(text, "green"), end="")
+
+
+def print_thought(text: str) -> bool:
+    return _render_and_print(_render_text(text, "cyan dim"), end="")
 
 
 def print_diff(text: str) -> None:
     """Render a unified diff with syntax highlighting."""
-    console.print(Syntax(text, "diff", theme="ansi_dark", line_numbers=False))
+    _render_and_print(Syntax(text, "diff", theme="ansi_dark", line_numbers=False))
 
 
 def print_plan(entries: Iterable[Any]) -> None:
@@ -82,7 +144,7 @@ def print_plan(entries: Iterable[Any]) -> None:
         priority = getattr(entry, "priority", "medium") or "medium"
         content = _format_content(getattr(entry, "content", "") or "")
         table.add_row(Text(icon, style=color), priority, content)
-    console.print(table)
+    _render_and_print(table)
 
 
 def print_file_edit_diff(path: str, old_text: str | None, new_text: str) -> None:

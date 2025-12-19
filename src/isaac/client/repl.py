@@ -3,20 +3,25 @@
 from __future__ import annotations
 
 import asyncio
+import getpass
 import logging
 import os
 import sys
 from pathlib import Path
+from typing import Any
 
 from acp import ClientSideConnection, text_block
 from acp.schema import EmbeddedResourceContentBlock, ResourceContentBlock, TextResourceContents
 from prompt_toolkit import PromptSession  # type: ignore
+from prompt_toolkit.formatted_text import ANSI  # type: ignore
 from prompt_toolkit.key_binding import KeyBindings  # type: ignore
-from typing import Any
+from prompt_toolkit.patch_stdout import patch_stdout  # type: ignore
+from prompt_toolkit.shortcuts import print_formatted_text  # type: ignore
 
+from isaac.client.display import create_thinking_status
 from isaac.client.session_state import SessionUIState
-from isaac.client.status_box import render_status_box
-from isaac.client.slash import handle_slash_command
+from isaac.client.status_box import build_status_toolbar, build_welcome_banner, format_path
+from isaac.client.slash import SLASH_HANDLERS, handle_slash_command
 
 EMBED_FILE_MAX_BYTES = 20_000
 
@@ -25,24 +30,43 @@ async def interactive_loop(conn: ClientSideConnection, session_id: str, state: S
     """Interactive REPL that drives session/prompt per ACP prompt turn rules."""
     kb = KeyBindings()
     CANCEL_TOKEN = "__CANCEL__"
+    EXIT_TOKEN = "__EXIT__"
 
     @kb.add("escape")
     def _(event):  # type: ignore
         if not event.app.is_done:
             event.app.exit(result=CANCEL_TOKEN)
 
-    session: PromptSession = PromptSession(key_bindings=kb)
-    if state.show_status_on_start:
-        print(render_status_box(state))
-        state.show_status_on_start = False
+    @kb.add("c-q")
+    def _(event):  # type: ignore
+        if not event.app.is_done:
+            event.app.exit(result=EXIT_TOKEN)
+
+    session: PromptSession = PromptSession(
+        key_bindings=kb,
+        bottom_toolbar=lambda: build_status_toolbar(state),
+    )
+    if state.thinking_status is None:
+        state.thinking_status = create_thinking_status()
+
+    def _invalidate_toolbar() -> None:
+        try:
+            session.app.invalidate()
+        except Exception:
+            return
+
+    state.refresh_ui = _invalidate_toolbar
+    state.local_slash_commands = set(SLASH_HANDLERS.keys())
+    if state.show_welcome_on_start:
+        print(build_welcome_banner(state), end="")
+        state.show_welcome_on_start = False
 
     while True:
         try:
-            if state.pending_newline:
-                print()
-                state.pending_newline = False
-            usage_suffix = f" [{state.usage_summary}]" if state.usage_summary else ""
-            line = await session.prompt_async(f"🍏 {state.current_mode}|{state.current_model}{usage_suffix}> ")
+            print_formatted_text(ANSI("\n"), end="")
+
+            with patch_stdout():
+                line = await session.prompt_async(_build_prompt(state))
             if line == CANCEL_TOKEN:
                 state.cancel_requested = True
                 await conn.cancel(session_id=session_id)
@@ -50,6 +74,8 @@ async def interactive_loop(conn: ClientSideConnection, session_id: str, state: S
                 loop = asyncio.get_running_loop()
                 loop.call_later(1.0, setattr, state, "cancel_requested", False)
                 continue
+            if line == EXIT_TOKEN:
+                break
         except EOFError:
             break
         except KeyboardInterrupt:
@@ -68,14 +94,28 @@ async def interactive_loop(conn: ClientSideConnection, session_id: str, state: S
         blocks = _build_prompt_blocks(line)
 
         try:
+            if state.thinking_status is not None:
+                state.thinking_status.start()
             await conn.prompt(prompt=blocks, session_id=session_id)
         except Exception as exc:  # noqa: BLE001
             logging.error("Prompt failed: %s", exc)
-        if state.pending_newline:
-            print()
-            state.pending_newline = False
+        finally:
+            if state.thinking_status is not None:
+                state.thinking_status.stop()
 
     # Unknown slash commands fall through to the agent for server-side handling.
+
+
+def _build_prompt(state: SessionUIState) -> list[tuple[str, str]]:
+    user = getpass.getuser()
+    cwd = format_path(state.cwd)
+    return [
+        ("class:prompt.symbol", "🍏 "),
+        ("class:prompt.user", user),
+        ("class:prompt.sep", ":"),
+        ("class:prompt.cwd", cwd),
+        ("class:prompt.sig", " $ "),
+    ]
 
 
 def _build_prompt_blocks(line: str) -> list[Any]:

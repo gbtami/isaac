@@ -73,17 +73,22 @@ async def run_client(program: str, args: Iterable[str], mcp_servers: list[Any]) 
         (srv.get("name") if isinstance(srv, dict) else getattr(srv, "name", "<server>")) or "<server>"
         for srv in mcp_servers
     ]
-    session = await conn.new_session(cwd=os.getcwd(), mcp_servers=mcp_servers)
+    cwd = os.getcwd()
+    session = await conn.new_session(cwd=cwd, mcp_servers=mcp_servers)
+    state.session_id = session.session_id
+    state.cwd = cwd
     try:
         ext_models = await conn.ext_method("model/list", {"session_id": session.session_id})
         if isinstance(ext_models, dict):
             current = ext_models.get("current")
             if isinstance(current, str):
                 state.current_model = current
+                state.notify_changed()
     except Exception:
         state.current_model = state.current_model
     if getattr(session, "modes", None) and getattr(session.modes, "current_mode_id", None):
         state.current_mode = session.modes.current_mode_id
+        state.notify_changed()
 
     try:
         await interactive_loop(conn, session.session_id, state)

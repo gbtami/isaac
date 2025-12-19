@@ -63,11 +63,6 @@ DEFAULT_CONFIG = {
             "model": "gemini-2.5-flash",
             "description": "Google Gemini 2.5 Flash",
         },
-        "google:gemini-2.5-flash-lite": {
-            "provider": "google",
-            "model": "gemini-2.5-flash-lite",
-            "description": "Google Gemini 2.5 Flash lite",
-        },
         "openrouter:openai/gpt-oss-120b": {
             "provider": "openrouter",
             "model": "openai/gpt-oss-120b",
