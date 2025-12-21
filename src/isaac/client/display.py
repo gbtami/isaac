@@ -74,22 +74,10 @@ def print_mode_update(mode: str) -> None:
     _render_and_print(Text(f"[mode -> {mode}]", style="magenta"))
 
 
-TOOL_KIND_ICONS = {
-    "read": "📖",
-    "edit": "✏️",
-    "search": "🔎",
-    "execute": "💻",
-    "fetch": "🌐",
-    "think": "🧠",
-    "other": "🛠️",
-}
-
-
 def print_tool(status: str, message: str, *, kind: str | None = None) -> None:
     normalized = status.lower()
     style = "green" if normalized == "completed" else "yellow" if normalized in {"in_progress", "start"} else "red"
-    icon = TOOL_KIND_ICONS.get((kind or "").lower(), TOOL_KIND_ICONS["other"])
-    _render_and_print(Text(f"{icon} | Tool[{status}]: {message}", style=style))
+    _render_and_print(Text(f"🛠️ | Tool[{status}]: {message}", style=style))
 
 
 def _render_text(text: str, style: str | None) -> Text:
@@ -120,8 +108,8 @@ def print_plan(entries: Iterable[Any]) -> None:
     table.add_column("Item", style="white")
     status_styles = {
         "completed": "green",
-        "in_progress": "yellow blink",
-        "pending": "cyan",
+        "in_progress": "orange1",
+        "pending": "orange1",
     }
 
     def _format_content(raw: Any) -> str:
@@ -139,7 +127,7 @@ def print_plan(entries: Iterable[Any]) -> None:
 
     for entry in entries:
         status = getattr(entry, "status", "pending") or "pending"
-        style = status_styles.get(status, "cyan")
+        style = status_styles.get(status, "orange1")
         content = _format_content(getattr(entry, "content", "") or "")
         table.add_row(Text("•", style=style), content)
     _render_and_print(table)

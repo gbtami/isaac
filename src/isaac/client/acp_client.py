@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
+import json
 import logging
 from acp import (
     Client,
@@ -74,10 +75,6 @@ class ACPClient(Client):
         if self._state.thinking_status is not None:
             self._state.thinking_status.stop()
         raw_input = getattr(tool_call, "raw_input", None) or {}
-        if raw_input.get("tool") == "run_command" and raw_input.get("command"):
-            cwd = raw_input.get("cwd")
-            location = f" (cwd={cwd})" if cwd else ""
-            print(f"[permission] run_command: {raw_input['command']}{location}")
         self._logger.info(
             "permission.request session=%s tool=%s options=%s raw=%s",
             session_id,
@@ -195,8 +192,21 @@ class ACPClient(Client):
             cmd = None
             if raw_in.get("tool") == "run_command":
                 cmd = raw_in.get("command")
-            suffix = f" cmd=`{cmd}`" if cmd else ""
-            print_tool("start", f"{title}{suffix}", kind=str(kind) if kind else None)
+                if isinstance(cmd, dict):
+                    cmd = cmd.get("command") or cmd.get("cmd") or cmd
+                if isinstance(cmd, str):
+                    stripped = cmd.strip()
+                    if stripped.startswith("{") and stripped.endswith("}"):
+                        try:
+                            parsed = json.loads(stripped)
+                        except json.JSONDecodeError:
+                            parsed = None
+                        if isinstance(parsed, dict):
+                            cmd = parsed.get("command") or parsed.get("cmd") or cmd
+            if cmd is not None and not isinstance(cmd, str):
+                cmd = str(cmd)
+            message = f"{title}: {cmd}" if cmd else title
+            print_tool("start", message, kind=str(kind) if kind else None)
             return
         if isinstance(update, ToolCallProgress):
             raw_out = getattr(update, "raw_output", {}) or {}
