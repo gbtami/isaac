@@ -15,7 +15,7 @@ from isaac.agent.brain.prompt import (
     EXECUTOR_INSTRUCTIONS,
     PLANNER_INSTRUCTIONS,
     SUBAGENT_INSTRUCTIONS,
-    TODO_PLANNER_INSTRUCTIONS,
+    PLANNER_TOOL_INSTRUCTIONS,
     SYSTEM_PROMPT,
 )
 from isaac.agent.brain.strategy_plan import PlanSteps
@@ -88,7 +88,7 @@ def create_subagent_for_model(
 
 
 def create_subagent_planner_for_model(model_id: str, system_prompt: str | None = None) -> Any:
-    """Build a delegate planner agent for the subagent todo tool."""
+    """Build a delegate planner agent for the subagent planner tool."""
 
     load_dotenv(ENV_FILE, override=False)
     load_dotenv()
@@ -103,7 +103,7 @@ def create_subagent_planner_for_model(model_id: str, system_prompt: str | None =
     planner = PydanticAgent(
         planner_obj,
         system_prompt=system_prompt or SYSTEM_PROMPT,
-        instructions=TODO_PLANNER_INSTRUCTIONS,
+        instructions=PLANNER_TOOL_INSTRUCTIONS,
         model_settings=planner_settings,
         toolsets=(),
         output_type=PlanSteps,

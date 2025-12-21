@@ -9,7 +9,7 @@ from acp.schema import AllowedOutcome
 from isaac.agent import ACPAgent
 from isaac.agent.brain.prompt import PLANNER_INSTRUCTIONS, SYSTEM_PROMPT
 from isaac.agent.brain.strategy_plan import PlanSteps
-from isaac.agent.runner import register_tools
+from isaac.agent.tools import register_tools
 from isaac.agent.tools import register_readonly_tools
 from pydantic_ai import Agent as PydanticAgent  # type: ignore
 from pydantic_ai.models.test import TestModel  # type: ignore

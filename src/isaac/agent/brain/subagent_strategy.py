@@ -1,4 +1,4 @@
-"""Single-agent prompt strategy with an embedded todo planning tool."""
+"""Single-agent prompt strategy with an embedded planner tool."""
 
 from __future__ import annotations
 
@@ -23,8 +23,9 @@ from isaac.agent.brain.strategy_utils import (
     plan_update_from_steps,
     plan_with_status,
 )
-from isaac.agent.brain.prompt import TODO_PLANNER_INSTRUCTIONS
-from isaac.agent.runner import register_tools as default_register_tools, stream_with_runner
+from isaac.agent.brain.prompt import PLANNER_TOOL_INSTRUCTIONS
+from isaac.agent.runner import stream_with_runner
+from isaac.agent.tools import register_tools as default_register_tools
 from isaac.agent.tools import DEFAULT_TOOL_TIMEOUT_S
 from isaac.agent.usage import normalize_usage
 
@@ -34,7 +35,7 @@ class SubagentSessionState:
     """State for sessions using the subagent planning strategy."""
 
     runner: Any | None = None
-    todo_planner: Any | None = None
+    planner: Any | None = None
     model_id: str | None = None
     history: list[Any] = field(default_factory=list)
     planner_history: list[Any] = field(default_factory=list)
@@ -43,7 +44,7 @@ class SubagentSessionState:
 
 
 class SubagentPromptStrategy(PromptStrategy):
-    """Single-runner strategy that delegates planning to a subagent todo tool."""
+    """Single-runner strategy that delegates planning to a subagent planner tool."""
 
     _MAX_HISTORY_MESSAGES = 30
     _PRESERVE_RECENT_MESSAGES = 8
@@ -79,8 +80,8 @@ class SubagentPromptStrategy(PromptStrategy):
             )
             planner = create_subagent_planner_for_model(model_id, system_prompt=system_prompt)
             state.runner = executor
-            state.todo_planner = planner
-            self._attach_todo_tool(state)
+            state.planner = planner
+            self._attach_planner_tool(state)
             state.model_id = model_id
             state.history = []
             state.planner_history = []
@@ -89,7 +90,7 @@ class SubagentPromptStrategy(PromptStrategy):
         except Exception as exc:
             msg = f"Model load failed: {exc}"
             state.runner = None
-            state.todo_planner = None
+            state.planner = None
             state.model_error = msg
             state.model_error_notified = False
             await self.env.send_update(
@@ -137,9 +138,9 @@ class SubagentPromptStrategy(PromptStrategy):
                 return
             result_part = event.result
             tool_name = getattr(result_part, "tool_name", None) or ""
-            if tool_name != "todo":
+            if tool_name != "planner":
                 return
-            plan_update = self._plan_from_todo_result(result_part)
+            plan_update = self._plan_from_planner_result(result_part)
             if plan_update is None:
                 return
             if plan_progress is not None:
@@ -157,11 +158,11 @@ class SubagentPromptStrategy(PromptStrategy):
         )
 
         async def _on_event(event: Any) -> bool:
-            is_todo_result = (
+            is_planner_result = (
                 isinstance(event, FunctionToolResultEvent)
-                and getattr(getattr(event, "result", None), "tool_name", "") == "todo"
+                and getattr(getattr(event, "result", None), "tool_name", "") == "planner"
             )
-            if is_todo_result and plan_progress is not None:
+            if is_planner_result and plan_progress is not None:
                 saved_plan = plan_progress.get("plan")
                 saved_idx = plan_progress.get("idx", 0)
                 plan_progress["plan"] = None
@@ -220,14 +221,14 @@ class SubagentPromptStrategy(PromptStrategy):
         )
         state.runner = runner
         try:
-            state.todo_planner = create_subagent_planner_for_model(state.model_id or model_registry.current_model_id())
+            state.planner = create_subagent_planner_for_model(state.model_id or model_registry.current_model_id())
         except Exception:
-            state.todo_planner = None
+            state.planner = None
         state.model_id = state.model_id or model_registry.current_model_id()
         state.model_error = None
         state.model_error_notified = False
         state.planner_history = []
-        self._attach_todo_tool(state)
+        self._attach_planner_tool(state)
 
     def session_ids(self) -> list[str]:
         return list(self._sessions.keys())
@@ -250,7 +251,7 @@ class SubagentPromptStrategy(PromptStrategy):
         state.history = list(snapshot.get("history") or [])
         state.planner_history = list(snapshot.get("planner_history") or [])
         state.model_id = snapshot.get("model_id") or state.model_id
-        self._attach_todo_tool(state)
+        self._attach_planner_tool(state)
 
     async def _maybe_compact_history(self, state: SubagentSessionState) -> None:
         """Compact older history into a summary when it grows too large."""
@@ -301,21 +302,21 @@ class SubagentPromptStrategy(PromptStrategy):
             return list(history)
         return list(history[-limit:])
 
-    def _attach_todo_tool(self, state: SubagentSessionState) -> None:
+    def _attach_planner_tool(self, state: SubagentSessionState) -> None:
         runner = state.runner
-        planner = state.todo_planner
+        planner = state.planner
         if runner is None:
             return
         if not hasattr(runner, "tool"):
             return
-        if getattr(runner, "_isaac_todo_registered", False):
+        if getattr(runner, "_isaac_planner_registered", False):
             return
 
-        @runner.tool(name="todo", timeout=DEFAULT_TOOL_TIMEOUT_S)  # type: ignore[misc]
-        async def todo_tool(ctx: RunContext[Any], task: str) -> Any:
+        @runner.tool(name="planner", timeout=DEFAULT_TOOL_TIMEOUT_S)  # type: ignore[misc]
+        async def planner_tool(ctx: RunContext[Any], task: str) -> Any:
             if planner is None:
                 return parse_plan_from_text(task)
-            plan_prompt = f"{TODO_PLANNER_INSTRUCTIONS.strip()}\n\nTask: {task.strip()}"
+            plan_prompt = f"{PLANNER_TOOL_INSTRUCTIONS.strip()}\n\nTask: {task.strip()}"
             base_history = self._trim_history(state.history, self._MAX_HISTORY_MESSAGES)
             structured_plan: PlanSteps | None = None
 
@@ -360,7 +361,7 @@ class SubagentPromptStrategy(PromptStrategy):
                 return parsed or plan_obj
             return plan_obj
 
-        setattr(runner, "_isaac_todo_registered", True)
+        setattr(runner, "_isaac_planner_registered", True)
 
     async def _build_runner(
         self,
@@ -378,8 +379,8 @@ class SubagentPromptStrategy(PromptStrategy):
             )
             state.model_id = model_registry.current_model_id()
             state.runner = executor
-            state.todo_planner = create_subagent_planner_for_model(state.model_id, system_prompt=system_prompt)
-            self._attach_todo_tool(state)
+            state.planner = create_subagent_planner_for_model(state.model_id, system_prompt=system_prompt)
+            self._attach_planner_tool(state)
             state.history = []
             state.planner_history = []
             state.model_error = None
@@ -387,7 +388,7 @@ class SubagentPromptStrategy(PromptStrategy):
         except Exception as exc:
             msg = f"Model load failed: {exc}"
             state.runner = None
-            state.todo_planner = None
+            state.planner = None
             state.model_error = msg
             state.model_error_notified = False
             await self.env.send_update(
@@ -409,7 +410,7 @@ class SubagentPromptStrategy(PromptStrategy):
             state.model_error_notified = True
         return PromptResponse(stop_reason="refusal")
 
-    def _plan_from_todo_result(self, result_part: Any) -> Any | None:
+    def _plan_from_planner_result(self, result_part: Any) -> Any | None:
         content = getattr(result_part, "content", None)
         plan_obj = content
         if isinstance(plan_obj, PlanSteps) and plan_obj.entries:

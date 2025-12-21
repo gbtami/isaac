@@ -280,6 +280,6 @@ class StrategyPromptRunner:
             return "execute"
         if name in {"fetch_url"}:
             return "fetch"
-        if name in {"todo"}:
+        if name in {"planner"}:
             return "think"
         return "other"

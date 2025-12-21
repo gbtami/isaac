@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import inspect
+import logging
 from dataclasses import dataclass
 from typing import Any, Awaitable, Callable, Dict, List, Type
 
@@ -186,31 +187,84 @@ async def run_tool(function_name: str, ctx: Any | None = None, **kwargs: Any) ->
 
 def register_readonly_tools(agent: Any) -> None:
     """Register read-only tool wrappers on the given agent (for planning delegate)."""
+    _register_toolset(agent, tools=_READ_ONLY_TOOL_ORDER, logger=None)
 
-    @agent.tool(name="list_files", timeout=DEFAULT_TOOL_TIMEOUT_S)  # type: ignore[misc]
+
+def register_tools(agent: Any) -> None:
+    """Register the full toolset on the given agent."""
+    _register_toolset(agent, tools=_FULL_TOOL_ORDER, logger=logging.getLogger("acp_server"))
+
+
+_FULL_TOOL_ORDER = tuple(TOOL_HANDLERS.keys())
+_READ_ONLY_TOOL_ORDER = tuple(name for name in _FULL_TOOL_ORDER if name in READ_ONLY_TOOLS)
+
+
+class _ToolRegistrar:
+    def __init__(self, logger: logging.Logger | None) -> None:
+        self._logger = logger
+
+    def _log(self, tool_name: str, args: dict[str, Any]) -> None:
+        if self._logger is None:
+            return
+        self._logger.info("Pydantic tool invoked: %s args=%s", tool_name, args)
+
     async def list_files_tool(
+        self,
         ctx: RunContext[Any],
         directory: str = ".",
         recursive: bool = True,
     ) -> Any:
+        self._log("list_files", {"directory": directory, "recursive": recursive})
         return await run_tool("list_files", ctx=ctx, directory=directory, recursive=recursive)
 
-    @agent.tool(name="read_file", timeout=DEFAULT_TOOL_TIMEOUT_S)  # type: ignore[misc]
     async def read_file_tool(
+        self,
         ctx: RunContext[Any],
         path: str,
         start: int | None = None,
         lines: int | None = None,
     ) -> Any:
+        self._log("read_file", {"path": path, "start": start, "lines": lines})
         return await run_tool("read_file", ctx=ctx, path=path, start=start, lines=lines)
 
-    @agent.tool(name="file_summary", timeout=DEFAULT_TOOL_TIMEOUT_S)  # type: ignore[misc]
+    async def run_command_tool(
+        self,
+        ctx: RunContext[Any],
+        command: str,
+        cwd: str | None = None,
+        timeout: float | None = None,
+    ) -> Any:
+        self._log("run_command", {"command": command, "cwd": cwd, "timeout": timeout})
+        return await run_tool("run_command", ctx=ctx, command=command, cwd=cwd, timeout=timeout)
+
+    async def edit_file_tool(
+        self,
+        ctx: RunContext[Any],
+        path: str,
+        content: str,
+        create: bool = True,
+    ) -> Any:
+        self._log("edit_file", {"path": path, "create": create})
+        return await run_tool("edit_file", ctx=ctx, path=path, content=content, create=create)
+
+    async def apply_patch_tool(
+        self,
+        ctx: RunContext[Any],
+        path: str,
+        patch: str,
+        strip: int | None = None,
+    ) -> Any:
+        self._log("apply_patch", {"path": path, "strip": strip})
+        return await run_tool("apply_patch", ctx=ctx, path=path, patch=patch, strip=strip)
+
     async def file_summary_tool(
+        self,
         ctx: RunContext[Any],
         path: str,
         head_lines: int | None = 20,
         tail_lines: int | None = 20,
     ) -> Any:
+        self._log("file_summary", {"path": path, "head_lines": head_lines, "tail_lines": tail_lines})
         return await run_tool(
             "file_summary",
             ctx=ctx,
@@ -219,8 +273,8 @@ def register_readonly_tools(agent: Any) -> None:
             tail_lines=tail_lines,
         )
 
-    @agent.tool(name="code_search", timeout=DEFAULT_TOOL_TIMEOUT_S)  # type: ignore[misc]
     async def code_search_tool(
+        self,
         ctx: RunContext[Any],
         pattern: str,
         directory: str = ".",
@@ -228,6 +282,16 @@ def register_readonly_tools(agent: Any) -> None:
         case_sensitive: bool = True,
         timeout: float | None = None,
     ) -> Any:
+        self._log(
+            "code_search",
+            {
+                "pattern": pattern,
+                "directory": directory,
+                "glob": glob,
+                "case_sensitive": case_sensitive,
+                "timeout": timeout,
+            },
+        )
         return await run_tool(
             "code_search",
             ctx=ctx,
@@ -238,11 +302,34 @@ def register_readonly_tools(agent: Any) -> None:
             timeout=timeout,
         )
 
-    @agent.tool(name="fetch_url", timeout=DEFAULT_FETCH_TIMEOUT)  # type: ignore[misc]
     async def fetch_url_tool(
+        self,
         ctx: RunContext[Any],
         url: str,
         max_bytes: int = DEFAULT_FETCH_MAX_BYTES,
         timeout: float | None = DEFAULT_FETCH_TIMEOUT,
     ) -> Any:
+        self._log("fetch_url", {"url": url, "max_bytes": max_bytes, "timeout": timeout})
         return await run_tool("fetch_url", ctx=ctx, url=url, max_bytes=max_bytes, timeout=timeout)
+
+
+def _register_toolset(
+    agent: Any,
+    *,
+    tools: tuple[str, ...],
+    logger: logging.Logger | None,
+) -> None:
+    registrar = _ToolRegistrar(logger)
+    tool_map = {
+        "list_files": (registrar.list_files_tool, DEFAULT_TOOL_TIMEOUT_S),
+        "read_file": (registrar.read_file_tool, DEFAULT_TOOL_TIMEOUT_S),
+        "run_command": (registrar.run_command_tool, RUN_COMMAND_TIMEOUT_S),
+        "edit_file": (registrar.edit_file_tool, DEFAULT_TOOL_TIMEOUT_S),
+        "apply_patch": (registrar.apply_patch_tool, DEFAULT_TOOL_TIMEOUT_S),
+        "file_summary": (registrar.file_summary_tool, DEFAULT_TOOL_TIMEOUT_S),
+        "code_search": (registrar.code_search_tool, DEFAULT_TOOL_TIMEOUT_S),
+        "fetch_url": (registrar.fetch_url_tool, DEFAULT_FETCH_TIMEOUT),
+    }
+    for name in tools:
+        func, timeout = tool_map[name]
+        agent.tool(name=name, timeout=timeout)(func)  # type: ignore[misc]

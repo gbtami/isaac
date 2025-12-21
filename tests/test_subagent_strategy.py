@@ -33,11 +33,11 @@ class _FakeRunner:
         self.prompts.append(prompt)
 
         async def _gen():
-            part = ToolCallPart(tool_name="todo", args={"task": prompt}, tool_call_id="tc1")
+            part = ToolCallPart(tool_name="planner", args={"task": prompt}, tool_call_id="tc1")
             call_event = FunctionToolCallEvent(part=part)
             yield call_event
             result_event = FunctionToolResultEvent(
-                result=SimpleNamespace(tool_name="todo", content=self._plan, tool_call_id=part.tool_call_id)
+                result=SimpleNamespace(tool_name="planner", content=self._plan, tool_call_id=part.tool_call_id)
             )
             yield result_event
             yield "done"
@@ -54,7 +54,7 @@ class _PlannerStub:
 
 
 @pytest.mark.asyncio
-async def test_subagent_todo_plan_updates(tmp_path, monkeypatch):
+async def test_subagent_planner_plan_updates(tmp_path, monkeypatch):
     conn = AsyncMock()
     conn.session_update = AsyncMock()
     conn.request_permission = AsyncMock(return_value=True)
@@ -97,7 +97,7 @@ async def test_subagent_todo_plan_updates(tmp_path, monkeypatch):
         updates.append(getattr(note, "update", note))
     plan_updates = [u for u in updates if isinstance(u, AgentPlanUpdate)]
 
-    assert plan_updates, "Expected plan updates from todo tool"
+    assert plan_updates, "Expected plan updates from planner tool"
     assert plan_updates[0].entries[0].status == "in_progress"
     assert plan_updates[0].entries[0].field_meta.get("id")
     assert plan_updates[-1].entries[0].status == "completed"
@@ -183,7 +183,7 @@ async def test_subagent_plan_refreshes_each_prompt(tmp_path, monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_subagent_todo_resets_planner_history(monkeypatch):
+async def test_subagent_planner_resets_planner_history(monkeypatch):
     # Force small history window for test
     monkeypatch.setattr(SubagentPromptStrategy, "_MAX_HISTORY_MESSAGES", 2)
 
@@ -218,17 +218,17 @@ async def test_subagent_todo_resets_planner_history(monkeypatch):
     class RunnerStub:
         def tool(self, *_: object, **__: object):
             def _decorator(func):
-                self.todo_fn = func
+                self.planner_fn = func
                 return func
 
             return _decorator
 
     strategy = SubagentPromptStrategy(env, register_tools=lambda *_: None)
-    state = SubagentSessionState(runner=RunnerStub(), todo_planner=object(), model_id="m")
-    strategy._attach_todo_tool(state)
+    state = SubagentSessionState(runner=RunnerStub(), planner=object(), model_id="m")
+    strategy._attach_planner_tool(state)
 
-    await state.runner.todo_fn(object(), task="do it")  # type: ignore[attr-defined]
-    await state.runner.todo_fn(object(), task="do it")  # second call should not carry prior planner content
+    await state.runner.planner_fn(object(), task="do it")  # type: ignore[attr-defined]
+    await state.runner.planner_fn(object(), task="do it")  # second call should not carry prior planner content
 
     assert captured_histories[0] == []
     assert captured_histories[1] == []  # planner history is reset between calls

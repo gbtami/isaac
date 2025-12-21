@@ -88,7 +88,7 @@ from isaac.agent.session_store import SessionStore
 from isaac.agent.slash import available_slash_commands, handle_slash_command
 from isaac.agent.tool_io import await_with_cancel, truncate_text, truncate_tool_output
 from isaac.agent.tools import run_tool
-from isaac.agent.runner import register_tools
+from isaac.agent.tools import register_tools
 from isaac.agent.usage import format_usage_summary, normalize_usage
 from isaac.agent.brain.strategy_base import ModelBuildError, PromptStrategy
 from isaac.agent.brain.handoff_strategy import HandoffPromptStrategy

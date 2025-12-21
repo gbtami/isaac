@@ -14,7 +14,7 @@ from isaac.agent.brain.strategy_runner import StrategyEnv
 from isaac.agent.brain.handoff_runner import HandoffRunner
 from isaac.agent.brain.strategy_base import ModelBuildError, PromptStrategy
 from isaac.agent.brain.strategy_utils import create_agents_for_model
-from isaac.agent.runner import register_tools as default_register_tools
+from isaac.agent.tools import register_tools as default_register_tools
 
 
 @dataclass

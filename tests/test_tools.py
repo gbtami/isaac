@@ -12,7 +12,7 @@ from isaac.agent.brain.prompt import PLANNER_INSTRUCTIONS, SYSTEM_PROMPT
 from isaac.agent.brain.strategy_plan import PlanSteps
 from isaac.agent.tools import register_readonly_tools
 from isaac.agent.tools.fetch_url import fetch_url
-from isaac.agent.runner import register_tools
+from isaac.agent.tools import register_tools
 from isaac.agent.tools.apply_patch import apply_patch
 from isaac.agent.tools.code_search import code_search
 from isaac.agent.tools.edit_file import edit_file
