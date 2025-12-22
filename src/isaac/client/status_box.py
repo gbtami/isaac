@@ -88,7 +88,7 @@ def build_welcome_banner(state: SessionUIState) -> str:
     model_line = _format_model_intro(state.current_model)
 
     lines = [
-        "🍏 Welcome to Isaac CLI!",
+        "🍏 Welcome to Isaac CLI! 🍏",
         "Send /help for help information.",
         "",
         f"Directory: {cwd}",
