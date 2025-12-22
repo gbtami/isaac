@@ -70,7 +70,7 @@ class ACPClient(Client):
         **_: Any,
     ) -> RequestPermissionResponse:
         """Prompt the user for a permission choice (Prompt Turn permission flow)."""
-        if self._state.cancel_requested:
+        if self._state.cancel_requested or self._state.cancel_event.is_set():
             return RequestPermissionResponse(outcome=DeniedOutcome(outcome="cancelled"))
         if self._state.thinking_status is not None:
             self._state.thinking_status.stop()
@@ -86,7 +86,11 @@ class ACPClient(Client):
             for idx, opt in enumerate(options, start=1):
                 label = getattr(opt, "label", opt.option_id)
                 print(f"{idx}) {label}")
+            if self._state.cancel_requested or self._state.cancel_event.is_set():
+                return RequestPermissionResponse(outcome=DeniedOutcome(outcome="cancelled"))
             choice = input("Permission choice (number): ").strip()
+            if self._state.cancel_requested or self._state.cancel_event.is_set():
+                return RequestPermissionResponse(outcome=DeniedOutcome(outcome="cancelled"))
             if choice.isdigit() and 1 <= int(choice) <= len(options):
                 selection = options[int(choice) - 1].option_id
             else:

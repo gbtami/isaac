@@ -179,14 +179,14 @@ async def test_model_tool_call_requests_permission(monkeypatch: pytest.MonkeyPat
         output_type=PlanSteps,
     )
     register_readonly_tools(planning_runner)
-    from isaac.agent.brain import handoff_strategy
+    from isaac.agent.brain import subagent_strategy
 
-    def _build(_model_id: str, _register: object, toolsets=None, **kwargs: object) -> tuple[object, object]:
-        _ = toolsets
-        return ai_runner, planning_runner
-
-    monkeypatch.setattr(handoff_strategy, "create_agents_for_model", _build)
-    monkeypatch.setenv("ISAAC_PROMPT_STRATEGY", "handoff")
+    monkeypatch.setattr(subagent_strategy, "create_subagent_for_model", lambda *_args, **_kwargs: ai_runner)
+    monkeypatch.setattr(
+        subagent_strategy,
+        "create_subagent_planner_for_model",
+        lambda *_args, **_kwargs: planning_runner,
+    )
     agent = ACPAgent(conn)
     session = await agent.new_session(cwd=str(tmp_path), mcp_servers=[])
 
@@ -231,14 +231,14 @@ async def test_model_run_command_denied_blocks_execution(monkeypatch: pytest.Mon
         output_type=PlanSteps,
     )
     register_readonly_tools(planning_runner)
-    from isaac.agent.brain import handoff_strategy
+    from isaac.agent.brain import subagent_strategy
 
-    def _build(_model_id: str, _register: object, toolsets=None, **kwargs: object) -> tuple[object, object]:
-        _ = toolsets
-        return ai_runner, planning_runner
-
-    monkeypatch.setattr(handoff_strategy, "create_agents_for_model", _build)
-    monkeypatch.setenv("ISAAC_PROMPT_STRATEGY", "handoff")
+    monkeypatch.setattr(subagent_strategy, "create_subagent_for_model", lambda *_args, **_kwargs: ai_runner)
+    monkeypatch.setattr(
+        subagent_strategy,
+        "create_subagent_planner_for_model",
+        lambda *_args, **_kwargs: planning_runner,
+    )
     agent = ACPAgent(conn)
     session = await agent.new_session(cwd=str(tmp_path), mcp_servers=[])
     agent._session_modes[session.session_id] = "ask"

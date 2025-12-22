@@ -42,14 +42,8 @@ def make_function_agent(conn: AgentSideConnection) -> ACPAgent:
         else:
             conn.request_permission = _default_perm  # type: ignore[attr-defined]
     # Patch model builders to use deterministic test agents.
-    from isaac.agent.brain import strategy_utils, handoff_strategy, subagent_strategy
+    from isaac.agent.brain import subagent_strategy
 
-    def _build_model(_model_id: str, _register: object, toolsets=None, **kwargs: object) -> tuple[object, object]:
-        _ = toolsets
-        return runner, planning_runner
-
-    strategy_utils.create_agents_for_model = _build_model  # type: ignore[assignment]
-    handoff_strategy.create_agents_for_model = _build_model  # type: ignore[assignment]
     subagent_strategy.create_subagent_for_model = lambda *_args, **_kwargs: runner  # type: ignore[assignment]
     subagent_strategy.create_subagent_planner_for_model = lambda *_args, **_kwargs: planning_runner  # type: ignore[assignment]
 
@@ -63,15 +57,8 @@ def make_error_agent(conn: AgentSideConnection) -> ACPAgent:
         async def run_stream_events(self, prompt: str):  # pragma: no cover - simple stub
             raise RuntimeError("rate limited")
 
-    from isaac.agent.brain import strategy_utils, handoff_strategy, subagent_strategy
+    from isaac.agent.brain import subagent_strategy
 
-    def _build_error(_model_id: str, _register: object, toolsets=None, **kwargs: object) -> tuple[object, object]:
-        _ = toolsets
-        err = ErrorRunner()
-        return err, err
-
-    strategy_utils.create_agents_for_model = _build_error  # type: ignore[assignment]
-    handoff_strategy.create_agents_for_model = _build_error  # type: ignore[assignment]
     subagent_strategy.create_subagent_for_model = lambda *_args, **_kwargs: ErrorRunner()  # type: ignore[assignment]
     subagent_strategy.create_subagent_planner_for_model = lambda *_args, **_kwargs: ErrorRunner()  # type: ignore[assignment]
 

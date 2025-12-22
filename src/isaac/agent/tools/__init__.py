@@ -4,8 +4,7 @@ from __future__ import annotations
 
 import inspect
 import logging
-from dataclasses import dataclass
-from typing import Any, Awaitable, Callable, Dict, List, Type
+from typing import Any, Awaitable, Callable, Dict, Type
 
 from pydantic import ValidationError
 from pydantic_ai import RunContext
@@ -28,20 +27,6 @@ from .args import (
     RunCommandArgs,
     FetchUrlArgs,
 )
-
-
-@dataclass
-class ToolParameter:
-    type: str
-    properties: dict[str, Any]
-    required: list[str]
-
-
-@dataclass
-class Tool:
-    function: str
-    description: str
-    parameters: ToolParameter
 
 
 ToolHandler = Callable[..., Awaitable[dict]]
@@ -69,17 +54,6 @@ TOOL_ARG_MODELS: Dict[str, Type[Any]] = {
     "fetch_url": FetchUrlArgs,
 }
 
-TOOL_DESCRIPTIONS: Dict[str, str] = {
-    "list_files": "List files and directories (defaults to current directory; set directory if you need a different root).",
-    "read_file": "Read a file with optional line range",
-    "run_command": "Execute a shell command and return its output (include the full command string).",
-    "edit_file": "Replace the contents of a file (requires a path and content; path must not be a directory).",
-    "apply_patch": "Apply a unified diff patch to a file",
-    "file_summary": "Summarize a file (head/tail and line count)",
-    "code_search": "Search for a pattern in files using ripgrep",
-    "fetch_url": "Fetch a URL (https only) with size/time limits; useful for docs and API refs.",
-}
-
 DEFAULT_TOOL_TIMEOUT_S = 10.0
 RUN_COMMAND_TIMEOUT_S = 60.0
 
@@ -96,28 +70,6 @@ TOOL_REQUIRED_ARGS: Dict[str, list[str]] = {
     name: list(model.model_json_schema().get("required", []))  # type: ignore[attr-defined]
     for name, model in TOOL_ARG_MODELS.items()
 }
-
-
-def get_tools() -> List[Any]:
-    """Return ACP tool descriptions from pydantic models."""
-    base_tools: list[Any] = []
-    for name in TOOL_HANDLERS.keys():
-        model = TOOL_ARG_MODELS.get(name)
-        if model is None:
-            continue
-        schema = model.model_json_schema()  # type: ignore[attr-defined]
-        base_tools.append(
-            Tool(
-                function=name,
-                description=TOOL_DESCRIPTIONS.get(name, ""),
-                parameters=ToolParameter(
-                    type="object",
-                    properties=schema.get("properties", {}),
-                    required=schema.get("required", []),
-                ),
-            )
-        )
-    return base_tools
 
 
 async def run_tool(function_name: str, ctx: Any | None = None, **kwargs: Any) -> dict:
