@@ -69,14 +69,6 @@ async def run_client(program: str, args: Iterable[str], mcp_servers: list[Any]) 
             with contextlib.suppress(ProcessLookupError):
                 await proc.wait()
         return 1
-    agent_caps = getattr(init_resp, "agent_capabilities", None)
-    prompt_caps = getattr(agent_caps, "prompt_capabilities", None)
-    state.agent_prompt_embedded_context = bool(getattr(prompt_caps, "embedded_context", False))
-    meta = getattr(agent_caps, "field_meta", {}) or {}
-    ext_methods = meta.get("extMethods", []) if isinstance(meta, dict) else []
-    if isinstance(ext_methods, list):
-        state.agent_ext_methods = {str(name) for name in ext_methods}
-
     state.mcp_servers = [
         (srv.get("name") if isinstance(srv, dict) else getattr(srv, "name", "<server>")) or "<server>"
         for srv in mcp_servers
@@ -85,16 +77,15 @@ async def run_client(program: str, args: Iterable[str], mcp_servers: list[Any]) 
     session = await conn.new_session(cwd=cwd, mcp_servers=mcp_servers)
     state.session_id = session.session_id
     state.cwd = cwd
-    if "model/list" in state.agent_ext_methods:
-        try:
-            ext_models = await conn.ext_method("model/list", {"session_id": session.session_id})
-            if isinstance(ext_models, dict):
-                current = ext_models.get("current")
-                if isinstance(current, str):
-                    state.current_model = current
-                    state.notify_changed()
-        except Exception:
-            state.current_model = state.current_model
+    try:
+        ext_models = await conn.ext_method("model/list", {"session_id": session.session_id})
+        if isinstance(ext_models, dict):
+            current = ext_models.get("current")
+            if isinstance(current, str):
+                state.current_model = current
+                state.notify_changed()
+    except Exception:
+        state.current_model = state.current_model
     if getattr(session, "modes", None) and getattr(session.modes, "current_mode_id", None):
         state.current_mode = session.modes.current_mode_id
         state.notify_changed()

@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-import asyncio
 from typing import TYPE_CHECKING, Callable
 
 if TYPE_CHECKING:
@@ -20,12 +19,9 @@ class SessionUIState:
     show_welcome_on_start: bool = True
     show_thinking: bool = True
     cancel_requested: bool = False
-    cancel_event: asyncio.Event = field(default_factory=asyncio.Event)
     usage_summary: str | None = None
     available_agent_commands: dict[str, str] = field(default_factory=dict)
     local_slash_commands: set[str] = field(default_factory=set)
-    agent_prompt_embedded_context: bool = False
-    agent_ext_methods: set[str] = field(default_factory=set)
     session_id: str | None = None
     cwd: str | None = None
     refresh_ui: Callable[[], None] | None = None

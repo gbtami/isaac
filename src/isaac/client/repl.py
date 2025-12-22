@@ -82,16 +82,10 @@ async def interactive_loop(conn: ClientSideConnection, session_id: str, state: S
                 line = await session.prompt_async(_build_prompt(state))
             if line == CANCEL_TOKEN:
                 state.cancel_requested = True
-                state.cancel_event.set()
                 await conn.cancel(session_id=session_id)
                 print("[cancelled]")
                 loop = asyncio.get_running_loop()
-
-                def _clear_cancel() -> None:
-                    state.cancel_requested = False
-                    state.cancel_event.clear()
-
-                loop.call_later(1.0, _clear_cancel)
+                loop.call_later(1.0, setattr, state, "cancel_requested", False)
                 continue
             if line == EXIT_TOKEN:
                 break
@@ -110,7 +104,7 @@ async def interactive_loop(conn: ClientSideConnection, session_id: str, state: S
             if handled:
                 continue
 
-        blocks = _build_prompt_blocks(line, state)
+        blocks = _build_prompt_blocks(line)
 
         try:
             if state.thinking_status is not None:
@@ -137,7 +131,7 @@ def _build_prompt(state: SessionUIState) -> list[tuple[str, str]]:
     ]
 
 
-def _build_prompt_blocks(line: str, state: SessionUIState) -> list[Any]:
+def _build_prompt_blocks(line: str) -> list[Any]:
     """Build ACP content blocks from user input, embedding @file references."""
 
     blocks: list[Any] = [text_block(line)]
@@ -153,7 +147,7 @@ def _build_prompt_blocks(line: str, state: SessionUIState) -> list[Any]:
         except Exception:
             size = 0
         uri = path.resolve().as_uri()
-        if size <= EMBED_FILE_MAX_BYTES and state.agent_prompt_embedded_context:
+        if size <= EMBED_FILE_MAX_BYTES:  # embed small text files
             try:
                 text = path.read_text(encoding="utf-8", errors="replace")
             except Exception:
