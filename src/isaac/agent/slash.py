@@ -66,8 +66,7 @@ def _list_models(agent: Any, session_id: str) -> SessionNotification:
         lines.append("Available models:")
         for model_id, meta in models.items():
             desc = meta.get("description") or ""
-            prefix = "*" if model_id == current else "-"
-            line = f"{prefix} {model_id}"
+            line = f"- {model_id}"
             if desc:
                 line = f"{line} - {desc}"
             lines.append(line)
