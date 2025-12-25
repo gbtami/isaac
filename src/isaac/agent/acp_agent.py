@@ -9,7 +9,6 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import logging
-import os
 import uuid
 from pathlib import Path
 from typing import Any, Dict
@@ -91,7 +90,6 @@ from isaac.agent.tools import run_tool
 from isaac.agent.tools import register_tools
 from isaac.agent.usage import format_usage_summary, normalize_usage
 from isaac.agent.brain.strategy_base import ModelBuildError, PromptStrategy
-from isaac.agent.brain.handoff_strategy import HandoffPromptStrategy
 from isaac.agent.brain.subagent_strategy import SubagentPromptStrategy
 
 logger = logging.getLogger("acp_server")
@@ -141,9 +139,8 @@ class ACPAgent(Agent):
         self._conn = conn
 
     def _build_prompt_strategy(self) -> PromptStrategy:
-        """Construct the default planning/execution strategy."""
+        """Construct the default prompt strategy."""
 
-        strategy_name = (os.getenv("ISAAC_PROMPT_STRATEGY") or "subagent").strip().lower()
         env = StrategyEnv(
             session_modes=self._session_modes,
             session_last_chunk=self._session_last_chunk,
@@ -156,12 +153,7 @@ class ACPAgent(Agent):
             ),
             set_usage=lambda session_id, usage: self._session_usage.__setitem__(session_id, usage),
         )
-        if strategy_name == "subagent":
-            return SubagentPromptStrategy(
-                env=env,
-                register_tools=register_tools,
-            )
-        return HandoffPromptStrategy(
+        return SubagentPromptStrategy(
             env=env,
             register_tools=register_tools,
         )

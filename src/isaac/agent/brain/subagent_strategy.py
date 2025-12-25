@@ -57,7 +57,7 @@ class SubagentPromptStrategy(PromptStrategy):
     ) -> None:
         self.env = env
         self._register_tools = register_tools or default_register_tools
-        self._handoff_helper = StrategyPromptRunner(env)
+        self._prompt_runner = StrategyPromptRunner(env)
         self._sessions: Dict[str, SubagentSessionState] = {}
 
     async def init_session(self, session_id: str, toolsets: list[Any], system_prompt: str | None = None) -> None:
@@ -120,8 +120,8 @@ class SubagentPromptStrategy(PromptStrategy):
         state.planner_history = []
         history = self._trim_history(state.history, self._MAX_HISTORY_MESSAGES)
         plan_progress: dict[str, Any] | None = {"plan": None, "idx": 0}
-        _push_chunk = self._handoff_helper._make_chunk_sender(session_id)  # type: ignore[attr-defined]
-        _push_thought = self._handoff_helper._make_thought_sender(session_id)  # type: ignore[attr-defined]
+        _push_chunk = self._prompt_runner._make_chunk_sender(session_id)  # type: ignore[attr-defined]
+        _push_thought = self._prompt_runner._make_thought_sender(session_id)  # type: ignore[attr-defined]
 
         tool_trackers: Dict[str, Any] = {}
         run_command_ctx_tokens: Dict[str, Any] = {}
@@ -149,7 +149,7 @@ class SubagentPromptStrategy(PromptStrategy):
             initial = plan_with_status(plan_update, active_index=0)
             await self.env.send_update(session_notification(session_id, initial))
 
-        base_handler = self._handoff_helper._build_runner_event_handler(  # type: ignore[attr-defined]
+        base_handler = self._prompt_runner._build_runner_event_handler(  # type: ignore[attr-defined]
             session_id,
             tool_trackers,
             run_command_ctx_tokens,
@@ -195,7 +195,7 @@ class SubagentPromptStrategy(PromptStrategy):
             log_context="subagent",
         )
         if response_text is None:
-            return self._handoff_helper._prompt_cancel()  # type: ignore[attr-defined]
+            return self._prompt_runner._prompt_cancel()  # type: ignore[attr-defined]
         if response_text.startswith("Provider error:"):
             msg = response_text.removeprefix("Provider error:").strip()
             await self.env.send_update(
@@ -204,12 +204,12 @@ class SubagentPromptStrategy(PromptStrategy):
                     update_agent_message(text_block(f"Model/provider error: {msg}")),
                 )
             )
-            return self._handoff_helper._prompt_end()  # type: ignore[attr-defined]
+            return self._prompt_runner._prompt_end()  # type: ignore[attr-defined]
         if plan_progress and plan_progress.get("plan"):
             completed = plan_with_status(plan_progress["plan"], status_all="completed")
             await self.env.send_update(session_notification(session_id, completed))
         self.env.set_usage(session_id, normalize_usage(usage))
-        return self._handoff_helper._prompt_end()  # type: ignore[attr-defined]
+        return self._prompt_runner._prompt_end()  # type: ignore[attr-defined]
 
     def model_id(self, session_id: str) -> str | None:
         return self._sessions.get(session_id, SubagentSessionState()).model_id

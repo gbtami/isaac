@@ -14,7 +14,7 @@ from isaac.agent.agent import ACPAgent
 from isaac.agent.slash import handle_slash_command
 
 
-def _raise_model_error(*_: object, **__: object) -> tuple[object, object]:
+def _raise_model_error(*_: object, **__: object) -> object:
     raise RuntimeError("boom")
 
 
@@ -45,9 +45,8 @@ async def test_model_build_failure_surfaces_error(monkeypatch, tmp_path: Path):
     monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "xdg"))
     monkeypatch.setenv("HOME", str(tmp_path))
     monkeypatch.setattr("pathlib.Path.home", lambda: tmp_path)
-    monkeypatch.setenv("ISAAC_PROMPT_STRATEGY", "handoff")
-    monkeypatch.setattr("isaac.agent.brain.strategy_utils.create_agents_for_model", _raise_model_error)
-    monkeypatch.setattr("isaac.agent.brain.handoff_strategy.create_agents_for_model", _raise_model_error)
+    monkeypatch.setattr("isaac.agent.brain.subagent_strategy.create_subagent_for_model", _raise_model_error)
+    monkeypatch.setattr("isaac.agent.brain.subagent_strategy.create_subagent_planner_for_model", _raise_model_error)
 
     conn = AsyncMock(spec=AgentSideConnection)
     conn.session_update = AsyncMock()
