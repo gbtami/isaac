@@ -52,7 +52,7 @@ async def test_tool_list_files_sends_progress(tmp_path: Path):
         )
     )
     register_tools(runner)
-    agent._prompt_strategy.set_session_runner(session.session_id, runner)  # type: ignore[attr-defined]
+    agent._prompt_handler.set_session_runner(session.session_id, runner)  # type: ignore[attr-defined]
 
     response = await agent.prompt(prompt=[text_block("list files")], session_id=session.session_id)
 
@@ -94,7 +94,7 @@ async def test_tool_read_file_returns_content(tmp_path: Path):
         )
     )
     register_tools(runner)
-    agent._prompt_strategy.set_session_runner(session.session_id, runner)  # type: ignore[attr-defined]
+    agent._prompt_handler.set_session_runner(session.session_id, runner)  # type: ignore[attr-defined]
 
     response = await agent.prompt(prompt=[text_block("read file")], session_id=session.session_id)
 
@@ -127,7 +127,7 @@ async def test_tool_run_command_executes(tmp_path: Path):
         )
     )
     register_tools(runner)
-    agent._prompt_strategy.set_session_runner(session.session_id, runner)  # type: ignore[attr-defined]
+    agent._prompt_handler.set_session_runner(session.session_id, runner)  # type: ignore[attr-defined]
 
     response = await agent.prompt(prompt=[text_block("run command")], session_id=session.session_id)
 
@@ -228,7 +228,7 @@ async def test_tool_code_search(tmp_path: Path):
         )
     )
     register_tools(runner)
-    agent._prompt_strategy.set_session_runner(session.session_id, runner)  # type: ignore[attr-defined]
+    agent._prompt_handler.set_session_runner(session.session_id, runner)  # type: ignore[attr-defined]
 
     response = await agent.prompt(prompt=[text_block("search hello")], session_id=session.session_id)
 

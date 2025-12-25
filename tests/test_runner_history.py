@@ -8,7 +8,7 @@ import pytest
 from pydantic_ai.messages import FunctionToolCallEvent, ToolCallPart  # type: ignore
 
 from isaac.agent.runner import stream_with_runner
-from isaac.agent.brain.strategy_runner import StrategyPromptRunner
+from isaac.agent.brain.prompt_runner import PromptRunner
 
 
 class _CapturingRunner:
@@ -51,7 +51,7 @@ async def test_stream_with_runner_replaces_system_prompt_in_history() -> None:
 
 
 def test_tool_history_summary_uses_inputs() -> None:
-    summary = StrategyPromptRunner._tool_history_summary(
+    summary = PromptRunner._tool_history_summary(
         "list_files",
         raw_output={"content": "ok"},
         status="completed",
@@ -80,7 +80,7 @@ async def test_tool_kinds_in_updates():
         def set_usage(self, *_args: Any, **_kwargs: Any) -> None:  # pragma: no cover - not used
             return None
 
-    env = StrategyPromptRunner(env=Env())
+    env = PromptRunner(env=Env())
     handler = env._build_runner_event_handler("s1", {}, {}, None)
     event = FunctionToolCallEvent(
         part=ToolCallPart(tool_name="list_files", args={"directory": "/tmp"}, tool_call_id="tc1")

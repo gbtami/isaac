@@ -9,7 +9,7 @@ from acp.schema import AllowedOutcome
 from unittest.mock import AsyncMock
 
 from isaac.agent.brain.prompt import PLANNER_INSTRUCTIONS, SYSTEM_PROMPT
-from isaac.agent.brain.strategy_plan import PlanSteps
+from isaac.agent.brain.plan_schema import PlanSteps
 from isaac.agent.tools import register_readonly_tools
 from isaac.agent.tools.fetch_url import fetch_url
 from isaac.agent.tools import register_tools
@@ -179,15 +179,15 @@ async def test_model_tool_call_requests_permission(monkeypatch: pytest.MonkeyPat
         output_type=PlanSteps,
     )
     register_readonly_tools(planning_runner)
-    from isaac.agent.brain import subagent_strategy
+    from isaac.agent.brain import subagent_prompt
 
     def _build(_model_id: str, _register: object, toolsets=None, **kwargs: object) -> object:
         _ = toolsets
         return ai_runner
 
-    monkeypatch.setattr(subagent_strategy, "create_subagent_for_model", _build)
+    monkeypatch.setattr(subagent_prompt, "create_subagent_for_model", _build)
     monkeypatch.setattr(
-        subagent_strategy,
+        subagent_prompt,
         "create_subagent_planner_for_model",
         lambda *_args, **_kwargs: planning_runner,
     )
@@ -235,15 +235,15 @@ async def test_model_run_command_denied_blocks_execution(monkeypatch: pytest.Mon
         output_type=PlanSteps,
     )
     register_readonly_tools(planning_runner)
-    from isaac.agent.brain import subagent_strategy
+    from isaac.agent.brain import subagent_prompt
 
     def _build(_model_id: str, _register: object, toolsets=None, **kwargs: object) -> object:
         _ = toolsets
         return ai_runner
 
-    monkeypatch.setattr(subagent_strategy, "create_subagent_for_model", _build)
+    monkeypatch.setattr(subagent_prompt, "create_subagent_for_model", _build)
     monkeypatch.setattr(
-        subagent_strategy,
+        subagent_prompt,
         "create_subagent_planner_for_model",
         lambda *_args, **_kwargs: planning_runner,
     )

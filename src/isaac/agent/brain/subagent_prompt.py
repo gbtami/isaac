@@ -1,4 +1,4 @@
-"""Single-agent prompt strategy with an embedded planner tool."""
+"""Single-agent prompt handler with an embedded planner tool."""
 
 from __future__ import annotations
 
@@ -13,11 +13,11 @@ from pydantic_ai.messages import FunctionToolResultEvent  # type: ignore
 from pydantic_ai.run import AgentRunResultEvent  # type: ignore
 
 from isaac.agent import models as model_registry
-from isaac.agent.brain.strategy_runner import StrategyEnv, StrategyPromptRunner
+from isaac.agent.brain.prompt_runner import PromptEnv, PromptRunner
 from isaac.agent.brain.planner import parse_plan_from_text
-from isaac.agent.brain.strategy_base import ModelBuildError, PromptStrategy
-from isaac.agent.brain.strategy_plan import PlanSteps
-from isaac.agent.brain.strategy_utils import (
+from isaac.agent.brain.model_errors import ModelBuildError
+from isaac.agent.brain.plan_schema import PlanSteps
+from isaac.agent.brain.prompt_support import (
     create_subagent_for_model,
     create_subagent_planner_for_model,
     plan_update_from_steps,
@@ -32,7 +32,7 @@ from isaac.agent.usage import normalize_usage
 
 @dataclass
 class SubagentSessionState:
-    """State for sessions using the subagent planning strategy."""
+    """State for sessions using the subagent planner."""
 
     runner: Any | None = None
     planner: Any | None = None
@@ -43,21 +43,21 @@ class SubagentSessionState:
     model_error_notified: bool = False
 
 
-class SubagentPromptStrategy(PromptStrategy):
-    """Single-runner strategy that delegates planning to a subagent planner tool."""
+class SubagentPromptHandler:
+    """Single-runner prompt handler that delegates planning to a subagent planner tool."""
 
     _MAX_HISTORY_MESSAGES = 30
     _PRESERVE_RECENT_MESSAGES = 8
 
     def __init__(
         self,
-        env: StrategyEnv,
+        env: PromptEnv,
         *,
         register_tools: Any | None = None,
     ) -> None:
         self.env = env
         self._register_tools = register_tools or default_register_tools
-        self._prompt_runner = StrategyPromptRunner(env)
+        self._prompt_runner = PromptRunner(env)
         self._sessions: Dict[str, SubagentSessionState] = {}
 
     async def init_session(self, session_id: str, toolsets: list[Any], system_prompt: str | None = None) -> None:

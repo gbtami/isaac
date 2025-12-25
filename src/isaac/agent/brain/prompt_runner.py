@@ -17,7 +17,7 @@ from acp.helpers import (
 )
 from acp.schema import SessionNotification, ToolKind
 from pydantic_ai.messages import FunctionToolCallEvent, FunctionToolResultEvent, RetryPromptPart
-from isaac.agent.brain.strategy_utils import coerce_tool_args, plan_with_status
+from isaac.agent.brain.prompt_support import coerce_tool_args, plan_with_status
 from isaac.agent.tools.run_command import (
     RunCommandContext,
     pop_run_command_permission,
@@ -28,8 +28,8 @@ from isaac.agent.tools.run_command import (
 
 
 @dataclass
-class StrategyEnv:
-    """Environment/state shared by the strategy runner."""
+class PromptEnv:
+    """Environment/state shared by the prompt runner."""
 
     session_modes: Dict[str, str]
     session_last_chunk: Dict[str, str | None]
@@ -38,10 +38,10 @@ class StrategyEnv:
     set_usage: Callable[[str, Any | None], None]
 
 
-class StrategyPromptRunner:
-    """Utilities shared by prompt strategies."""
+class PromptRunner:
+    """Utilities shared by prompt handling."""
 
-    def __init__(self, env: StrategyEnv) -> None:
+    def __init__(self, env: PromptEnv) -> None:
         self.env = env
 
     def _make_chunk_sender(self, session_id: str) -> Callable[[str], Awaitable[None]]:

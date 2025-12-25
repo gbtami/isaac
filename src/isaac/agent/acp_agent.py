@@ -75,7 +75,7 @@ from isaac.agent.agent_terminal import (
     terminal_output,
     wait_for_terminal_exit,
 )
-from isaac.agent.brain.strategy_runner import StrategyEnv
+from isaac.agent.brain.prompt_runner import PromptEnv
 from isaac.agent.constants import TOOL_OUTPUT_LIMIT
 from isaac.agent.fs import read_text_file, write_text_file
 from isaac.agent.mcp_support import build_mcp_toolsets
@@ -89,8 +89,8 @@ from isaac.agent.tool_io import await_with_cancel, truncate_text, truncate_tool_
 from isaac.agent.tools import run_tool
 from isaac.agent.tools import register_tools
 from isaac.agent.usage import format_usage_summary, normalize_usage
-from isaac.agent.brain.strategy_base import ModelBuildError, PromptStrategy
-from isaac.agent.brain.subagent_strategy import SubagentPromptStrategy
+from isaac.agent.brain.model_errors import ModelBuildError
+from isaac.agent.brain.subagent_prompt import SubagentPromptHandler
 
 logger = logging.getLogger("acp_server")
 DEFAULT_COMMAND_TIMEOUT_S = 30.0
@@ -106,7 +106,6 @@ class ACPAgent(Agent):
         agent_name: str = "isaac",
         agent_title: str = "Isaac ACP Agent",
         agent_version: str = "0.1.0",
-        prompt_strategy: PromptStrategy | None = None,
     ) -> None:
         self._conn: AgentSideConnection | None = conn
         self._sessions: set[str] = set()
@@ -131,17 +130,16 @@ class ACPAgent(Agent):
         self._terminal_output_limit = TOOL_OUTPUT_LIMIT
         self._session_store = SessionStore(Path.home() / ".isaac" / "sessions")
         self._session_last_chunk: Dict[str, str | None] = {}
-        self._prompt_strategy = prompt_strategy or self._build_prompt_strategy()
+        self._prompt_handler = self._build_prompt_handler()
         self._session_system_prompts: Dict[str, str | None] = {}
 
     def on_connect(self, conn: AgentSideConnection) -> None:  # type: ignore[override]
         """Capture connection when wiring via run_agent/connect_to_agent."""
         self._conn = conn
 
-    def _build_prompt_strategy(self) -> PromptStrategy:
-        """Construct the default prompt strategy."""
-
-        env = StrategyEnv(
+    def _build_prompt_handler(self) -> SubagentPromptHandler:
+        """Construct the prompt handler."""
+        env = PromptEnv(
             session_modes=self._session_modes,
             session_last_chunk=self._session_last_chunk,
             send_update=self._send_update,
@@ -153,7 +151,7 @@ class ACPAgent(Agent):
             ),
             set_usage=lambda session_id, usage: self._session_usage.__setitem__(session_id, usage),
         )
-        return SubagentPromptStrategy(
+        return SubagentPromptHandler(
             env=env,
             register_tools=register_tools,
         )
@@ -245,11 +243,11 @@ class ACPAgent(Agent):
         self._cancel_events[session_id] = asyncio.Event()
         toolsets = build_mcp_toolsets(mcp_servers)
         self._session_toolsets[session_id] = toolsets
-        await self._prompt_strategy.init_session(session_id, toolsets, system_prompt=session_system_prompt)
+        await self._prompt_handler.init_session(session_id, toolsets, system_prompt=session_system_prompt)
         self._session_history[session_id] = []
         self._session_allowed_commands[session_id] = set()
         self._session_mcp_servers[session_id] = mcp_servers
-        model_id = self._prompt_strategy.model_id(session_id) or self._current_model_id()
+        model_id = self._prompt_handler.model_id(session_id) or self._current_model_id()
         self._session_model_ids[session_id] = model_id
         self._persist_session_meta(
             session_id,
@@ -280,13 +278,13 @@ class ACPAgent(Agent):
         mcp_servers = mcp_servers or stored_meta.get("mcpServers", [])
         toolsets = build_mcp_toolsets(mcp_servers)
         self._session_toolsets[session_id] = toolsets
-        await self._prompt_strategy.init_session(session_id, toolsets, system_prompt=session_system_prompt)
+        await self._prompt_handler.init_session(session_id, toolsets, system_prompt=session_system_prompt)
         self._session_history.setdefault(session_id, [])
         self._session_allowed_commands.setdefault(session_id, set())
         self._session_mcp_servers[session_id] = mcp_servers
         mode = stored_meta.get("mode") or self._session_modes.get(session_id, "ask")
         self._session_modes[session_id] = mode
-        model_id = self._prompt_strategy.model_id(session_id) or self._current_model_id()
+        model_id = self._prompt_handler.model_id(session_id) or self._current_model_id()
         self._session_model_ids[session_id] = model_id
         history = self._load_session_history(session_id)
         self._session_history[session_id].extend(history)
@@ -340,7 +338,7 @@ class ACPAgent(Agent):
         logger.info("Received set session model request %s -> %s", session_id, model_id)
         previous_model_id = self._session_model_ids.get(session_id, model_registry.current_model_id())
         try:
-            await self._prompt_strategy.set_session_model(
+            await self._prompt_handler.set_session_model(
                 session_id,
                 model_id,
                 toolsets=self._session_toolsets.get(session_id, []),
@@ -391,7 +389,7 @@ class ACPAgent(Agent):
         if cancel_event.is_set():
             return PromptResponse(stop_reason="cancelled")
 
-        return await self._prompt_strategy.handle_prompt(
+        return await self._prompt_handler.handle_prompt(
             session_id,
             prompt_text,
             cancel_event,
@@ -741,28 +739,28 @@ class ACPAgent(Agent):
             self._record_update(SessionNotification(session_id=session_id, update=chunk))
 
     async def checkpoint_session(self, session_id: str) -> SessionNotification:
-        """Persist strategy state for later restore."""
+        """Persist prompt state for later restore."""
 
         snapshot: dict[str, Any] = {}
-        strategy_snapshot = getattr(self._prompt_strategy, "snapshot", None)
-        if callable(strategy_snapshot):
-            snapshot = strategy_snapshot(session_id)
-        self._session_store.persist_strategy_state(session_id, snapshot)
+        handler_snapshot = getattr(self._prompt_handler, "snapshot", None)
+        if callable(handler_snapshot):
+            snapshot = handler_snapshot(session_id)
+        self._session_store.persist_prompt_state(session_id, snapshot)
         return session_notification(
             session_id,
             update_agent_message(text_block("Checkpoint saved.")),
         )
 
     async def restore_session_state(self, session_id: str) -> SessionNotification:
-        """Restore strategy state from persisted snapshot."""
+        """Restore prompt state from persisted snapshot."""
 
-        snapshot = self._session_store.load_strategy_state(session_id)
+        snapshot = self._session_store.load_prompt_state(session_id)
         if not snapshot:
             return session_notification(
                 session_id,
                 update_agent_message(text_block("No checkpoint available.")),
             )
-        restorer = getattr(self._prompt_strategy, "restore_snapshot", None)
+        restorer = getattr(self._prompt_handler, "restore_snapshot", None)
         if callable(restorer):
             await restorer(session_id, snapshot)
         return session_notification(

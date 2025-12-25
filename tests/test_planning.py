@@ -6,7 +6,7 @@ import pytest
 from pydantic_ai.messages import FunctionToolCallEvent, ToolCallPart  # type: ignore
 
 from isaac.agent.brain.planner import parse_plan_from_text
-from isaac.agent.brain.strategy_runner import StrategyEnv, StrategyPromptRunner
+from isaac.agent.brain.prompt_runner import PromptEnv, PromptRunner
 
 
 def test_plan_parser_handles_steps_list_line():
@@ -20,14 +20,14 @@ def test_plan_parser_handles_steps_list_line():
 async def test_run_command_permission_includes_string_args():
     send_update = AsyncMock()
     request_perm = AsyncMock(return_value=True)
-    env = StrategyEnv(
+    env = PromptEnv(
         session_modes={"s": "ask"},
         session_last_chunk={},
         send_update=send_update,
         request_run_permission=request_perm,
         set_usage=lambda *_: None,
     )
-    runner = StrategyPromptRunner(env)
+    runner = PromptRunner(env)
     handler = runner._build_runner_event_handler(
         "s",
         tool_trackers={},

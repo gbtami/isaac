@@ -108,16 +108,16 @@ class SessionStore:
         except Exception:
             return {}
 
-    # Strategy-specific persistence -------------------------------------------------
-    def persist_strategy_state(self, session_id: str, data: dict[str, Any]) -> None:
-        path = self.session_dir(session_id) / "strategy.json"
+    # Prompt-state persistence -------------------------------------------------------
+    def persist_prompt_state(self, session_id: str, data: dict[str, Any]) -> None:
+        path = self.session_dir(session_id) / "prompt.json"
         try:
             path.write_text(json.dumps(data), encoding="utf-8")
         except Exception:
             return
 
-    def load_strategy_state(self, session_id: str) -> dict[str, Any]:
-        path = self.session_dir(session_id) / "strategy.json"
+    def load_prompt_state(self, session_id: str) -> dict[str, Any]:
+        path = self.session_dir(session_id) / "prompt.json"
         if not path.exists():
             return {}
         try:

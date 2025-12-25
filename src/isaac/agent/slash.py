@@ -147,7 +147,7 @@ def _handle_usage(agent: Any, session_id: str, _command: str, _argument: str) ->
 
 @register_slash_command(
     "/checkpoint",
-    description="Save the current session state (strategy/history).",
+    description="Save the current session state (prompt/history).",
     hint="/checkpoint",
 )
 async def _handle_checkpoint(agent: Any, session_id: str, _command: str, _argument: str) -> SessionNotification:

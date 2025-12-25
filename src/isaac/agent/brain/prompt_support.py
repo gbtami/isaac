@@ -1,4 +1,4 @@
-"""Shared utilities for prompt strategies."""
+"""Shared utilities for prompt handling."""
 
 from __future__ import annotations
 
@@ -12,7 +12,7 @@ from acp.helpers import update_plan
 from acp.schema import PlanEntry
 
 from isaac.agent.brain.prompt import SUBAGENT_INSTRUCTIONS, PLANNER_TOOL_INSTRUCTIONS, SYSTEM_PROMPT
-from isaac.agent.brain.strategy_plan import PlanSteps
+from isaac.agent.brain.plan_schema import PlanSteps
 from isaac.agent.brain.planner import parse_plan_from_text
 from isaac.agent.tools import register_readonly_tools
 from isaac.agent.models import ENV_FILE, load_models_config, _build_provider_model

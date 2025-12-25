@@ -1,4 +1,4 @@
-"""Plan schemas used by prompt strategies."""
+"""Plan schemas used by prompt handling."""
 
 from __future__ import annotations
 
