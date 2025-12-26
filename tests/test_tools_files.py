@@ -292,7 +292,7 @@ async def test_tool_output_is_truncated_before_sending(monkeypatch: pytest.Monke
     async def fake_run_tool(tool_name: str, **kwargs: Any) -> dict[str, Any]:
         return {"content": long_content, "error": None}
 
-    monkeypatch.setattr("isaac.agent.acp_agent.run_tool", fake_run_tool)
+    monkeypatch.setattr("isaac.agent.tool_execution.run_tool", fake_run_tool)
 
     await agent._execute_tool(
         session_id=session.session_id,

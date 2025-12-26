@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from types import SimpleNamespace
+import importlib
 from unittest.mock import AsyncMock
 
 import pytest
@@ -13,8 +14,8 @@ from typing import Any
 from isaac.agent import ACPAgent
 from isaac.agent.brain.prompt_runner import PromptEnv
 from isaac.agent.brain.plan_schema import PlanStep, PlanSteps
-from isaac.agent.brain.subagent_prompt import SubagentPromptHandler
-from isaac.agent.brain.subagent_prompt import SubagentSessionState
+from isaac.agent.brain.prompt_handler import PromptHandler
+from isaac.agent.brain.prompt_handler import SessionState
 from pydantic_ai.run import AgentRunResult, AgentRunResultEvent  # type: ignore
 
 
@@ -48,11 +49,6 @@ class _FakeRunner:
         self._plan = plan
 
 
-class _PlannerStub:
-    async def run(self, prompt: str):  # pragma: no cover - simple stub
-        return prompt
-
-
 @pytest.mark.asyncio
 async def test_subagent_planner_plan_updates(tmp_path, monkeypatch):
     conn = AsyncMock()
@@ -62,17 +58,13 @@ async def test_subagent_planner_plan_updates(tmp_path, monkeypatch):
     plan = PlanSteps(entries=[PlanStep(content="alpha", priority="high"), PlanStep(content="beta")])
     runner = _FakeRunner(plan)
 
-    from isaac.agent.brain import subagent_prompt
+    from isaac.agent.brain import prompt_handler
 
     def _build(_model_id: str, _register: object, toolsets=None, **kwargs: object):
         _ = toolsets
         return runner
 
-    def _build_planner(_model_id: str, **kwargs: object):
-        return _PlannerStub()
-
-    monkeypatch.setattr(subagent_prompt, "create_subagent_for_model", _build)
-    monkeypatch.setattr(subagent_prompt, "create_subagent_planner_for_model", _build_planner)
+    monkeypatch.setattr(prompt_handler, "create_subagent_for_model", _build)
     agent = ACPAgent(conn)
 
     session = await agent.new_session(cwd=str(tmp_path), mcp_servers=[])
@@ -106,34 +98,13 @@ async def test_subagent_plan_refreshes_each_prompt(tmp_path, monkeypatch):
     plan2 = PlanSteps(entries=[PlanStep(content="first"), PlanStep(content="second")])
     runner = _FakeRunner(plan1)
 
-    class _PlannerRunner:
-        def __init__(self, plan: PlanSteps):
-            self.plan = plan
-
-        async def run_stream_events(self, prompt: str, message_history=None):
-            _ = prompt, message_history
-
-            async def _gen():
-                yield AgentRunResultEvent(result=AgentRunResult(self.plan))
-
-            return _gen()
-
-        def set_plan(self, plan: PlanSteps) -> None:
-            self.plan = plan
-
-    planner = _PlannerRunner(plan1)
-
-    from isaac.agent.brain import subagent_prompt
+    from isaac.agent.brain import prompt_handler
 
     def _build(_model_id: str, _register: object, toolsets=None, **kwargs: object):
         _ = toolsets
         return runner
 
-    def _build_planner(_model_id: str, **kwargs: object):
-        return planner
-
-    monkeypatch.setattr(subagent_prompt, "create_subagent_for_model", _build)
-    monkeypatch.setattr(subagent_prompt, "create_subagent_planner_for_model", _build_planner)
+    monkeypatch.setattr(prompt_handler, "create_subagent_for_model", _build)
     agent = ACPAgent(conn)
 
     session = await agent.new_session(cwd=str(tmp_path), mcp_servers=[])
@@ -150,7 +121,6 @@ async def test_subagent_plan_refreshes_each_prompt(tmp_path, monkeypatch):
     conn.session_update.reset_mock()
 
     runner.set_plan(plan2)
-    planner.set_plan(plan2)
     await agent.prompt(prompt=[text_block("second")], session_id=session.session_id)
     updates_second: list[Any] = []
     for call in conn.session_update.await_args_list:  # type: ignore[attr-defined]
@@ -167,61 +137,48 @@ async def test_subagent_plan_refreshes_each_prompt(tmp_path, monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_subagent_planner_resets_planner_history(monkeypatch):
-    # Force small history window for test
-    monkeypatch.setattr(SubagentPromptHandler, "_MAX_HISTORY_MESSAGES", 2)
-
-    captured_histories: list[list[Any]] = []
+@pytest.mark.parametrize("tool_name", ["planner", "review", "coding"])
+async def test_delegate_tool_isolation_default(monkeypatch, tool_name: str):
+    captured: dict[str, Any] = {}
 
     async def fake_stream_with_runner(
         _runner: Any,
-        _prompt: str,
+        prompt: str,
         *_: object,
         history: list[Any] | None = None,
-        on_event=None,
-        store_messages=None,
         **__: object,
     ):
-        captured_histories.append(list(history or []))
-        if store_messages:
-            store_messages(["m1"])
-        if on_event:
-            await on_event(AgentRunResultEvent(result=AgentRunResult(PlanSteps(entries=[PlanStep(content="x")]))))
-        return PlanSteps(entries=[PlanStep(content="x")]), None
-
-    monkeypatch.setattr("isaac.agent.brain.subagent_prompt.stream_with_runner", fake_stream_with_runner)
-
-    env = PromptEnv(
-        session_modes={},
-        session_last_chunk={},
-        send_update=AsyncMock(),
-        request_run_permission=AsyncMock(return_value=True),
-        set_usage=lambda *_: None,
-    )
+        captured["prompt"] = prompt
+        captured["history"] = history
+        return "ok", None
 
     class RunnerStub:
-        def tool(self, *_: object, **__: object):
-            def _decorator(func):
-                self.planner_fn = func
-                return func
+        def run_stream_events(self, *_: Any, **__: Any):
+            async def _gen():
+                yield "ok"
 
-            return _decorator
+            return _gen()
 
-    handler = SubagentPromptHandler(env, register_tools=lambda *_: None)
-    state = SubagentSessionState(runner=RunnerStub(), planner=object(), model_id="m")
-    handler._attach_planner_tool(state)
+    monkeypatch.setattr("isaac.agent.subagents.delegate_tools.stream_with_runner", fake_stream_with_runner)
+    monkeypatch.setattr(
+        "isaac.agent.subagents.delegate_tools._build_delegate_agent",
+        lambda *_args, **_kwargs: RunnerStub(),
+    )
 
-    await state.runner.planner_fn(object(), task="do it")  # type: ignore[attr-defined]
-    await state.runner.planner_fn(object(), task="do it")  # second call should not carry prior planner content
+    module = importlib.import_module(f"isaac.agent.subagents.{tool_name}")
+    tool = getattr(module, tool_name)
+    result = await tool(None, task="check isolation")
 
-    assert captured_histories[0] == []
-    assert captured_histories[1] == []  # planner history is reset between calls
+    assert result["error"] is None
+    assert result["content"] == "ok"
+    assert captured["history"] is None
+    assert captured["prompt"] == "check isolation"
 
 
 @pytest.mark.asyncio
 async def test_subagent_history_compaction(monkeypatch):
-    monkeypatch.setattr(SubagentPromptHandler, "_MAX_HISTORY_MESSAGES", 3)
-    monkeypatch.setattr(SubagentPromptHandler, "_PRESERVE_RECENT_MESSAGES", 1)
+    monkeypatch.setattr(PromptHandler, "_MAX_HISTORY_MESSAGES", 3)
+    monkeypatch.setattr(PromptHandler, "_PRESERVE_RECENT_MESSAGES", 1)
 
     compaction_calls: list[list[Any]] = []
 
@@ -235,7 +192,7 @@ async def test_subagent_history_compaction(monkeypatch):
         compaction_calls.append(list(history or []))
         return "summary here", None
 
-    monkeypatch.setattr("isaac.agent.brain.subagent_prompt.stream_with_runner", fake_stream_with_runner)
+    monkeypatch.setattr("isaac.agent.brain.prompt_handler.stream_with_runner", fake_stream_with_runner)
 
     env = PromptEnv(
         session_modes={},
@@ -244,8 +201,8 @@ async def test_subagent_history_compaction(monkeypatch):
         request_run_permission=AsyncMock(return_value=True),
         set_usage=lambda *_: None,
     )
-    handler = SubagentPromptHandler(env, register_tools=lambda *_: None)
-    state = SubagentSessionState(
+    handler = PromptHandler(env, register_tools=lambda *_: None)
+    state = SessionState(
         runner=object(),
         model_id="m",
         history=[
@@ -298,15 +255,13 @@ async def test_subagent_records_tool_history(tmp_path, monkeypatch):
 
     runner = CommandRunner()
 
-    from isaac.agent.brain import subagent_prompt
+    from isaac.agent.brain import prompt_handler
 
     def _build(_model_id: str, _register: object, toolsets=None, **kwargs: object):
         _ = toolsets
         return runner
 
-    monkeypatch.setattr(subagent_prompt, "create_subagent_for_model", _build)
-    monkeypatch.setattr(subagent_prompt, "create_subagent_planner_for_model", lambda *_args, **_kwargs: object())
-
+    monkeypatch.setattr(prompt_handler, "create_subagent_for_model", _build)
     agent = ACPAgent(conn)
 
     session = await agent.new_session(cwd=str(tmp_path), mcp_servers=[])

@@ -1,4 +1,4 @@
-"""Single-agent prompt handler with an embedded planner tool."""
+"""Single-agent prompt handler with delegate planning support."""
 
 from __future__ import annotations
 
@@ -8,43 +8,33 @@ from typing import Any, Dict
 
 from acp.helpers import session_notification, text_block, update_agent_message
 from acp.schema import PromptResponse
-from pydantic_ai import RunContext
 from pydantic_ai.messages import FunctionToolResultEvent  # type: ignore
-from pydantic_ai.run import AgentRunResultEvent  # type: ignore
 
 from isaac.agent import models as model_registry
 from isaac.agent.brain.prompt_runner import PromptEnv, PromptRunner
-from isaac.agent.brain.planner import parse_plan_from_text
+from isaac.agent.brain.plan_parser import parse_plan_from_text
 from isaac.agent.brain.model_errors import ModelBuildError
 from isaac.agent.brain.plan_schema import PlanSteps
-from isaac.agent.brain.prompt_support import (
-    create_subagent_for_model,
-    create_subagent_planner_for_model,
-    plan_update_from_steps,
-    plan_with_status,
-)
-from isaac.agent.brain.prompt import PLANNER_TOOL_INSTRUCTIONS
+from isaac.agent.brain.agent_factory import create_subagent_for_model
+from isaac.agent.brain.plan_updates import plan_update_from_steps, plan_with_status
 from isaac.agent.runner import stream_with_runner
 from isaac.agent.tools import register_tools as default_register_tools
-from isaac.agent.tools import DEFAULT_TOOL_TIMEOUT_S
 from isaac.agent.usage import normalize_usage
 
 
 @dataclass
-class SubagentSessionState:
-    """State for sessions using the subagent planner."""
+class SessionState:
+    """State for sessions using the prompt handler."""
 
     runner: Any | None = None
-    planner: Any | None = None
     model_id: str | None = None
     history: list[Any] = field(default_factory=list)
-    planner_history: list[Any] = field(default_factory=list)
     model_error: str | None = None
     model_error_notified: bool = False
 
 
-class SubagentPromptHandler:
-    """Single-runner prompt handler that delegates planning to a subagent planner tool."""
+class PromptHandler:
+    """Single-runner prompt handler that can use delegate planning tools."""
 
     _MAX_HISTORY_MESSAGES = 30
     _PRESERVE_RECENT_MESSAGES = 8
@@ -58,12 +48,12 @@ class SubagentPromptHandler:
         self.env = env
         self._register_tools = register_tools or default_register_tools
         self._prompt_runner = PromptRunner(env)
-        self._sessions: Dict[str, SubagentSessionState] = {}
+        self._sessions: Dict[str, SessionState] = {}
 
     async def init_session(self, session_id: str, toolsets: list[Any], system_prompt: str | None = None) -> None:
         state = self._sessions.setdefault(
             session_id,
-            SubagentSessionState(model_id=model_registry.current_model_id()),
+            SessionState(model_id=model_registry.current_model_id()),
         )
         await self._build_runner(session_id, state, toolsets, system_prompt=system_prompt)
 
@@ -72,25 +62,20 @@ class SubagentPromptHandler:
     ) -> None:
         state = self._sessions.setdefault(
             session_id,
-            SubagentSessionState(model_id=model_registry.current_model_id()),
+            SessionState(model_id=model_registry.current_model_id()),
         )
         try:
             executor = create_subagent_for_model(
                 model_id, self._register_tools, toolsets=toolsets, system_prompt=system_prompt
             )
-            planner = create_subagent_planner_for_model(model_id, system_prompt=system_prompt)
             state.runner = executor
-            state.planner = planner
-            self._attach_planner_tool(state)
             state.model_id = model_id
             state.history = []
-            state.planner_history = []
             state.model_error = None
             state.model_error_notified = False
         except Exception as exc:
             msg = f"Model load failed: {exc}"
             state.runner = None
-            state.planner = None
             state.model_error = msg
             state.model_error_notified = False
             await self.env.send_update(
@@ -109,15 +94,13 @@ class SubagentPromptHandler:
     ) -> PromptResponse:
         state = self._sessions.setdefault(
             session_id,
-            SubagentSessionState(model_id=model_registry.current_model_id()),
+            SessionState(model_id=model_registry.current_model_id()),
         )
         if state.runner is None:
             await self._build_runner(session_id, state, toolsets=None)
         if state.model_error or state.runner is None:
             return await self._respond_model_error(session_id, state)
 
-        # Reset planner_history per prompt to avoid leaking prior plan content into new plans.
-        state.planner_history = []
         history = self._trim_history(state.history, self._MAX_HISTORY_MESSAGES)
         plan_progress: dict[str, Any] | None = {"plan": None, "idx": 0}
         _push_chunk = self._prompt_runner._make_chunk_sender(session_id)  # type: ignore[attr-defined]
@@ -212,23 +195,17 @@ class SubagentPromptHandler:
         return self._prompt_runner._prompt_end()  # type: ignore[attr-defined]
 
     def model_id(self, session_id: str) -> str | None:
-        return self._sessions.get(session_id, SubagentSessionState()).model_id
+        return self._sessions.get(session_id, SessionState()).model_id
 
     def set_session_runner(self, session_id: str, runner: Any | None) -> None:
         state = self._sessions.setdefault(
             session_id,
-            SubagentSessionState(model_id=model_registry.current_model_id()),
+            SessionState(model_id=model_registry.current_model_id()),
         )
         state.runner = runner
-        try:
-            state.planner = create_subagent_planner_for_model(state.model_id or model_registry.current_model_id())
-        except Exception:
-            state.planner = None
         state.model_id = state.model_id or model_registry.current_model_id()
         state.model_error = None
         state.model_error_notified = False
-        state.planner_history = []
-        self._attach_planner_tool(state)
 
     def session_ids(self) -> list[str]:
         return list(self._sessions.keys())
@@ -239,21 +216,18 @@ class SubagentPromptHandler:
             return {}
         return {
             "history": list(state.history),
-            "planner_history": list(state.planner_history),
             "model_id": state.model_id,
         }
 
     async def restore_snapshot(self, session_id: str, snapshot: dict[str, Any]) -> None:
         state = self._sessions.setdefault(
             session_id,
-            SubagentSessionState(model_id=model_registry.current_model_id()),
+            SessionState(model_id=model_registry.current_model_id()),
         )
         state.history = list(snapshot.get("history") or [])
-        state.planner_history = list(snapshot.get("planner_history") or [])
         state.model_id = snapshot.get("model_id") or state.model_id
-        self._attach_planner_tool(state)
 
-    async def _maybe_compact_history(self, state: SubagentSessionState) -> None:
+    async def _maybe_compact_history(self, state: SessionState) -> None:
         """Compact older history into a summary when it grows too large."""
 
         runner = state.runner
@@ -292,7 +266,6 @@ class SubagentPromptHandler:
         summary_content = (summary_text or "").strip()
         summary_msg = {"role": "system", "content": f"Conversation summary:\n{summary_content}".strip()}
         state.history = [summary_msg] + preserved
-        state.planner_history = []
 
     @staticmethod
     def _trim_history(history: list[Any], limit: int) -> list[Any]:
@@ -302,71 +275,10 @@ class SubagentPromptHandler:
             return list(history)
         return list(history[-limit:])
 
-    def _attach_planner_tool(self, state: SubagentSessionState) -> None:
-        runner = state.runner
-        planner = state.planner
-        if runner is None:
-            return
-        if not hasattr(runner, "tool"):
-            return
-        if getattr(runner, "_isaac_planner_registered", False):
-            return
-
-        @runner.tool(name="planner", timeout=DEFAULT_TOOL_TIMEOUT_S)  # type: ignore[misc]
-        async def planner_tool(ctx: RunContext[Any], task: str) -> Any:
-            if planner is None:
-                return parse_plan_from_text(task)
-            plan_prompt = f"{PLANNER_TOOL_INSTRUCTIONS.strip()}\n\nTask: {task.strip()}"
-            base_history = self._trim_history(state.history, self._MAX_HISTORY_MESSAGES)
-            structured_plan: PlanSteps | None = None
-
-            async def _chunk(_: str) -> None:
-                return None
-
-            async def _thought(_: str) -> None:
-                return None
-
-            async def _capture(event: Any) -> bool:
-                nonlocal structured_plan
-                if isinstance(event, AgentRunResultEvent):
-                    output = getattr(event.result, "output", None)
-                    if isinstance(output, PlanSteps):
-                        structured_plan = output
-                return False
-
-            def _store_planner_messages(msgs: Any) -> None:
-                try:
-                    combined = base_history + list(msgs or [])
-                    state.planner_history = self._trim_history(combined, self._MAX_HISTORY_MESSAGES)
-                except Exception:
-                    state.planner_history = base_history
-
-            response, _ = await stream_with_runner(
-                planner,
-                plan_prompt,
-                _chunk,
-                _thought,
-                asyncio.Event(),
-                history=base_history,
-                on_event=_capture,
-                store_messages=_store_planner_messages,
-                log_context="subagent_planner",
-            )
-
-            plan_obj = structured_plan or response
-            if isinstance(plan_obj, PlanSteps):
-                return plan_obj
-            if isinstance(plan_obj, str):
-                parsed = parse_plan_from_text(plan_obj)
-                return parsed or plan_obj
-            return plan_obj
-
-        setattr(runner, "_isaac_planner_registered", True)
-
     async def _build_runner(
         self,
         session_id: str,
-        state: SubagentSessionState,
+        state: SessionState,
         toolsets: list[Any] | None = None,
         system_prompt: str | None = None,
     ) -> None:
@@ -379,16 +291,12 @@ class SubagentPromptHandler:
             )
             state.model_id = model_registry.current_model_id()
             state.runner = executor
-            state.planner = create_subagent_planner_for_model(state.model_id, system_prompt=system_prompt)
-            self._attach_planner_tool(state)
             state.history = []
-            state.planner_history = []
             state.model_error = None
             state.model_error_notified = False
         except Exception as exc:
             msg = f"Model load failed: {exc}"
             state.runner = None
-            state.planner = None
             state.model_error = msg
             state.model_error_notified = False
             await self.env.send_update(
@@ -398,7 +306,7 @@ class SubagentPromptHandler:
                 )
             )
 
-    async def _respond_model_error(self, session_id: str, state: SubagentSessionState) -> PromptResponse:
+    async def _respond_model_error(self, session_id: str, state: SessionState) -> PromptResponse:
         msg = state.model_error or "Model unavailable for this session."
         if not state.model_error_notified:
             await self.env.send_update(
@@ -413,6 +321,11 @@ class SubagentPromptHandler:
     def _plan_from_planner_result(self, result_part: Any) -> Any | None:
         content = getattr(result_part, "content", None)
         plan_obj = content
+        if isinstance(plan_obj, dict):
+            if plan_obj.get("error"):
+                return None
+            if "content" in plan_obj:
+                plan_obj = plan_obj.get("content")
         if isinstance(plan_obj, PlanSteps) and plan_obj.entries:
             plan_update = plan_update_from_steps(plan_obj.entries)
             if plan_update is not None:

@@ -35,17 +35,25 @@ To test isaac with other ACP clients after code changes without bumping the vers
 
 ## Tooling (pydantic-ai)
 - All tool functions must take `RunContext[...]` as the first argument; registration uses the public `Agent.tool` decorator (no private attributes).
-- `register_tools` in `src/isaac/agent/runner.py` wraps handlers so they bind `ctx` automatically and filter unexpected args.
-- Required tool args are enforced in `run_tool`; missing args return an error instead of calling the handler.
+- `register_tools` in `src/isaac/agent/tools/registration.py` binds `ctx` automatically and centralizes tool registration.
+- Required tool args are enforced in `run_tool` in `src/isaac/agent/tools/executor.py`; missing args return an error instead of calling the handler.
 
 ## Code Structure (responsibilities)
 - `src/isaac/agent/` — ACP agent implementation (session lifecycle, prompt handling, tool calls, filesystem/terminal endpoints, slash commands, model registry). Key files:
-  - `acp_agent.py`: ACP-facing agent; wiring for sessions, prompts, tools, slash commands, notifications, and prompt handling flow.
-  - `brain/prompt_runner.py`: Shared planning/execution runner for prompt handling.
-  - `brain/planner.py`: Plan parsing utilities for converting model text to ACP plan updates.
-  - `models.py`: Model registry/config loader; builds executor/planner agents.
-  - `tools/`: Local tool implementations plus registry (`TOOL_HANDLERS`, `TOOL_REQUIRED_ARGS`).
-  - `runner.py`: Registers tools with pydantic-ai models and streams prompts/events to ACP updates.
+  - `acp/`: ACP endpoint handlers split by domain (init, permissions, sessions, prompts, tools, filesystem, terminal, updates, extensions).
+  - `acp_agent.py`: ACP-facing agent composed from ACP handler mixins.
+  - `brain/prompt_handler.py`: Prompt handling with plan/tool integration.
+  - `brain/prompt_runner.py`: Stream handling and tool call updates.
+  - `brain/plan_parser.py`: Plan parsing utilities for converting model text to ACP plan updates.
+  - `brain/plan_updates.py`: Plan update helpers (status updates, stable IDs).
+  - `brain/agent_factory.py`: Model runner creation for prompt handling.
+  - `brain/tool_args.py`: Tool argument coercion for model calls.
+  - `plan_shortcuts.py`: Parse `plan:` prompt shortcuts into ACP plan updates.
+  - `models.py`: Model registry/config loader; builds pydantic-ai runners.
+  - `subagents/`: Delegate agents exposed as tools (planner/review/coding) with isolated context.
+  - `tools/`: Tool implementations plus registry/schema/executor/registration modules.
+  - `tool_execution.py`: ACP tool execution helpers (including terminal-backed run_command).
+  - `runner.py`: Streaming utilities for pydantic-ai runs.
   - `prompt_utils.py`: Helpers for extracting user text blocks.
   - `slash.py`: Server-side slash command registry/handlers (`/log`, `/model`, `/models`, `/usage`).
 - `src/isaac/client/` — ACP client REPL example. Key files:

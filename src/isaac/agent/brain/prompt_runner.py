@@ -17,7 +17,8 @@ from acp.helpers import (
 )
 from acp.schema import SessionNotification, ToolKind
 from pydantic_ai.messages import FunctionToolCallEvent, FunctionToolResultEvent, RetryPromptPart
-from isaac.agent.brain.prompt_support import coerce_tool_args, plan_with_status
+from isaac.agent.brain.plan_updates import plan_with_status
+from isaac.agent.brain.tool_args import coerce_tool_args
 from isaac.agent.tools.run_command import (
     RunCommandContext,
     pop_run_command_permission,
@@ -249,6 +250,10 @@ class PromptRunner:
             path = raw_output.get("path") or (raw_input or {}).get("path")
             if path:
                 return f"Summarized file {path} [{status}]"
+        if tool_name in {"planner", "review"}:
+            task = raw_output.get("task") or (raw_input or {}).get("task")
+            task_str = f": {task}" if task else ""
+            return f"Delegated to {tool_name}{task_str} [{status}]"
         if tool_name == "code_search":
             pattern = raw_output.get("pattern") or (raw_input or {}).get("pattern")
             directory = raw_output.get("directory") or (raw_input or {}).get("directory")
@@ -280,6 +285,6 @@ class PromptRunner:
             return "execute"
         if name in {"fetch_url"}:
             return "fetch"
-        if name in {"planner"}:
+        if name in {"planner", "review"}:
             return "think"
         return "other"

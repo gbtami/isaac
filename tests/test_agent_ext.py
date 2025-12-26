@@ -177,14 +177,13 @@ async def test_history_preserved_across_prompts(monkeypatch, tmp_path: Path):
     conn = AsyncMock(spec=AgentSideConnection)
     conn.session_update = AsyncMock()
     executor = _RecordingRunner("done")
-    from isaac.agent.brain import subagent_prompt
+    from isaac.agent.brain import prompt_handler
 
     def _build(_model_id: str, _register: object, toolsets=None, **kwargs: object) -> object:
         _ = toolsets
         return executor
 
-    monkeypatch.setattr(subagent_prompt, "create_subagent_for_model", _build)
-    monkeypatch.setattr(subagent_prompt, "create_subagent_planner_for_model", lambda *_args, **_kwargs: object())
+    monkeypatch.setattr(prompt_handler, "create_subagent_for_model", _build)
     agent = ACPAgent(conn)
     session = await agent.new_session(cwd=str(tmp_path), mcp_servers=[])
 

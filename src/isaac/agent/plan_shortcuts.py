@@ -1,4 +1,4 @@
-"""Planning helpers for ACP agent-plan updates.
+"""Parse and emit ACP plan updates from inline prompt shortcuts.
 
 See: https://agentclientprotocol.com/protocol/agent-plan
 """
@@ -11,7 +11,7 @@ from acp.helpers import plan_entry, update_plan
 from acp import SessionNotification
 
 
-def parse_plan_request(prompt_text: str) -> list[str] | None:
+def parse_plan_shortcut(prompt_text: str) -> list[str] | None:
     if not prompt_text.startswith("plan:"):
         return None
     content = prompt_text[len("plan:") :].strip()
@@ -24,6 +24,6 @@ def parse_plan_request(prompt_text: str) -> list[str] | None:
     return [content]
 
 
-def build_plan_notification(session_id: str, items: List[str]) -> SessionNotification:
+def build_plan_shortcut_notification(session_id: str, items: List[str]) -> SessionNotification:
     entries = [plan_entry(item.strip()) for item in items if item.strip()]
     return SessionNotification(session_id=session_id, update=update_plan(entries))

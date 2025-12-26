@@ -8,11 +8,8 @@ from acp import RequestPermissionResponse, text_block
 from acp.schema import AllowedOutcome
 from unittest.mock import AsyncMock
 
-from isaac.agent.brain.prompt import PLANNER_INSTRUCTIONS, SYSTEM_PROMPT
-from isaac.agent.brain.plan_schema import PlanSteps
-from isaac.agent.tools import register_readonly_tools
 from isaac.agent.tools.fetch_url import fetch_url
-from isaac.agent.tools import register_tools
+from isaac.agent.tools import get_tools, register_tools
 from isaac.agent.tools.apply_patch import apply_patch
 from isaac.agent.tools.code_search import code_search
 from isaac.agent.tools.edit_file import edit_file
@@ -104,6 +101,14 @@ async def test_run_tool_reports_missing_args():
     assert result["error"].startswith("Missing required arguments:")
 
 
+def test_tool_list_includes_coding_delegate():
+    tools = get_tools()
+    tool_names = {tool.function for tool in tools}
+    assert "coding" in tool_names
+    coding = next(tool for tool in tools if tool.function == "coding")
+    assert coding.description == "Delegate implementation work to a coding-focused agent."
+
+
 @pytest.mark.asyncio
 async def test_run_command_requests_permission():
     conn = AsyncMock()
@@ -171,26 +176,13 @@ async def test_model_tool_call_requests_permission(monkeypatch: pytest.MonkeyPat
     model = TestModel(call_tools=["run_command"], custom_output_text="done")
     ai_runner = PydanticAgent(model)
     register_tools(ai_runner)
-    planning_runner = PydanticAgent(
-        TestModel(call_tools=[]),
-        system_prompt=SYSTEM_PROMPT,
-        instructions=PLANNER_INSTRUCTIONS,
-        toolsets=(),
-        output_type=PlanSteps,
-    )
-    register_readonly_tools(planning_runner)
-    from isaac.agent.brain import subagent_prompt
+    from isaac.agent.brain import prompt_handler
 
     def _build(_model_id: str, _register: object, toolsets=None, **kwargs: object) -> object:
         _ = toolsets
         return ai_runner
 
-    monkeypatch.setattr(subagent_prompt, "create_subagent_for_model", _build)
-    monkeypatch.setattr(
-        subagent_prompt,
-        "create_subagent_planner_for_model",
-        lambda *_args, **_kwargs: planning_runner,
-    )
+    monkeypatch.setattr(prompt_handler, "create_subagent_for_model", _build)
     agent = ACPAgent(conn)
     session = await agent.new_session(cwd=str(tmp_path), mcp_servers=[])
 
@@ -227,26 +219,13 @@ async def test_model_run_command_denied_blocks_execution(monkeypatch: pytest.Mon
     model = TestModel(call_tools=["run_command"], custom_output_text="done")
     ai_runner = PydanticAgent(model)
     register_tools(ai_runner)
-    planning_runner = PydanticAgent(
-        TestModel(call_tools=[]),
-        system_prompt=SYSTEM_PROMPT,
-        instructions=PLANNER_INSTRUCTIONS,
-        toolsets=(),
-        output_type=PlanSteps,
-    )
-    register_readonly_tools(planning_runner)
-    from isaac.agent.brain import subagent_prompt
+    from isaac.agent.brain import prompt_handler
 
     def _build(_model_id: str, _register: object, toolsets=None, **kwargs: object) -> object:
         _ = toolsets
         return ai_runner
 
-    monkeypatch.setattr(subagent_prompt, "create_subagent_for_model", _build)
-    monkeypatch.setattr(
-        subagent_prompt,
-        "create_subagent_planner_for_model",
-        lambda *_args, **_kwargs: planning_runner,
-    )
+    monkeypatch.setattr(prompt_handler, "create_subagent_for_model", _build)
     agent = ACPAgent(conn)
     session = await agent.new_session(cwd=str(tmp_path), mcp_servers=[])
     agent._session_modes[session.session_id] = "ask"

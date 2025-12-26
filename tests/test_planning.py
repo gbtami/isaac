@@ -5,7 +5,7 @@ from unittest.mock import AsyncMock
 import pytest
 from pydantic_ai.messages import FunctionToolCallEvent, ToolCallPart  # type: ignore
 
-from isaac.agent.brain.planner import parse_plan_from_text
+from isaac.agent.brain.plan_parser import parse_plan_from_text
 from isaac.agent.brain.prompt_runner import PromptEnv, PromptRunner
 
 

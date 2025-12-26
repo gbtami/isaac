@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from isaac.agent.brain.planner import parse_plan_from_text
+from isaac.agent.brain.plan_parser import parse_plan_from_text
 
 
 def test_parse_plan_without_header():
