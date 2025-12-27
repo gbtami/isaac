@@ -2,12 +2,20 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 import importlib
+import json
 from unittest.mock import AsyncMock
 
 import pytest
 from acp import text_block
-from acp.schema import AgentPlanUpdate
-from pydantic_ai.messages import FunctionToolCallEvent, FunctionToolResultEvent, ToolCallPart  # type: ignore
+from acp.schema import AgentPlanUpdate, ToolCallProgress
+from pydantic_ai.messages import (  # type: ignore
+    FunctionToolCallEvent,
+    FunctionToolResultEvent,
+    ToolCallPart,
+)
+from pydantic_ai.messages import ModelRequest, ModelResponse, TextPart  # type: ignore
+from pydantic_ai import Agent as PydanticAgent  # type: ignore
+from pydantic_ai.models.test import TestModel  # type: ignore
 
 from typing import Any
 
@@ -17,6 +25,7 @@ from isaac.agent.brain.plan_schema import PlanStep, PlanSteps
 from isaac.agent.brain.prompt_handler import PromptHandler
 from isaac.agent.brain.prompt_handler import SessionState
 from pydantic_ai.run import AgentRunResult, AgentRunResultEvent  # type: ignore
+from isaac.agent.tools import register_tools
 
 
 class _FakeRunner:
@@ -172,7 +181,7 @@ async def test_delegate_tool_isolation_default(monkeypatch, tool_name: str):
     assert result["error"] is None
     assert result["content"] == "ok"
     assert captured["history"] is None
-    assert captured["prompt"] == "check isolation"
+    assert "check isolation" in captured["prompt"]
 
 
 @pytest.mark.asyncio
@@ -270,3 +279,189 @@ async def test_subagent_records_tool_history(tmp_path, monkeypatch):
     state = agent._prompt_handler._sessions[session.session_id]  # type: ignore[attr-defined]
     history_text = " ".join(str(msg.get("content") or "") for msg in state.history if isinstance(msg, dict))
     assert "python main.py" in history_text
+
+
+@pytest.mark.asyncio
+async def test_delegate_tool_carryover_summary(monkeypatch):
+    prompts: list[str] = []
+
+    def _json_summary(text: str) -> str:
+        return f'{{"summary": "{text}", "files": [], "tests": [], "risks": [], "followups": []}}'
+
+    long_summary = "Summary: " + ("detail " * 20)
+
+    async def fake_stream_with_runner(
+        _runner: Any,
+        prompt: str,
+        *_: object,
+        history: list[Any] | None = None,
+        **__: object,
+    ):
+        prompts.append(prompt)
+        assert history is None
+        return _json_summary(long_summary), None
+
+    class RunnerStub:
+        def run_stream_events(self, *_: Any, **__: Any):
+            async def _gen():
+                yield "ok"
+
+            return _gen()
+
+    monkeypatch.setattr("isaac.agent.subagents.delegate_tools.stream_with_runner", fake_stream_with_runner)
+    monkeypatch.setattr(
+        "isaac.agent.subagents.delegate_tools._build_delegate_agent",
+        lambda *_args, **_kwargs: RunnerStub(),
+    )
+
+    from isaac.agent.subagents.coding import coding
+
+    session_id = "carryover-demo"
+    first = await coding(None, task="first task", session_id=session_id, carryover=False)
+    second = await coding(None, task="second task", session_id=session_id, carryover=True)
+
+    assert first["error"] is None
+    assert second["error"] is None
+    assert first["delegate_session_id"] == session_id
+    assert second["delegate_session_id"] == session_id
+    assert isinstance(first["content"], dict)
+    assert isinstance(second["content"], dict)
+
+    assert len(prompts) == 2
+    assert prompts[0] == "first task"
+    assert "Previous delegate summary" in prompts[1]
+    assert "Task: second task" in prompts[1]
+
+
+@pytest.mark.asyncio
+async def test_delegate_tool_carryover_acp_integration(monkeypatch, tmp_path):
+    """Exercise delegate carryover through ACP tool calls without stubbing the stream runner."""
+
+    class FixedArgsModel(TestModel):  # type: ignore[misc]
+        """Return predetermined tool args for the requested function tool."""
+
+        def __init__(self, fixed_args: dict[str, dict[str, object]], **kwargs: object) -> None:
+            super().__init__(**kwargs)
+            self._fixed_args = fixed_args
+
+        def gen_tool_args(self, tool_def: object) -> dict:
+            name = getattr(tool_def, "name", "")
+            if name in self._fixed_args:
+                return self._fixed_args[name]
+            return super().gen_tool_args(tool_def)
+
+    class PromptAwareModel(TestModel):  # type: ignore[misc]
+        """Return different JSON summaries depending on carryover prompt content."""
+
+        def _request(self, messages, model_settings, model_request_parameters):  # type: ignore[override]
+            prompt_text = []
+            for message in messages:
+                if not isinstance(message, ModelRequest):
+                    continue
+                for part in message.parts:
+                    content = getattr(part, "content", None)
+                    if isinstance(content, str):
+                        prompt_text.append(content)
+                    elif isinstance(content, list):
+                        for item in content:
+                            if isinstance(item, str):
+                                prompt_text.append(item)
+            text = "\n".join(prompt_text)
+            summary = "carryover seen" if "Previous delegate summary" in text else "no carryover"
+            payload = {
+                "summary": summary,
+                "files": [],
+                "tests": [],
+                "risks": [],
+                "followups": [],
+            }
+            output_tools = getattr(model_request_parameters, "output_tools", None)
+            if output_tools:
+                output_tool = output_tools[0]
+                return ModelResponse(
+                    parts=[
+                        ToolCallPart(
+                            output_tool.name,
+                            payload,
+                            tool_call_id="delegate-output",
+                        )
+                    ],
+                    model_name=self._model_name,
+                )
+            return ModelResponse(parts=[TextPart(json.dumps(payload))], model_name=self._model_name)
+
+    from isaac.agent.subagents import delegate_tools as delegate_mod
+
+    def _build_delegate_agent(spec, *_, **__):
+        model = PromptAwareModel(call_tools=[])
+        agent = PydanticAgent(
+            model,
+            toolsets=(),
+            system_prompt=spec.system_prompt or "test",
+            instructions=spec.instructions,
+            output_type=spec.output_type,
+        )
+        register_tools(agent, tool_names=delegate_mod._expand_tool_names(spec))
+        return agent
+
+    monkeypatch.setattr(delegate_mod, "_build_delegate_agent", _build_delegate_agent)
+
+    conn = AsyncMock()
+    conn.session_update = AsyncMock()
+    agent = ACPAgent(conn)
+    session = await agent.new_session(cwd=str(tmp_path), mcp_servers=[])
+
+    runner_first = PydanticAgent(
+        FixedArgsModel(
+            fixed_args={
+                "coding": {
+                    "task": "first task",
+                    "session_id": "carryover-acp",
+                    "carryover": False,
+                }
+            },
+            call_tools=["coding"],
+            custom_output_text="done",
+        )
+    )
+    register_tools(runner_first)
+    agent._prompt_handler.set_session_runner(session.session_id, runner_first)  # type: ignore[attr-defined]
+
+    await agent.prompt(prompt=[text_block("first")], session_id=session.session_id)
+
+    def _extract_summary() -> str | None:
+        updates = [
+            call.kwargs["update"]
+            for call in conn.session_update.call_args_list
+            if isinstance(call.kwargs.get("update"), ToolCallProgress)
+        ]
+        for update in updates:
+            raw_output = getattr(update, "raw_output", {}) or {}
+            if raw_output.get("delegate_tool") == "coding":
+                content = raw_output.get("content")
+                if isinstance(content, dict):
+                    return content.get("summary")
+        return None
+
+    assert _extract_summary() == "no carryover"
+
+    conn.session_update.reset_mock()
+    runner_second = PydanticAgent(
+        FixedArgsModel(
+            fixed_args={
+                "coding": {
+                    "task": "second task",
+                    "session_id": "carryover-acp",
+                    "carryover": True,
+                }
+            },
+            call_tools=["coding"],
+            custom_output_text="done",
+        )
+    )
+    register_tools(runner_second)
+    agent._prompt_handler.set_session_runner(session.session_id, runner_second)  # type: ignore[attr-defined]
+
+    await agent.prompt(prompt=[text_block("second")], session_id=session.session_id)
+
+    assert _extract_summary() == "carryover seen"

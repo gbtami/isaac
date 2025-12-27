@@ -50,7 +50,7 @@ To test isaac with other ACP clients after code changes without bumping the vers
   - `brain/tool_args.py`: Tool argument coercion for model calls.
   - `plan_shortcuts.py`: Parse `plan:` prompt shortcuts into ACP plan updates.
   - `models.py`: Model registry/config loader; builds pydantic-ai runners.
-  - `subagents/`: Delegate agents exposed as tools (planner/review/coding) with isolated context.
+  - `subagents/`: Delegate agents exposed as tools with isolated context; contributor guide in `src/isaac/agent/subagents/CONTRIBUTOR.md`.
   - `tools/`: Tool implementations plus registry/schema/executor/registration modules.
   - `tool_execution.py`: ACP tool execution helpers (including terminal-backed run_command).
   - `runner.py`: Streaming utilities for pydantic-ai runs.

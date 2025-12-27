@@ -27,7 +27,8 @@ Rules:
 - Use 3-6 steps unless the task is trivial (1-2 steps).
 - Each step is an outcome, not a command list.
 - No code, no execution, no extra commentary.
-- You may consult other delegate tools to clarify context, but do not ask them to implement changes.
+- Do not call other delegate tools; rely on read-only tools only.
+- If you consult tools, still return only the JSON plan with no extra fields or prose.
 - If context is missing, make reasonable assumptions and proceed.
 Return only the JSON plan.
 """
@@ -38,6 +39,15 @@ Return a short plan in the required JSON shape.
 - Use priority="medium" when unsure.
 """
 
+
+def _planner_summary(output: object) -> str | None:
+    """Summarize planner output for optional carryover context."""
+
+    if isinstance(output, PlanSteps):
+        return "; ".join(step.content for step in output.entries)
+    return None
+
+
 PLANNER_TOOL_SPEC = DelegateToolSpec(
     name="planner",
     description="Delegate planning to a specialized planner agent.",
@@ -46,16 +56,25 @@ PLANNER_TOOL_SPEC = DelegateToolSpec(
     tool_names=_READ_ONLY_TOOL_NAMES,
     output_type=PlanSteps,
     log_context="delegate_planner",
+    summary_extractor=_planner_summary,
 )
 
 
-async def planner(ctx: RunContext, task: str, context: str | None = None) -> dict[str, object]:
+async def planner(
+    ctx: RunContext,
+    task: str,
+    context: str | None = None,
+    session_id: str | None = None,
+    carryover: bool = False,
+) -> dict[str, object]:
     """Delegate planning to a specialized planner agent."""
     _ = ctx
     result = await run_delegate_tool(
         PLANNER_TOOL_SPEC,
         task=task,
         context=context,
+        session_id=session_id,
+        carryover=carryover,
     )
     if result.get("error"):
         return result

@@ -18,6 +18,11 @@ from isaac.agent.brain.plan_schema import PlanSteps
 from isaac.agent.brain.agent_factory import create_subagent_for_model
 from isaac.agent.brain.plan_updates import plan_update_from_steps, plan_with_status
 from isaac.agent.runner import stream_with_runner
+from isaac.agent.subagents.delegate_tools import (
+    DelegateToolContext,
+    reset_delegate_tool_context,
+    set_delegate_tool_context,
+)
 from isaac.agent.tools import register_tools as default_register_tools
 from isaac.agent.usage import normalize_usage
 
@@ -166,17 +171,27 @@ class PromptHandler:
             except Exception:
                 return
 
-        response_text, usage = await stream_with_runner(
-            state.runner,
-            prompt_text,
-            _push_chunk,
-            _push_thought,
-            cancel_event,
-            history=history,
-            on_event=_on_event,
-            store_messages=_store_messages,
-            log_context="subagent",
+        # Provide parent permission routing to delegate tool runs in this prompt turn.
+        delegate_token = set_delegate_tool_context(
+            DelegateToolContext(
+                session_id=session_id,
+                request_run_permission=self.env.request_run_permission,
+            )
         )
+        try:
+            response_text, usage = await stream_with_runner(
+                state.runner,
+                prompt_text,
+                _push_chunk,
+                _push_thought,
+                cancel_event,
+                history=history,
+                on_event=_on_event,
+                store_messages=_store_messages,
+                log_context="subagent",
+            )
+        finally:
+            reset_delegate_tool_context(delegate_token)
         if response_text is None:
             return self._prompt_runner._prompt_cancel()  # type: ignore[attr-defined]
         if response_text.startswith("Provider error:"):

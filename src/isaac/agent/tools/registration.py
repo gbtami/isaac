@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import logging
-from typing import Any, Iterable
+from typing import Any, Awaitable, Callable, Iterable
 
 from pydantic_ai import RunContext
 
@@ -38,7 +38,7 @@ def _register_toolset(
     logger: logging.Logger | None,
 ) -> None:
     registrar = _ToolRegistrar(logger)
-    tool_map = {
+    tool_map: dict[str, tuple[Callable[..., Awaitable[Any]], float | None]] = {
         "list_files": (registrar.list_files_tool, DEFAULT_TOOL_TIMEOUT_S),
         "read_file": (registrar.read_file_tool, DEFAULT_TOOL_TIMEOUT_S),
         "run_command": (registrar.run_command_tool, RUN_COMMAND_TIMEOUT_S),
@@ -47,10 +47,9 @@ def _register_toolset(
         "file_summary": (registrar.file_summary_tool, DEFAULT_TOOL_TIMEOUT_S),
         "code_search": (registrar.code_search_tool, DEFAULT_TOOL_TIMEOUT_S),
         "fetch_url": (registrar.fetch_url_tool, DEFAULT_FETCH_TIMEOUT),
-        "planner": (registrar.planner_tool, DELEGATE_TOOL_TIMEOUTS.get("planner", DEFAULT_TOOL_TIMEOUT_S)),
-        "review": (registrar.review_tool, DELEGATE_TOOL_TIMEOUTS.get("review", DEFAULT_TOOL_TIMEOUT_S)),
-        "coding": (registrar.coding_tool, DELEGATE_TOOL_TIMEOUTS.get("coding", DEFAULT_TOOL_TIMEOUT_S)),
     }
+    for name, timeout in DELEGATE_TOOL_TIMEOUTS.items():
+        tool_map[name] = (registrar.delegate_tool(name), timeout)
     for name in tools:
         func, timeout = tool_map[name]
         agent.tool(name=name, timeout=timeout)(func)  # type: ignore[misc]
@@ -64,6 +63,38 @@ class _ToolRegistrar:
         if self._logger is None:
             return
         self._logger.info("Pydantic tool invoked: %s args=%s", tool_name, args)
+
+    def delegate_tool(
+        self, tool_name: str
+    ) -> Callable[[RunContext[Any], str, str | None, str | None, bool], Awaitable[Any]]:
+        """Build a wrapper for delegate tools that share the base delegate args."""
+
+        async def _tool(
+            ctx: RunContext[Any],
+            task: str,
+            context: str | None = None,
+            session_id: str | None = None,
+            carryover: bool = False,
+        ) -> Any:
+            self._log(
+                tool_name,
+                {
+                    "task": task,
+                    "context": context,
+                    "session_id": session_id,
+                    "carryover": carryover,
+                },
+            )
+            return await run_tool(
+                tool_name,
+                ctx=ctx,
+                task=task,
+                context=context,
+                session_id=session_id,
+                carryover=carryover,
+            )
+
+        return _tool
 
     async def list_files_tool(
         self,
@@ -168,30 +199,3 @@ class _ToolRegistrar:
     ) -> Any:
         self._log("fetch_url", {"url": url, "max_bytes": max_bytes, "timeout": timeout})
         return await run_tool("fetch_url", ctx=ctx, url=url, max_bytes=max_bytes, timeout=timeout)
-
-    async def planner_tool(
-        self,
-        ctx: RunContext[Any],
-        task: str,
-        context: str | None = None,
-    ) -> Any:
-        self._log("planner", {"task": task, "context": context})
-        return await run_tool("planner", ctx=ctx, task=task, context=context)
-
-    async def review_tool(
-        self,
-        ctx: RunContext[Any],
-        task: str,
-        context: str | None = None,
-    ) -> Any:
-        self._log("review", {"task": task, "context": context})
-        return await run_tool("review", ctx=ctx, task=task, context=context)
-
-    async def coding_tool(
-        self,
-        ctx: RunContext[Any],
-        task: str,
-        context: str | None = None,
-    ) -> Any:
-        self._log("coding", {"task": task, "context": context})
-        return await run_tool("coding", ctx=ctx, task=task, context=context)

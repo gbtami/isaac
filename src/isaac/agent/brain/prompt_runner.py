@@ -39,6 +39,18 @@ class PromptEnv:
     set_usage: Callable[[str, Any | None], None]
 
 
+def _is_delegate_tool(tool_name: str) -> bool:
+    """Check if a tool name belongs to a registered delegate tool."""
+
+    if not tool_name:
+        return False
+    try:
+        from isaac.agent.subagents import DELEGATE_TOOL_HANDLERS
+    except Exception:
+        return False
+    return tool_name in DELEGATE_TOOL_HANDLERS
+
+
 class PromptRunner:
     """Utilities shared by prompt handling."""
 
@@ -250,7 +262,7 @@ class PromptRunner:
             path = raw_output.get("path") or (raw_input or {}).get("path")
             if path:
                 return f"Summarized file {path} [{status}]"
-        if tool_name in {"planner", "review"}:
+        if _is_delegate_tool(tool_name):
             task = raw_output.get("task") or (raw_input or {}).get("task")
             task_str = f": {task}" if task else ""
             return f"Delegated to {tool_name}{task_str} [{status}]"
@@ -285,6 +297,6 @@ class PromptRunner:
             return "execute"
         if name in {"fetch_url"}:
             return "fetch"
-        if name in {"planner", "review"}:
+        if _is_delegate_tool(name):
             return "think"
         return "other"
