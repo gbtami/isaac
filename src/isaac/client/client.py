@@ -8,6 +8,7 @@ import contextlib
 import logging
 import os
 import sys
+from dataclasses import replace
 from pathlib import Path
 from typing import Any, Iterable
 
@@ -20,10 +21,14 @@ from isaac.client.mcp_config import load_mcp_config
 from isaac.client.acp_client import ACPClient
 from isaac.client.repl import interactive_loop
 from isaac.client.session_state import SessionUIState
+from isaac.log_utils import build_log_config, configure_logging, log_event
+
+logger = logging.getLogger(__name__)
 
 
 async def run_client(program: str, args: Iterable[str], mcp_servers: list[Any]) -> int:
     _setup_client_logging()
+    log_event(logger, "client.start", program=program)
 
     program_path = Path(program)
     spawn_program = program
@@ -123,15 +128,13 @@ async def main(argv: list[str]) -> int:
 def _setup_client_logging() -> None:
     """Initialize client logging to a file (mirrors agent logging convention)."""
 
-    log_dir = Path.home() / ".isaac"
-    log_dir.mkdir(exist_ok=True)
-    log_file = log_dir / "acp_client.log"
-
-    for handler in logging.root.handlers[:]:
-        logging.root.removeHandler(handler)
-
-    logging.basicConfig(
-        level=logging.INFO,
-        format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-        handlers=[logging.FileHandler(log_file)],
+    config = build_log_config(log_file_name="acp_client.log")
+    configure_logging(
+        replace(
+            config,
+            logger_levels={
+                "isaac": config.level,
+                "acp": config.level,
+            },
+        )
     )

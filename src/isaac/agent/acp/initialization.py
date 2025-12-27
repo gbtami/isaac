@@ -14,8 +14,9 @@ from acp.schema import (
     SessionCapabilities,
     SessionListCapabilities,
 )
+from isaac.log_utils import log_event
 
-logger = logging.getLogger("acp_server")
+logger = logging.getLogger(__name__)
 
 
 class InitializationMixin:
@@ -27,14 +28,16 @@ class InitializationMixin:
         **_: Any,
     ) -> InitializeResponse:
         """Handle ACP initialize handshake (Initialization section)."""
-        logger.info("Received initialize request: %s", protocol_version)
+        log_event(logger, "acp.initialize.request", protocol_version=protocol_version)
         # ACP version negotiation: if the requested version isn't supported, respond with
         # the latest version we support; the client may disconnect if it can't accept it.
         if protocol_version != PROTOCOL_VERSION:
-            logger.warning(
-                "Protocol version mismatch requested=%s supported=%s",
-                protocol_version,
-                PROTOCOL_VERSION,
+            log_event(
+                logger,
+                "acp.initialize.version_mismatch",
+                level=logging.WARNING,
+                requested=protocol_version,
+                supported=PROTOCOL_VERSION,
             )
         # Capture peer capabilities/info for optional behavior gating.
         self._client_capabilities = client_capabilities
@@ -63,5 +66,5 @@ class InitializationMixin:
 
     async def authenticate(self, method_id: str, **_: Any) -> AuthenticateResponse | None:
         """Return a no-op authentication response (Initialization auth step)."""
-        logger.info("Received authenticate request %s", method_id)
+        log_event(logger, "acp.authenticate.request", method_id=method_id)
         return AuthenticateResponse()

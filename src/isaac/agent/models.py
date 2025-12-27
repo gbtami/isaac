@@ -32,7 +32,7 @@ from pydantic_ai.providers.openai import OpenAIProvider  # type: ignore
 from pydantic_ai.providers.openrouter import OpenRouterProvider  # type: ignore
 
 
-logger = logging.getLogger("acp_server")
+logger = logging.getLogger(__name__)
 
 OLLAMA_BASE_URL = "http://localhost:11434/v1"
 

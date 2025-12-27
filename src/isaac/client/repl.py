@@ -23,6 +23,9 @@ from isaac.client.display import create_thinking_status
 from isaac.client.session_state import SessionUIState
 from isaac.client.status_box import build_status_toolbar, build_welcome_banner, format_path
 from isaac.client.slash import SLASH_HANDLERS, handle_slash_command
+from isaac.log_utils import log_event
+
+logger = logging.getLogger(__name__)
 
 EMBED_FILE_MAX_BYTES = 20_000
 PROMPT_STYLE = Style.from_dict(
@@ -111,7 +114,7 @@ async def interactive_loop(conn: ClientSideConnection, session_id: str, state: S
                 state.thinking_status.start()
             await conn.prompt(prompt=blocks, session_id=session_id)
         except Exception as exc:  # noqa: BLE001
-            logging.error("Prompt failed: %s", exc)
+            log_event(logger, "client.prompt.error", level=logging.WARNING, error=str(exc))
         finally:
             if state.thinking_status is not None:
                 state.thinking_status.stop()

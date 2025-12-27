@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import contextvars
 import logging
+import time
 import uuid
 from dataclasses import dataclass
 from typing import Any, Awaitable, Callable
@@ -13,11 +15,14 @@ from dotenv import load_dotenv
 from pydantic_ai import Agent as PydanticAgent  # type: ignore
 from pydantic_ai.run import AgentRunResultEvent  # type: ignore
 
+from acp.contrib.tool_calls import ToolCallTracker
+from acp.helpers import session_notification, text_block, tool_content
 from isaac.agent import models as model_registry
 from isaac.agent.brain.prompt import SYSTEM_PROMPT
 from isaac.agent.models import ENV_FILE, load_models_config, _build_provider_model
 from isaac.agent.runner import stream_with_runner
 from isaac.agent.tools.run_command import RunCommandContext, reset_run_command_context, set_run_command_context
+from isaac.log_utils import log_context as log_ctx, log_event
 
 DELEGATE_TOOL_TIMEOUT_S = 60.0
 DELEGATE_TOOL_DEFAULT_DEPTH = 2
@@ -28,7 +33,7 @@ _delegate_context = contextvars.ContextVar("delegate_tool_context", default=None
 
 _DelegateHandler = Callable[..., Any]
 
-logger = logging.getLogger("isaac.delegate")
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -36,15 +41,21 @@ class DelegateToolContext:
     """Context installed by the prompt handler for delegate tools.
 
     This lets delegate runs route permission requests (for commands) back to the
-    parent ACP session without leaking full chat history.
+    parent ACP session without leaking full chat history. It also exposes a
+    send_update hook so sub-agents can surface progress to the ACP client.
     """
 
     session_id: str
     request_run_permission: Callable[[str, str, str, str | None], Awaitable[bool]]
+    send_update: Callable[[Any], Awaitable[None]]
 
 
 def set_delegate_tool_context(ctx: DelegateToolContext) -> contextvars.Token[DelegateToolContext | None]:
-    """Install the delegate tool context for the current prompt turn."""
+    """Install the delegate tool context for the current prompt turn.
+
+    This keeps delegate tools isolated while still letting them request
+    permissions and emit ACP updates through the parent session.
+    """
 
     return _delegate_context.set(ctx)
 
@@ -94,7 +105,10 @@ DELEGATE_TOOL_TIMEOUTS: dict[str, float] = {}
 
 @dataclass
 class DelegateSession:
-    """Minimal state retained for multi-turn delegate work."""
+    """Minimal state retained for multi-turn delegate work.
+
+    We keep only a short summary for carryover to avoid full history sharing.
+    """
 
     session_id: str
     tool_name: str
@@ -111,7 +125,11 @@ def register_delegate_tool(
     handler: _DelegateHandler,
     arg_model: type[Any],
 ) -> None:
-    """Register a delegate tool definition."""
+    """Register a delegate tool definition.
+
+    Delegate tools register their handler and argument model so discovery and
+    tool registration can stay data-driven.
+    """
     DELEGATE_TOOL_HANDLERS[spec.name] = handler
     DELEGATE_TOOL_ARG_MODELS[spec.name] = arg_model
     DELEGATE_TOOL_DESCRIPTIONS[spec.name] = spec.description
@@ -165,6 +183,7 @@ def _build_delegate_prompt(task: str, context: str | None, carryover_summary: st
 
 
 def _expand_tool_names(spec: DelegateToolSpec) -> tuple[str, ...]:
+    """Expand tool names to include other delegate tools when allowed."""
     if not spec.include_delegate_tools:
         return spec.tool_names
     tool_names = list(spec.tool_names)
@@ -227,7 +246,10 @@ class _DelegateRunOutcome:
 
 
 def _summary_from_output(spec: DelegateToolSpec, output: Any) -> str | None:
-    """Return a summary string for carryover and brevity checks."""
+    """Return a summary string for carryover and brevity checks.
+
+    The summary is stored in memory for the same delegate session only.
+    """
 
     if spec.summary_extractor is not None:
         try:
@@ -240,7 +262,11 @@ def _summary_from_output(spec: DelegateToolSpec, output: Any) -> str | None:
 
 
 def _should_request_continuation(spec: DelegateToolSpec, summary: str | None) -> bool:
-    """Decide whether to ask the delegate for a more detailed response."""
+    """Decide whether to ask the delegate for a more detailed response.
+
+    This lets structured delegates retry with a follow-up prompt if their first
+    response is too brief for the task at hand.
+    """
 
     if not spec.continuation_prompt or spec.min_summary_chars <= 0:
         return False
@@ -285,7 +311,11 @@ def _build_permission_context(
     spec: DelegateToolSpec,
     delegate_run_id: str,
 ) -> tuple[contextvars.Token[RunCommandContext | None] | None, Callable[[], None]]:
-    """Install a run_command permission bridge for delegate tool runs."""
+    """Install a run_command permission bridge for delegate tool runs.
+
+    Delegate tools can call run_command, but permissions must be routed through
+    the parent ACP session so the user sees a single permission workflow.
+    """
 
     ctx = get_delegate_tool_context()
     if ctx is None:
@@ -315,14 +345,60 @@ async def _run_delegate_once(
     prompt: str,
     *,
     log_context: str | None,
+    tool_call_id: str | None,
+    session_id: str | None,
+    send_update: Callable[[Any], Awaitable[None]] | None,
 ) -> _DelegateRunOutcome:
-    """Run a delegate agent once and capture structured output if available."""
+    """Run a delegate agent once and capture structured output if available.
+
+    We stream incremental text back to the ACP client as tool progress updates,
+    but only surface response text (never internal reasoning).
+    """
 
     structured: Any | None = None
     cancel_event = asyncio.Event()
 
-    async def _noop(_: str) -> None:
-        return None
+    tracker: ToolCallTracker | None = None
+    if tool_call_id and session_id and send_update:
+        tracker = ToolCallTracker(id_factory=lambda: tool_call_id)
+
+    buffer: list[str] = []
+    last_sent = 0.0
+
+    async def _emit_progress(text: str) -> None:
+        if not tracker or not send_update or not session_id:
+            return
+        raw_output = {
+            "tool": spec.name,
+            "content": text,
+            "delegate_tool": spec.name,
+        }
+        progress = tracker.progress(
+            external_id=tool_call_id,
+            status="in_progress",
+            raw_output=raw_output,
+            content=[tool_content(text_block(text))],
+        )
+        with contextlib.suppress(Exception):
+            await send_update(session_notification(session_id, progress))
+
+    async def _flush(force: bool = False) -> None:
+        nonlocal last_sent
+        if not buffer:
+            return
+        now = time.monotonic()
+        if not force and (now - last_sent) < 0.5 and sum(len(chunk) for chunk in buffer) < 200:
+            return
+        text = "".join(buffer)
+        buffer.clear()
+        last_sent = now
+        await _emit_progress(text)
+
+    async def _on_text(chunk: str) -> None:
+        if not chunk:
+            return
+        buffer.append(chunk)
+        await _flush()
 
     async def _capture(event: Any) -> bool:
         nonlocal structured
@@ -338,8 +414,8 @@ async def _run_delegate_once(
         return await stream_with_runner(
             agent,
             prompt,
-            _noop,
-            _noop,
+            _on_text,
+            None,
             cancel_event,
             on_event=_capture,
             log_context=log_context,
@@ -357,6 +433,8 @@ async def _run_delegate_once(
             raw_text=None,
             error=f"Delegate tool timed out after {spec.timeout_s}s.",
         )
+
+    await _flush(force=True)
 
     if response is None:
         return _DelegateRunOutcome(content=None, raw_text=None, error="Delegate agent cancelled.")
@@ -382,6 +460,7 @@ async def run_delegate_tool(
     context: str | None = None,
     session_id: str | None = None,
     carryover: bool = False,
+    tool_call_id: str | None = None,
 ) -> dict[str, Any]:
     """Run a delegate agent tool with depth guarding.
 
@@ -395,6 +474,14 @@ async def run_delegate_tool(
 
     depth = _delegate_depth.get()
     if depth >= spec.max_depth:
+        with log_ctx(delegate_tool=spec.name):
+            log_event(
+                logger,
+                "delegate.run.depth_exceeded",
+                level=logging.WARNING,
+                max_depth=spec.max_depth,
+                depth=depth,
+            )
         return {
             "content": "",
             "error": f"Delegate tool depth exceeded (max {spec.max_depth}).",
@@ -405,15 +492,22 @@ async def run_delegate_tool(
     delegate_run_id = uuid.uuid4().hex
     session = _get_delegate_session(spec, delegate_session_id)
     carryover_summary = session.last_summary if carryover else None
-    logger.info(
-        "Delegate run start tool=%s session=%s run=%s carryover=%s",
-        spec.name,
-        delegate_session_id,
-        delegate_run_id,
-        carryover,
-    )
+    with log_ctx(
+        delegate_tool=spec.name,
+        delegate_session_id=delegate_session_id,
+        delegate_run_id=delegate_run_id,
+    ):
+        log_event(
+            logger,
+            "delegate.run.start",
+            carryover=carryover,
+            task_preview=task[:160].replace("\n", "\\n"),
+        )
 
     token = _delegate_depth.set(depth + 1)
+    delegate_ctx = get_delegate_tool_context()
+    send_update = delegate_ctx.send_update if delegate_ctx else None
+    parent_session_id = delegate_ctx.session_id if delegate_ctx else None
 
     def _reset_permission() -> None:
         return None
@@ -430,6 +524,9 @@ async def run_delegate_tool(
             active_agent,
             prompt,
             log_context=spec.log_context,
+            tool_call_id=tool_call_id,
+            session_id=parent_session_id,
+            send_update=send_update,
         )
         if outcome.validation_failed and spec.allow_unstructured_fallback:
             fallback_agent = _build_delegate_agent(spec, output_type_override=None)
@@ -439,9 +536,18 @@ async def run_delegate_tool(
                 active_agent,
                 prompt,
                 log_context=spec.log_context,
+                tool_call_id=tool_call_id,
+                session_id=parent_session_id,
+                send_update=send_update,
             )
 
         if outcome.error:
+            with log_ctx(
+                delegate_tool=spec.name,
+                delegate_session_id=delegate_session_id,
+                delegate_run_id=delegate_run_id,
+            ):
+                log_event(logger, "delegate.run.error", level=logging.WARNING, error=outcome.error)
             return {
                 "content": "",
                 "error": outcome.error,
@@ -478,6 +584,9 @@ async def run_delegate_tool(
                 active_agent,
                 followup_prompt,
                 log_context=spec.log_context,
+                tool_call_id=tool_call_id,
+                session_id=parent_session_id,
+                send_update=send_update,
             )
             if outcome.error:
                 return {
@@ -503,6 +612,16 @@ async def run_delegate_tool(
         session.runs += 1
         if summary:
             session.last_summary = _truncate_summary(summary)
+        with log_ctx(
+            delegate_tool=spec.name,
+            delegate_session_id=delegate_session_id,
+            delegate_run_id=delegate_run_id,
+        ):
+            log_event(
+                logger,
+                "delegate.run.complete",
+                summary_preview=(summary or "")[:160].replace("\n", "\\n"),
+            )
 
         return {
             "content": output_payload,
@@ -512,13 +631,12 @@ async def run_delegate_tool(
             "delegate_run_id": delegate_run_id,
         }
     except Exception as exc:
-        logger.warning(
-            "Delegate run error tool=%s session=%s run=%s error=%s",
-            spec.name,
-            delegate_session_id,
-            delegate_run_id,
-            exc,
-        )
+        with log_ctx(
+            delegate_tool=spec.name,
+            delegate_session_id=delegate_session_id,
+            delegate_run_id=delegate_run_id,
+        ):
+            log_event(logger, "delegate.run.error", level=logging.WARNING, error=str(exc))
         return {
             "content": "",
             "error": str(exc),

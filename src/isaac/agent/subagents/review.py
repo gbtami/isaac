@@ -76,13 +76,13 @@ async def review(
     carryover: bool = False,
 ) -> dict[str, object]:
     """Delegate a focused review to a specialized agent."""
-    _ = ctx
     return await run_delegate_tool(
         REVIEW_TOOL_SPEC,
         task=task,
         context=context,
         session_id=session_id,
         carryover=carryover,
+        tool_call_id=getattr(ctx, "tool_call_id", None),
     )
 
 

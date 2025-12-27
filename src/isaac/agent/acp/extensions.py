@@ -5,12 +5,16 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-logger = logging.getLogger("acp_server")
+from isaac.log_utils import log_context, log_event
+
+logger = logging.getLogger(__name__)
 
 
 class ExtensionsMixin:
     async def ext_method(self, name: str, payload: dict[str, Any]) -> dict[str, Any]:
         """Handle extension methods for model listing/selection."""
+        with log_context(session_id=payload.get("session_id"), ext_method=name):
+            log_event(logger, "acp.ext.request", params_keys=sorted(payload.keys()))
         if name == "model/list":
             session_id = payload.get("session_id")
             current = self._session_model_ids.get(session_id, self._current_model_id())
@@ -34,7 +38,8 @@ class ExtensionsMixin:
 
     async def ext_notification(self, method: str, params: dict[str, Any]) -> None:
         """Handle extension notifications (noop placeholder to satisfy ACP interface)."""
-        logger.info("Received ext notification %s params_keys=%s", method, sorted(params.keys()))
+        with log_context(ext_method=method):
+            log_event(logger, "acp.ext.notification", params_keys=sorted(params.keys()))
 
     @staticmethod
     def _list_user_models() -> dict[str, Any]:

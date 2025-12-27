@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 from dataclasses import dataclass, field
 from typing import Any, Dict
 
@@ -25,6 +26,9 @@ from isaac.agent.subagents.delegate_tools import (
 )
 from isaac.agent.tools import register_tools as default_register_tools
 from isaac.agent.usage import normalize_usage
+from isaac.log_utils import log_context as log_ctx, log_event
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -106,6 +110,13 @@ class PromptHandler:
         if state.model_error or state.runner is None:
             return await self._respond_model_error(session_id, state)
 
+        with log_ctx(session_id=session_id, model_id=state.model_id):
+            log_event(
+                logger,
+                "prompt.handle.start",
+                prompt_preview=prompt_text[:160].replace("\n", "\\n"),
+            )
+
         history = self._trim_history(state.history, self._MAX_HISTORY_MESSAGES)
         plan_progress: dict[str, Any] | None = {"plan": None, "idx": 0}
         _push_chunk = self._prompt_runner._make_chunk_sender(session_id)  # type: ignore[attr-defined]
@@ -176,6 +187,7 @@ class PromptHandler:
             DelegateToolContext(
                 session_id=session_id,
                 request_run_permission=self.env.request_run_permission,
+                send_update=self.env.send_update,
             )
         )
         try:
@@ -193,9 +205,13 @@ class PromptHandler:
         finally:
             reset_delegate_tool_context(delegate_token)
         if response_text is None:
+            with log_ctx(session_id=session_id, model_id=state.model_id):
+                log_event(logger, "prompt.handle.cancelled")
             return self._prompt_runner._prompt_cancel()  # type: ignore[attr-defined]
         if response_text.startswith("Provider error:"):
             msg = response_text.removeprefix("Provider error:").strip()
+            with log_ctx(session_id=session_id, model_id=state.model_id):
+                log_event(logger, "prompt.handle.error", level=logging.WARNING, error=msg)
             await self.env.send_update(
                 session_notification(
                     session_id,
@@ -207,6 +223,8 @@ class PromptHandler:
             completed = plan_with_status(plan_progress["plan"], status_all="completed")
             await self.env.send_update(session_notification(session_id, completed))
         self.env.set_usage(session_id, normalize_usage(usage))
+        with log_ctx(session_id=session_id, model_id=state.model_id):
+            log_event(logger, "prompt.handle.complete")
         return self._prompt_runner._prompt_end()  # type: ignore[attr-defined]
 
     def model_id(self, session_id: str) -> str | None:

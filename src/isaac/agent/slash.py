@@ -222,11 +222,12 @@ def _set_log_level(level: str) -> str:
     target_level = getattr(logging, level_name, logging.INFO)
     logging.getLogger().setLevel(target_level)
     for name in (
-        "acp_server",
-        "isaac.llm",
+        "isaac",
+        "acp",
         "pydantic_ai",
         "pydantic_ai.providers",
         "httpx",
+        "asyncio",
     ):
         logging.getLogger(name).setLevel(target_level)
     return f"Logging level set to {level_name}. Future requests will include verbose provider/LLM events."

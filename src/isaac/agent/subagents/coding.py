@@ -83,13 +83,13 @@ async def coding(
     carryover: bool = False,
 ) -> dict[str, object]:
     """Delegate implementation work to a coding-focused agent."""
-    _ = ctx
     return await run_delegate_tool(
         CODING_TOOL_SPEC,
         task=task,
         context=context,
         session_id=session_id,
         carryover=carryover,
+        tool_call_id=getattr(ctx, "tool_call_id", None),
     )
 
 

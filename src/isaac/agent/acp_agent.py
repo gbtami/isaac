@@ -23,8 +23,9 @@ from isaac.agent.agent_terminal import TerminalState
 from isaac.agent.brain.prompt_handler import PromptHandler
 from isaac.agent.constants import TOOL_OUTPUT_LIMIT
 from isaac.agent.session_store import SessionStore
+from isaac.log_utils import log_event
 
-logger = logging.getLogger("acp_server")
+logger = logging.getLogger(__name__)
 DEFAULT_COMMAND_TIMEOUT_S = 30.0
 
 
@@ -79,3 +80,4 @@ class ACPAgent(
     def on_connect(self, conn: AgentSideConnection) -> None:  # type: ignore[override]
         """Capture connection when wiring via run_agent/connect_to_agent."""
         self._conn = conn
+        log_event(logger, "acp.connection.ready")

@@ -18,6 +18,9 @@ from pydantic_ai.messages import (  # type: ignore
     ThinkingPartDelta,
 )
 from pydantic_ai.run import AgentRunResultEvent  # type: ignore
+from isaac.log_utils import log_chunks_enabled, log_context as log_ctx, log_event
+
+logger = logging.getLogger("isaac.agent.llm")
 
 HISTORY_LOG_MAX = 8000
 
@@ -38,11 +41,14 @@ async def stream_with_runner(
 
     `on_event` lets callers react to tool call events (used to emit ACP tool updates).
     """
-    name_suffix = f".{log_context}" if log_context else ""
-    stream_logger = logging.getLogger(f"acp_server{name_suffix}")
-    llm_logger = logging.getLogger(f"isaac.llm{name_suffix}")
-    stream_logger.info("LLM stream start prompt_preview=%s", prompt_text[:200])
-    llm_logger.info("SEND prompt\n%s", prompt_text)
+    with log_ctx(llm_context=log_context):
+        log_event(
+            logger,
+            "llm.stream.start",
+            prompt_preview=prompt_text[:200].replace("\n", "\\n"),
+            has_history=history is not None,
+        )
+        log_event(logger, "llm.prompt.send", level=logging.DEBUG, prompt=prompt_text)
     cancel_event = cancel_event or asyncio.Event()
 
     output_parts: list[str] = []
@@ -71,23 +77,39 @@ async def stream_with_runner(
 
         return raw_history
 
+    event_iter = None
     try:
-        event_iter = None
         thought_delta_buffer: list[str] = []
         if history is not None:
+            history_preview = None
             try:
-                llm_logger.info("HISTORY %s", json.dumps(history)[:HISTORY_LOG_MAX])
+                history_preview = json.dumps(history)[:HISTORY_LOG_MAX]
             except Exception:
-                llm_logger.info("HISTORY %s", str(history)[:HISTORY_LOG_MAX])
+                history_preview = str(history)[:HISTORY_LOG_MAX]
+            log_event(
+                logger,
+                "llm.history.raw",
+                level=logging.DEBUG,
+                history_preview=history_preview,
+                history_len=len(history) if isinstance(history, list) else None,
+            )
             if isinstance(history, list) and history and not isinstance(history[0], dict):
                 safe_history = history
             else:
                 sanitized = _sanitize_history(history)
                 safe_history = _convert_to_model_messages(sanitized)
+            sanitized_preview = None
             try:
-                llm_logger.info("HISTORY_SANITIZED %s", json.dumps(safe_history)[:HISTORY_LOG_MAX])
+                sanitized_preview = json.dumps(safe_history)[:HISTORY_LOG_MAX]
             except Exception:
-                llm_logger.info("HISTORY_SANITIZED %s", str(safe_history)[:HISTORY_LOG_MAX])
+                sanitized_preview = str(safe_history)[:HISTORY_LOG_MAX]
+            log_event(
+                logger,
+                "llm.history.sanitized",
+                level=logging.DEBUG,
+                history_preview=sanitized_preview,
+                history_len=len(safe_history) if isinstance(safe_history, list) else None,
+            )
             event_iter = runner.run_stream_events(prompt_text, message_history=safe_history)
         if event_iter is None:
             event_iter = runner.run_stream_events(prompt_text)
@@ -117,8 +139,14 @@ async def stream_with_runner(
 
             if isinstance(event, str):
                 output_parts.append(event)
-                stream_logger.info("LLM text chunk=%s", event[:200].replace("\n", "\\n"))
-                llm_logger.info("RECV text chunk\n%s", event)
+                if log_chunks_enabled():
+                    log_event(
+                        logger,
+                        "llm.stream.text",
+                        level=logging.DEBUG,
+                        chunk_preview=event[:200].replace("\n", "\\n"),
+                    )
+                    log_event(logger, "llm.stream.text.raw", level=logging.DEBUG, chunk=event)
                 await on_text(event)
                 continue
             if isinstance(event, PartDeltaEvent):
@@ -138,33 +166,62 @@ async def stream_with_runner(
             elif isinstance(event, PartEndEvent):
                 kind = getattr(event.part, "part_kind", "")
                 if kind and kind not in {"text", "thinking"}:
-                    logging.getLogger("acp_server").debug(
-                        "Received PartEndEvent kind=%s content=%s",
-                        kind,
-                        getattr(event.part, "content", None),
-                    )
+                    if log_chunks_enabled():
+                        log_event(
+                            logger,
+                            "llm.stream.part_end.unknown",
+                            level=logging.DEBUG,
+                            kind=kind,
+                            content=getattr(event.part, "content", None),
+                        )
                 part = getattr(event.part, "content", "")
                 if kind == "thinking" and on_thought is not None:
                     final_thought = str(part) if part else "".join(thought_delta_buffer)
                     thought_delta_buffer.clear()
                     if final_thought:
-                        stream_logger.info("LLM thinking=%s", final_thought[:200].replace("\n", "\\n"))
-                        llm_logger.info("RECV thinking\n%s", final_thought)
+                        if log_chunks_enabled():
+                            log_event(
+                                logger,
+                                "llm.stream.thinking",
+                                level=logging.DEBUG,
+                                thought_preview=final_thought[:200].replace("\n", "\\n"),
+                            )
+                            log_event(
+                                logger,
+                                "llm.stream.thinking.raw",
+                                level=logging.DEBUG,
+                                thought=final_thought,
+                            )
                         await on_thought(final_thought)
                 elif part and not output_parts:
                     output_parts.append(part)
-                    stream_logger.info("LLM part_end=%s", str(part)[:200].replace("\n", "\\n"))
-                    llm_logger.info("RECV part_end\n%s", part)
+                    if log_chunks_enabled():
+                        log_event(
+                            logger,
+                            "llm.stream.part_end",
+                            level=logging.DEBUG,
+                            part_preview=str(part)[:200].replace("\n", "\\n"),
+                        )
+                        log_event(logger, "llm.stream.part_end.raw", level=logging.DEBUG, part=part)
                     await on_text(part)
             elif isinstance(event, AgentRunResultEvent):
                 result = event.result
                 full = result.output
                 usage = getattr(result, "usage", None)
-                stream_logger.info("LLM final output=%s", str(full)[:200].replace("\n", "\\n"))
-                llm_logger.info("RECV final output\n%s", full)
+                log_event(
+                    logger,
+                    "llm.stream.final",
+                    output_preview=str(full)[:200].replace("\n", "\\n"),
+                )
+                log_event(logger, "llm.stream.final.raw", level=logging.DEBUG, output=full)
                 try:
                     msgs = result.new_messages()
-                    llm_logger.info("MODEL_MESSAGES %s", str(msgs)[:HISTORY_LOG_MAX])
+                    log_event(
+                        logger,
+                        "llm.model_messages",
+                        level=logging.DEBUG,
+                        messages_preview=str(msgs)[:HISTORY_LOG_MAX],
+                    )
                     if store_messages is not None:
                         with contextlib.suppress(Exception):
                             store_messages(msgs)
@@ -178,15 +235,19 @@ async def stream_with_runner(
                 return str(full), usage
     except (ai_exc.ModelRetry, ai_exc.UnexpectedModelBehavior) as exc:
         msg = str(exc)
-        stream_logger.warning("LLM validation failure: %s", msg)
-        llm_logger.warning("LLM validation failure: %s", msg)
+        log_event(logger, "llm.stream.validation_failure", level=logging.WARNING, error=msg)
         friendly = "Model output failed validation; please retry or adjust the request."
         return friendly, usage
     except Exception as exc:  # pragma: no cover - provider errors
         msg = str(exc)
-        stream_logger.warning("LLM stream error: %s", msg)
-        llm_logger.warning("LLM stream error: %s", msg)
+        log_event(logger, "llm.stream.error", level=logging.WARNING, error=msg)
         return f"Provider error: {msg}", None
+    finally:
+        if event_iter is not None:
+            closer = getattr(event_iter, "aclose", None)
+            if callable(closer):
+                with contextlib.suppress(Exception):
+                    await closer()
 
     if thought_delta_buffer and on_thought is not None:
         final_thought = "".join(thought_delta_buffer)

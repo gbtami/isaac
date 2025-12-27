@@ -51,6 +51,9 @@ from isaac.client.display import (
     print_tool,
 )
 from isaac.client.session_state import SessionUIState
+from isaac.log_utils import log_context as log_ctx, log_event
+
+logger = logging.getLogger(__name__)
 
 
 class ACPClient(Client):
@@ -60,7 +63,7 @@ class ACPClient(Client):
         self._last_prompt = ""
         self._state = state
         self._terminal_manager = ClientTerminalManager()
-        self._logger = logging.getLogger("acp_client")
+        self._logger = logger
 
     async def request_permission(
         self,
@@ -74,14 +77,13 @@ class ACPClient(Client):
             return RequestPermissionResponse(outcome=DeniedOutcome(outcome="cancelled"))
         if self._state.thinking_status is not None:
             self._state.thinking_status.stop()
-        raw_input = getattr(tool_call, "raw_input", None) or {}
-        self._logger.info(
-            "permission.request session=%s tool=%s options=%s raw=%s",
-            session_id,
-            getattr(tool_call, "title", "") or getattr(tool_call, "tool_call_id", ""),
-            [getattr(opt, "option_id", "<id>") for opt in options],
-            raw_input,
-        )
+        with log_ctx(session_id=session_id):
+            log_event(
+                self._logger,
+                "client.permission.request",
+                tool=getattr(tool_call, "title", "") or getattr(tool_call, "tool_call_id", ""),
+                options=[getattr(opt, "option_id", "<id>") for opt in options],
+            )
         try:
             for idx, opt in enumerate(options, start=1):
                 label = getattr(opt, "label", opt.option_id)
@@ -93,7 +95,8 @@ class ACPClient(Client):
                 selection = options[0].option_id if options else "default"
         except Exception:
             selection = options[0].option_id if options else "default"
-        self._logger.info("permission.response session=%s selection=%s", session_id, selection)
+        with log_ctx(session_id=session_id):
+            log_event(self._logger, "client.permission.response", selection=selection)
         return RequestPermissionResponse(outcome=AllowedOutcome(option_id=selection, outcome="selected"))
 
     async def ext_method(self, method: str, params: dict[str, Any]) -> dict[str, Any]:
@@ -233,9 +236,17 @@ class ACPClient(Client):
                     summary_bits.append("truncated")
                 summary = " ".join(summary_bits) if summary_bits else "done"
                 print_tool(update.status, summary, kind=str(getattr(update, "kind", "")) or None)
+                delegate_tool = raw_out.get("delegate_tool")
+                delegate_output = raw_out.get("content")
+                if delegate_tool and delegate_output not in (None, ""):
+                    formatted = _format_delegate_output(delegate_tool, delegate_output)
+                    if formatted:
+                        print_agent_text(formatted)
             else:
                 text = raw_out.get("content") or raw_out.get("error") or ""
                 print_tool(update.status, text, kind=str(getattr(update, "kind", "")) or None)
+                if raw_out.get("delegate_tool"):
+                    return
                 if getattr(update, "content", None):
                     for item in update.content or []:
                         inner = getattr(item, "content", None)
@@ -269,7 +280,7 @@ class ACPClient(Client):
             self._maybe_update_usage_summary(display_text)
             print_agent_text(display_text)
             return
-        elif isinstance(content, ImageContentBlock):
+        if isinstance(content, ImageContentBlock):
             display_text = "<image>"
         elif isinstance(content, AudioContentBlock):
             display_text = "<audio>"
@@ -283,6 +294,7 @@ class ACPClient(Client):
         print_agent_text(rendered)
 
     def _maybe_update_usage_summary(self, text: str) -> None:
+        """Capture usage lines so the UI can display token/usage summaries."""
         if text.startswith("Usage:"):
             self._state.usage_summary = text
             self._state.notify_changed()
@@ -291,6 +303,56 @@ class ACPClient(Client):
             self._state.usage_summary = text
             self._state.notify_changed()
             return
+
+
+def _format_delegate_output(tool_name: str, payload: Any) -> str:
+    """Render delegate tool payloads into user-facing summaries.
+
+    This keeps delegate results readable while avoiding raw JSON spam for tools
+    like the planner that already stream structured updates separately.
+    """
+    if isinstance(payload, dict):
+        if tool_name == "planner" and payload.get("entries"):
+            return ""
+        summary = payload.get("summary")
+        lines: list[str] = []
+        if isinstance(summary, str) and summary.strip():
+            lines.append(summary.strip())
+
+        def _append_list(title: str, items: Any) -> None:
+            if not items:
+                return
+            if not isinstance(items, list):
+                items = [items]
+            if not items:
+                return
+            lines.append(f"{title}:")
+            for item in items:
+                if isinstance(item, dict):
+                    desc = item.get("description") or item.get("summary") or item.get("path") or str(item)
+                    severity = item.get("severity")
+                    location = item.get("location") or item.get("line")
+                    extra = []
+                    if severity:
+                        extra.append(str(severity))
+                    if location:
+                        extra.append(str(location))
+                    suffix = f" ({', '.join(extra)})" if extra else ""
+                    lines.append(f"- {desc}{suffix}")
+                else:
+                    lines.append(f"- {item}")
+
+        _append_list("Findings", payload.get("findings"))
+        _append_list("Files", payload.get("files"))
+        _append_list("Tests", payload.get("tests"))
+        _append_list("Risks", payload.get("risks"))
+        _append_list("Followups", payload.get("followups"))
+        if lines:
+            return "\n".join(lines).rstrip() + "\n"
+        return json.dumps(payload, ensure_ascii=True, indent=2) + "\n"
+    if isinstance(payload, list):
+        return "\n".join(str(item) for item in payload).rstrip() + "\n"
+    return f"{payload}\n"
 
 
 async def set_mode(

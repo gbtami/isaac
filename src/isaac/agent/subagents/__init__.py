@@ -1,4 +1,8 @@
-"""Delegate sub-agent tooling and registries."""
+"""Delegate sub-agent tooling and registries.
+
+This module auto-discovers delegate tool modules at import time so contributors
+can add new sub-agents by dropping a module in this package.
+"""
 
 from __future__ import annotations
 
@@ -20,7 +24,11 @@ _DISCOVERED = False
 
 
 def _discover_delegate_tools() -> None:
-    """Import sub-agent modules so they can register their delegate tools."""
+    """Import sub-agent modules so they can register their delegate tools.
+
+    Auto-discovery keeps tool registration data-driven and avoids editing
+    central registries when new sub-agents are added.
+    """
 
     global _DISCOVERED
     if _DISCOVERED:

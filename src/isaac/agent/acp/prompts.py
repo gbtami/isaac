@@ -15,8 +15,9 @@ from isaac.agent.plan_shortcuts import build_plan_shortcut_notification, parse_p
 from isaac.agent.prompt_utils import extract_prompt_text
 from isaac.agent.slash import handle_slash_command
 from isaac.agent.tools import register_tools
+from isaac.log_utils import log_context, log_event
 
-logger = logging.getLogger("acp_server")
+logger = logging.getLogger(__name__)
 
 
 class PromptMixin:
@@ -46,7 +47,8 @@ class PromptMixin:
         **_: Any,
     ) -> PromptResponse:
         """Process a prompt turn per Prompt Turn lifecycle (session/prompt)."""
-        logger.info("Received prompt request for session: %s", session_id)
+        with log_context(session_id=session_id):
+            log_event(logger, "acp.prompt.request")
         cancel_event = self._cancel_events.setdefault(session_id, asyncio.Event())
         cancel_event.clear()
         # Reset last text chunk tracking for this prompt turn.
@@ -83,7 +85,8 @@ class PromptMixin:
 
     async def cancel(self, session_id: str, **_: Any) -> None:
         """Stop in-flight prompt/tool work for a session (Prompt Turn cancellation)."""
-        logger.info("Received cancel notification for session %s", session_id)
+        with log_context(session_id=session_id):
+            log_event(logger, "acp.prompt.cancel")
         event = self._cancel_events.get(session_id)
         if event:
             event.set()

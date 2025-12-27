@@ -10,7 +10,9 @@ from acp import RequestPermissionResponse
 from acp.helpers import text_block, tool_content
 from acp.schema import PermissionOption, ToolCall
 
-logger = logging.getLogger("acp_server")
+from isaac.log_utils import log_context, log_event
+
+logger = logging.getLogger(__name__)
 
 
 class PermissionMixin:
@@ -44,6 +46,8 @@ class PermissionMixin:
             return True
 
         try:
+            with log_context(session_id=session_id, tool_call_id=tool_call_id):
+                log_event(logger, "acp.permission.request", command=command.strip(), cwd=cwd or "")
             options = [
                 PermissionOption(option_id="allow_once", name="Allow once", kind="allow_once"),
                 PermissionOption(option_id="allow_always", name="Allow this command", kind="allow_always"),
@@ -79,12 +83,19 @@ class PermissionMixin:
             key = (command.strip(), cwd or "")
             if option_id == "allow_always":
                 self._session_allowed_commands.setdefault(session_id, set()).add(key)
+                with log_context(session_id=session_id, tool_call_id=tool_call_id):
+                    log_event(logger, "acp.permission.granted", mode="allow_always")
                 return True
             if option_id == "allow_once":
+                with log_context(session_id=session_id, tool_call_id=tool_call_id):
+                    log_event(logger, "acp.permission.granted", mode="allow_once")
                 return True
             if key in self._session_allowed_commands.get(session_id, set()):
                 return True
+            with log_context(session_id=session_id, tool_call_id=tool_call_id):
+                log_event(logger, "acp.permission.denied")
             return False
         except Exception as exc:  # pragma: no cover - defensive fallback
-            logger.warning("Permission request failed, denying by default: %s", exc)
+            with log_context(session_id=session_id, tool_call_id=tool_call_id):
+                log_event(logger, "acp.permission.error", level=logging.WARNING, error=str(exc))
             return False

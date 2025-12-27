@@ -29,8 +29,9 @@ from isaac.agent.agent_terminal import (
 )
 from isaac.agent.tool_io import await_with_cancel, truncate_text, truncate_tool_output
 from isaac.agent.tools import run_tool
+from isaac.log_utils import log_context, log_event
 
-logger = logging.getLogger("acp_server")
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -57,12 +58,8 @@ async def execute_tool(
     """Execute a regular tool and stream ACP tool_call_update notifications."""
     tool_call_id = tool_call_id or str(uuid.uuid4())
     tracker = ToolCallTracker(id_factory=lambda: tool_call_id)
-    logger.info(
-        "Tool call start %s session=%s args_keys=%s",
-        tool_name,
-        session_id,
-        sorted(arguments or {}),
-    )
+    with log_context(session_id=session_id, tool_call_id=tool_call_id, tool_name=tool_name):
+        log_event(logger, "tool.call.start", args_keys=sorted(arguments or {}))
     start = tracker.start(
         external_id=tool_call_id,
         title=tool_name,
@@ -81,6 +78,8 @@ async def execute_tool(
         cancel_event,
     )
     if result is None:
+        with log_context(session_id=session_id, tool_call_id=tool_call_id, tool_name=tool_name):
+            log_event(logger, "tool.call.cancelled")
         progress = tracker.progress(
             external_id=tool_call_id,
             status="failed",
@@ -108,13 +107,13 @@ async def execute_tool(
                 content_blocks.append(tool_diff_content(path, new_text, old_text))
     if not content_blocks:
         content_blocks = [tool_content(text_block(summary))]
-    logger.info(
-        "Tool call done %s session=%s status=%s summary_preview=%s",
-        tool_name,
-        session_id,
-        status,
-        str(summary)[:160].replace("\n", "\\n"),
-    )
+    with log_context(session_id=session_id, tool_call_id=tool_call_id, tool_name=tool_name):
+        log_event(
+            logger,
+            "tool.call.complete",
+            status=status,
+            summary_preview=str(summary)[:160].replace("\n", "\\n"),
+        )
     progress = tracker.progress(
         external_id=tool_call_id,
         status=status,
@@ -135,6 +134,8 @@ async def execute_run_command_with_terminal(
     tracker = ToolCallTracker(id_factory=lambda: tool_call_id)
     command = arguments.get("command") or ""
     cwd_arg = arguments.get("cwd")
+    with log_context(session_id=session_id, tool_call_id=tool_call_id, tool_name="run_command"):
+        log_event(logger, "tool.run_command.start", command=command.strip(), cwd=cwd_arg)
 
     start = tracker.start(
         external_id=tool_call_id,
@@ -154,6 +155,8 @@ async def execute_run_command_with_terminal(
             cwd=cwd_arg,
         )
         if not allowed:
+            with log_context(session_id=session_id, tool_call_id=tool_call_id, tool_name="run_command"):
+                log_event(logger, "tool.run_command.denied")
             progress = tracker.progress(
                 external_id=tool_call_id,
                 status="failed",
@@ -166,6 +169,8 @@ async def execute_run_command_with_terminal(
     cancel_event = ctx.cancel_events.setdefault(session_id, asyncio.Event())
     cancel_event.clear()
     timeout_s = float(arguments.get("timeout") or ctx.command_timeout_s)
+    with log_context(session_id=session_id, tool_call_id=tool_call_id, tool_name="run_command"):
+        log_event(logger, "tool.run_command.config", timeout_s=timeout_s)
 
     try:
         create_resp = await create_terminal(
@@ -180,6 +185,8 @@ async def execute_run_command_with_terminal(
             ),
         )
     except Exception as exc:  # pragma: no cover - defensive
+        with log_context(session_id=session_id, tool_call_id=tool_call_id, tool_name="run_command"):
+            log_event(logger, "tool.run_command.error", level=logging.WARNING, error=str(exc))
         progress = tracker.progress(
             external_id=tool_call_id,
             status="failed",
@@ -280,3 +287,12 @@ async def execute_run_command_with_terminal(
         content=[tool_content(text_block(summary))] if summary else None,
     )
     await ctx.send_update(session_notification(session_id, progress))
+    with log_context(session_id=session_id, tool_call_id=tool_call_id, tool_name="run_command"):
+        log_event(
+            logger,
+            "tool.run_command.complete",
+            status=status,
+            returncode=exit_code,
+            truncated=truncated,
+            error=error_msg,
+        )

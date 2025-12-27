@@ -68,13 +68,13 @@ async def planner(
     carryover: bool = False,
 ) -> dict[str, object]:
     """Delegate planning to a specialized planner agent."""
-    _ = ctx
     result = await run_delegate_tool(
         PLANNER_TOOL_SPEC,
         task=task,
         context=context,
         session_id=session_id,
         carryover=carryover,
+        tool_call_id=getattr(ctx, "tool_call_id", None),
     )
     if result.get("error"):
         return result

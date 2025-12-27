@@ -12,6 +12,7 @@ from acp import ClientSideConnection
 from isaac.client.acp_client import set_mode
 from isaac.client.session_state import SessionUIState
 from isaac.client.thinking import toggle_thinking
+from isaac.log_utils import log_event
 
 logger = logging.getLogger(__name__)
 
@@ -169,5 +170,5 @@ async def handle_slash_command(
     except SystemExit:
         raise
     except Exception as exc:  # noqa: BLE001
-        logger.error("Slash command failed (%s): %s", command, exc)
+        log_event(logger, "client.slash.error", level=logging.WARNING, command=command, error=str(exc))
         return True

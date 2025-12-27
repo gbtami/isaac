@@ -17,8 +17,9 @@ from isaac.agent.brain.model_errors import ModelBuildError
 from isaac.agent.brain.prompt import SYSTEM_PROMPT
 from isaac.agent.mcp_support import build_mcp_toolsets
 from isaac.agent.session_modes import build_mode_state
+from isaac.log_utils import log_context, log_event
 
-logger = logging.getLogger("acp_server")
+logger = logging.getLogger(__name__)
 
 
 class SessionLifecycleMixin:
@@ -42,30 +43,31 @@ class SessionLifecycleMixin:
     ) -> NewSessionResponse:
         """Create a new session (Session Setup / creation)."""
         session_id = str(uuid.uuid4())
-        logger.info("Received new session request: %s cwd=%s", session_id, cwd)
-        self._sessions.add(session_id)
-        cwd_path = self._require_absolute_cwd(cwd)
-        self._session_cwds[session_id] = cwd_path
-        session_system_prompt = self._build_session_system_prompt(cwd_path)
-        self._session_system_prompts[session_id] = session_system_prompt
-        self._cancel_events[session_id] = asyncio.Event()
-        toolsets = build_mcp_toolsets(mcp_servers)
-        self._session_toolsets[session_id] = toolsets
-        await self._prompt_handler.init_session(session_id, toolsets, system_prompt=session_system_prompt)
-        self._session_history[session_id] = []
-        self._session_allowed_commands[session_id] = set()
-        self._session_mcp_servers[session_id] = mcp_servers
-        model_id = self._prompt_handler.model_id(session_id) or self._current_model_id()
-        self._session_model_ids[session_id] = model_id
-        self._persist_session_meta(
-            session_id,
-            cwd_path,
-            mcp_servers,
-            current_mode="ask",
-        )
-        mode_state = build_mode_state(self._session_modes, session_id, current_mode="ask")
-        await self._send_available_commands(session_id)
-        return NewSessionResponse(session_id=session_id, modes=mode_state)
+        with log_context(session_id=session_id, cwd=cwd):
+            log_event(logger, "acp.session.new")
+            self._sessions.add(session_id)
+            cwd_path = self._require_absolute_cwd(cwd)
+            self._session_cwds[session_id] = cwd_path
+            session_system_prompt = self._build_session_system_prompt(cwd_path)
+            self._session_system_prompts[session_id] = session_system_prompt
+            self._cancel_events[session_id] = asyncio.Event()
+            toolsets = build_mcp_toolsets(mcp_servers)
+            self._session_toolsets[session_id] = toolsets
+            await self._prompt_handler.init_session(session_id, toolsets, system_prompt=session_system_prompt)
+            self._session_history[session_id] = []
+            self._session_allowed_commands[session_id] = set()
+            self._session_mcp_servers[session_id] = mcp_servers
+            model_id = self._prompt_handler.model_id(session_id) or self._current_model_id()
+            self._session_model_ids[session_id] = model_id
+            self._persist_session_meta(
+                session_id,
+                cwd_path,
+                mcp_servers,
+                current_mode="ask",
+            )
+            mode_state = build_mode_state(self._session_modes, session_id, current_mode="ask")
+            await self._send_available_commands(session_id)
+            return NewSessionResponse(session_id=session_id, modes=mode_state)
 
     async def load_session(
         self,
@@ -75,7 +77,8 @@ class SessionLifecycleMixin:
         **_: Any,
     ) -> LoadSessionResponse | None:
         """Reload an existing session and replay history (Session Setup / loading)."""
-        logger.info("Received load session request %s", session_id)
+        with log_context(session_id=session_id, cwd=cwd):
+            log_event(logger, "acp.session.load")
         self._sessions.add(session_id)
         stored_meta = self._load_session_meta(session_id)
         cwd_path = self._require_absolute_cwd(cwd)
@@ -121,11 +124,8 @@ class SessionLifecycleMixin:
 
     async def set_session_mode(self, mode_id: str, session_id: str, **_: Any) -> SetSessionModeResponse | None:
         """Update the current session mode and broadcast (Session Modes)."""
-        logger.info(
-            "Received set session mode request %s -> %s",
-            session_id,
-            mode_id,
-        )
+        with log_context(session_id=session_id, mode_id=mode_id):
+            log_event(logger, "acp.session.mode")
         self._session_modes[session_id] = mode_id
         await self._send_update(self._mode_update(session_id, mode_id))
         self._persist_session_meta(
@@ -138,7 +138,8 @@ class SessionLifecycleMixin:
 
     async def set_session_model(self, model_id: str, session_id: str, **_: Any) -> SetSessionModelResponse | None:
         """Switch the backing model for a session."""
-        logger.info("Received set session model request %s -> %s", session_id, model_id)
+        with log_context(session_id=session_id, model_id=model_id):
+            log_event(logger, "acp.session.model")
         previous_model_id = self._session_model_ids.get(session_id, model_registry.current_model_id())
         try:
             await self._prompt_handler.set_session_model(

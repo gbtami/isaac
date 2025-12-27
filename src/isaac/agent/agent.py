@@ -4,10 +4,13 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from pathlib import Path
+from dataclasses import replace
 
 from isaac.agent.acp_agent import ACPAgent
 from isaac.agent.tools import run_tool
+from isaac.log_utils import build_log_config, configure_logging, log_event
+
+logger = logging.getLogger(__name__)
 
 __all__ = ["ACPAgent", "run_acp_agent", "main_entry", "run_tool"]
 
@@ -17,27 +20,24 @@ async def run_acp_agent():
     from acp.core import run_agent  # Imported lazily to avoid hard dependency at import time
 
     _setup_acp_logging()
-    logging.getLogger("acp_server").info("Starting ACP server on stdio")
+    log_event(logger, "agent.start", transport="stdio")
 
     await run_agent(ACPAgent())
 
 
 def _setup_acp_logging():
-    log_dir = Path.home() / ".isaac"
-    log_dir.mkdir(exist_ok=True)
-    log_file = log_dir / "isaac.log"
-
-    root_logger = logging.getLogger()
-    for handler in root_logger.handlers[:]:
-        root_logger.removeHandler(handler)
-
-    logging.basicConfig(
-        level=logging.INFO,
-        format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-        handlers=[logging.FileHandler(log_file)],
+    config = build_log_config(log_file_name="isaac.log")
+    configure_logging(
+        replace(
+            config,
+            logger_levels={
+                "isaac": config.level,
+                "acp": config.level,
+                "pydantic_ai": config.level,
+                "pydantic_ai.providers": config.level,
+            },
+        )
     )
-    logging.getLogger("isaac").setLevel(logging.INFO)
-    logging.getLogger("acp_server").setLevel(logging.INFO)
 
 
 async def main(argv: list[str] | None = None):

@@ -17,18 +17,25 @@ from isaac.agent.tools.registry import (
     _FULL_TOOL_ORDER,
     _READ_ONLY_TOOL_ORDER,
 )
+from isaac.log_utils import log_event
 
 
 def register_readonly_tools(agent: Any, *, tool_names: Iterable[str] | None = None) -> None:
-    """Register read-only tool wrappers on the given agent (for planning delegate)."""
+    """Register read-only tool wrappers on the given agent.
+
+    The planner delegate uses a restricted toolset so it cannot mutate state.
+    """
     tools = _READ_ONLY_TOOL_ORDER if tool_names is None else tuple(tool_names)
     _register_toolset(agent, tools=tools, logger=None)
 
 
 def register_tools(agent: Any, *, tool_names: Iterable[str] | None = None) -> None:
-    """Register the toolset on the given agent."""
+    """Register the toolset on the given agent.
+
+    The full toolset includes filesystem, command, and delegate tools.
+    """
     tools = _FULL_TOOL_ORDER if tool_names is None else tuple(tool_names)
-    _register_toolset(agent, tools=tools, logger=logging.getLogger("acp_server"))
+    _register_toolset(agent, tools=tools, logger=logging.getLogger(__name__))
 
 
 def _register_toolset(
@@ -37,6 +44,7 @@ def _register_toolset(
     tools: tuple[str, ...],
     logger: logging.Logger | None,
 ) -> None:
+    """Register a tool list on a pydantic-ai agent with per-tool timeouts."""
     registrar = _ToolRegistrar(logger)
     tool_map: dict[str, tuple[Callable[..., Awaitable[Any]], float | None]] = {
         "list_files": (registrar.list_files_tool, DEFAULT_TOOL_TIMEOUT_S),
@@ -56,18 +64,28 @@ def _register_toolset(
 
 
 class _ToolRegistrar:
+    """Builds tool wrappers that route calls through run_tool.
+
+    Wrappers handle logging and keep the pydantic-ai interface consistent.
+    """
+
     def __init__(self, logger: logging.Logger | None) -> None:
         self._logger = logger
 
     def _log(self, tool_name: str, args: dict[str, Any]) -> None:
+        """Emit a debug log for tool invocation arguments."""
         if self._logger is None:
             return
-        self._logger.info("Pydantic tool invoked: %s args=%s", tool_name, args)
+        log_event(self._logger, "tool.wrapper.invoke", level=logging.DEBUG, tool=tool_name, args=args)
 
     def delegate_tool(
         self, tool_name: str
     ) -> Callable[[RunContext[Any], str, str | None, str | None, bool], Awaitable[Any]]:
-        """Build a wrapper for delegate tools that share the base delegate args."""
+        """Build a wrapper for delegate tools that share the base delegate args.
+
+        Delegate tools always accept task/context/session/carryover to keep the
+        tool call contract uniform across sub-agents.
+        """
 
         async def _tool(
             ctx: RunContext[Any],
