@@ -9,7 +9,7 @@ from unittest.mock import AsyncMock
 
 import pytest
 from acp import text_block
-from acp.schema import AgentPlanUpdate, ToolCallProgress
+from acp.schema import AgentPlanUpdate, AgentThoughtChunk, ToolCallProgress
 from pydantic_ai.messages import (  # type: ignore
     FunctionToolCallEvent,
     FunctionToolResultEvent,
@@ -28,6 +28,11 @@ from isaac.agent.brain import compaction as compaction_utils
 from isaac.agent.brain.session_state import SessionState
 from pydantic_ai.run import AgentRunResult, AgentRunResultEvent  # type: ignore
 from isaac.agent.tools import register_tools
+from isaac.agent.subagents.delegate_tools import (
+    DelegateToolContext,
+    reset_delegate_tool_context,
+    set_delegate_tool_context,
+)
 
 
 COMPACT_USER_MAX_TOKENS = 20_000
@@ -512,3 +517,57 @@ async def test_delegate_tool_carryover_acp_integration(monkeypatch, tmp_path):
     await agent.prompt(prompt=[text_block("second")], session_id=session.session_id)
 
     assert _extract_summary() == "carryover seen"
+
+
+@pytest.mark.asyncio
+async def test_delegate_tool_emits_progress_and_thought(monkeypatch):
+    updates: list[Any] = []
+
+    async def _capture_update(note: Any) -> None:
+        updates.append(getattr(note, "update", note))
+
+    send_update = AsyncMock(side_effect=_capture_update)
+    ctx = set_delegate_tool_context(
+        DelegateToolContext(
+            session_id="s-delegate",
+            request_run_permission=AsyncMock(return_value=True),
+            send_update=send_update,
+        )
+    )
+    try:
+
+        async def fake_stream_with_runner(
+            _runner: Any,
+            _prompt: str,
+            on_text: Any,
+            on_thought: Any,
+            _cancel_event: Any,
+            **__: object,
+        ):
+            assert on_thought is not None
+            await on_thought("delegate thinking one ")
+            await on_thought("delegate thinking two")
+            await on_text("streaming ")
+            await on_text("output")
+            return '{"entries":[{"content":"step","priority":"high"}]}', None
+
+        monkeypatch.setattr("isaac.agent.subagents.delegate_tools.stream_with_runner", fake_stream_with_runner)
+        monkeypatch.setattr(
+            "isaac.agent.subagents.delegate_tools._build_delegate_agent",
+            lambda *_args, **_kwargs: object(),
+        )
+
+        from isaac.agent.subagents.planner import planner
+
+        result = await planner(SimpleNamespace(tool_call_id="tc-delegate"), task="plan it")
+        assert result["error"] is None
+    finally:
+        reset_delegate_tool_context(ctx)
+
+    progress_updates = [u for u in updates if isinstance(u, ToolCallProgress)]
+    thought_updates = [u for u in updates if isinstance(u, AgentThoughtChunk)]
+    assert progress_updates, "Expected delegate tool progress updates"
+    assert thought_updates, "Expected delegate tool thought updates"
+    thought_text = "".join(update.content.text for update in thought_updates)
+    assert "delegate thinking one" in thought_text
+    assert "delegate thinking two" in thought_text

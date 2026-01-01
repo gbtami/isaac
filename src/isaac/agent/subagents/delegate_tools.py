@@ -17,7 +17,7 @@ from pydantic_ai import Agent as PydanticAgent  # type: ignore
 from pydantic_ai.run import AgentRunResultEvent  # type: ignore
 
 from acp.contrib.tool_calls import ToolCallTracker
-from acp.helpers import session_notification, text_block, tool_content
+from acp.helpers import session_notification, text_block, tool_content, update_agent_thought
 from isaac.agent.ai_types import AgentRunner
 from isaac.agent import models as model_registry
 from isaac.agent.brain.prompt import SYSTEM_PROMPT
@@ -381,6 +381,8 @@ async def _run_delegate_once(
 
     buffer: list[str] = []
     last_sent = 0.0
+    thought_buffer: list[str] = []
+    thought_last_sent = 0.0
 
     async def _emit_progress(text: str) -> None:
         if not tracker or not send_update or not session_id:
@@ -399,6 +401,15 @@ async def _run_delegate_once(
         with contextlib.suppress(Exception):
             await send_update(session_notification(session_id, progress))
 
+    async def _emit_thought(text: str) -> None:
+        if not send_update or not session_id:
+            return
+        thought = text.strip()
+        if not thought:
+            return
+        with contextlib.suppress(Exception):
+            await send_update(session_notification(session_id, update_agent_thought(text_block(thought))))
+
     async def _flush(force: bool = False) -> None:
         nonlocal last_sent
         if not buffer:
@@ -411,11 +422,29 @@ async def _run_delegate_once(
         last_sent = now
         await _emit_progress(text)
 
+    async def _flush_thought(force: bool = False) -> None:
+        nonlocal thought_last_sent
+        if not thought_buffer:
+            return
+        now = time.monotonic()
+        if not force and (now - thought_last_sent) < 0.5 and sum(len(chunk) for chunk in thought_buffer) < 200:
+            return
+        text = "".join(thought_buffer)
+        thought_buffer.clear()
+        thought_last_sent = now
+        await _emit_thought(text)
+
     async def _on_text(chunk: str) -> None:
         if not chunk:
             return
         buffer.append(chunk)
         await _flush()
+
+    async def _on_thought(chunk: str) -> None:
+        if not chunk:
+            return
+        thought_buffer.append(chunk)
+        await _flush_thought()
 
     async def _capture(event: Any) -> bool:
         nonlocal structured
@@ -432,7 +461,7 @@ async def _run_delegate_once(
             agent,
             prompt,
             _on_text,
-            None,
+            _on_thought,
             cancel_event,
             on_event=_capture,
             log_context=log_context,
@@ -452,6 +481,7 @@ async def _run_delegate_once(
         )
 
     await _flush(force=True)
+    await _flush_thought(force=True)
 
     if response is None:
         return _DelegateRunOutcome(content=None, raw_text=None, error="Delegate agent cancelled.")
