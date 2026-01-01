@@ -8,6 +8,7 @@ import logging
 from typing import Any, Awaitable, Callable, Dict
 
 from pydantic_ai.messages import FunctionToolCallEvent, FunctionToolResultEvent, RetryPromptPart
+from isaac.agent.history_types import ChatMessage
 from isaac.agent.brain.events import ToolCallFinish, ToolCallStart
 from isaac.agent.brain.tool_events import should_record_tool_history, tool_history_summary, tool_kind
 from isaac.agent.brain.tool_args import coerce_tool_args
@@ -67,7 +68,7 @@ class PromptRunner:
         session_id: str,
         run_command_ctx_tokens: Dict[str, Any],
         plan_progress: dict[str, Any] | None = None,
-        record_history: Callable[[dict[str, str]], None] | None = None,
+        record_history: Callable[[ChatMessage], None] | None = None,
     ) -> Callable[[Any], Awaitable[bool]]:
         tool_call_inputs: Dict[str, Dict[str, Any]] = {}
 

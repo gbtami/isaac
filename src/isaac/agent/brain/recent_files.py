@@ -5,6 +5,8 @@ from __future__ import annotations
 import contextlib
 from typing import Any
 
+from isaac.agent.history_types import ChatMessage
+
 from pydantic_ai.messages import FunctionToolResultEvent  # type: ignore
 
 
@@ -33,7 +35,9 @@ def record_recent_file(recent_files: list[str], event: Any, max_recent: int) -> 
         del recent_files[:-max_recent]
 
 
-def inject_recent_files_context(history: list[Any], recent_files: list[str], context_count: int) -> list[Any]:
+def inject_recent_files_context(
+    history: list[ChatMessage], recent_files: list[str], context_count: int
+) -> list[ChatMessage]:
     """Add recent file hints to the model context for ambiguous follow-ups."""
 
     if not recent_files:

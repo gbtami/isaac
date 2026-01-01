@@ -8,6 +8,8 @@ from typing import Any, Dict
 from pydantic_ai.messages import FunctionToolResultEvent  # type: ignore
 
 from isaac.agent import models as model_registry
+from isaac.agent.ai_types import ToolRegister
+from isaac.agent.history_types import ChatMessage
 from isaac.agent.brain.plan_helpers import plan_from_planner_result
 from isaac.agent.brain.prompt_runner import PromptEnv, PromptRunner
 from isaac.agent.brain.prompt_result import PromptResult
@@ -42,7 +44,7 @@ class PromptHandler:
         self,
         env: PromptEnv,
         *,
-        register_tools: Any | None = None,
+        register_tools: ToolRegister | None = None,
     ) -> None:
         self.env = env
         self._register_tools = register_tools or default_register_tools
@@ -125,7 +127,7 @@ class PromptHandler:
 
         run_command_ctx_tokens: Dict[str, Any] = {}
 
-        def _record_history(msg: dict[str, Any]) -> None:
+        def _record_history(msg: ChatMessage) -> None:
             content = str(msg.get("content") or "").strip()
             if not content:
                 return

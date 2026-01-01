@@ -5,6 +5,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any
 
+from isaac.agent.history_types import ChatMessage
+
 
 @dataclass
 class SessionState:
@@ -12,7 +14,7 @@ class SessionState:
 
     runner: Any | None = None
     model_id: str | None = None
-    history: list[Any] = field(default_factory=list)
+    history: list[ChatMessage] = field(default_factory=list)
     recent_files: list[str] = field(default_factory=list)
     last_usage_total_tokens: int | None = None
     model_error: str | None = None

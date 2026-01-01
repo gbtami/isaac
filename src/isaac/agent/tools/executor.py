@@ -8,13 +8,14 @@ from typing import Any
 
 from pydantic import ValidationError
 
+from isaac.agent.ai_types import ToolContext
 from isaac.agent.tools.registry import TOOL_ARG_MODELS, TOOL_HANDLERS, TOOL_REQUIRED_ARGS
 from isaac.log_utils import log_event
 
 logger = logging.getLogger(__name__)
 
 
-async def run_tool(function_name: str, ctx: Any | None = None, **kwargs: Any) -> dict:
+async def run_tool(function_name: str, ctx: ToolContext | None = None, **kwargs: Any) -> dict[str, Any]:
     """Run a tool by name with pydantic validation and pydantic-ai retries."""
     handler = TOOL_HANDLERS.get(function_name)
     if not handler:

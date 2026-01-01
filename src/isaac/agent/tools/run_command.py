@@ -1,9 +1,9 @@
 import asyncio
 import contextvars
 from dataclasses import dataclass
-from typing import Any, Awaitable, Callable, Optional
+from typing import Awaitable, Callable, Optional
 
-from pydantic_ai import RunContext
+from isaac.agent.ai_types import ToolContext
 
 
 @dataclass
@@ -55,7 +55,7 @@ def get_run_command_context() -> RunCommandContext | None:
 
 
 async def run_command(
-    ctx: RunContext[Any] = None,
+    ctx: ToolContext | None = None,
     command: str = "",
     cwd: Optional[str] = None,
     timeout: Optional[float] = None,

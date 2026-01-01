@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from typing import Any
 
+from isaac.agent.history_types import ChatMessage
+
 
 def extract_usage_total(usage: Any) -> int | None:
     """Return total token usage from a RunUsage-like object or dict."""
@@ -30,7 +32,7 @@ def extract_usage_total(usage: Any) -> int | None:
     return None
 
 
-def trim_history(history: list[Any], limit: int) -> list[Any]:
+def trim_history(history: list[ChatMessage], limit: int) -> list[ChatMessage]:
     """Return the most recent history up to the limit."""
 
     if limit <= 0:

@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 from types import SimpleNamespace
+import contextlib
 import importlib
 import json
+import re
 from unittest.mock import AsyncMock
 
 import pytest
@@ -13,7 +15,7 @@ from pydantic_ai.messages import (  # type: ignore
     FunctionToolResultEvent,
     ToolCallPart,
 )
-from pydantic_ai.messages import ModelRequest, ModelResponse, TextPart  # type: ignore
+from pydantic_ai.messages import ModelRequest, ModelResponse, TextPart, ToolReturnPart  # type: ignore
 from pydantic_ai import Agent as PydanticAgent  # type: ignore
 from pydantic_ai.models.test import TestModel  # type: ignore
 
@@ -365,6 +367,26 @@ async def test_delegate_tool_carryover_acp_integration(monkeypatch, tmp_path):
                 return self._fixed_args[name]
             return super().gen_tool_args(tool_def)
 
+        def _request(self, messages, model_settings, model_request_parameters):  # type: ignore[override]
+            tool_calls = self._get_tool_calls(model_request_parameters)
+            has_tool_returns = any(
+                isinstance(message, ModelRequest) and any(isinstance(part, ToolReturnPart) for part in message.parts)
+                for message in messages
+            )
+            if tool_calls and not has_tool_returns:
+                return ModelResponse(
+                    parts=[
+                        ToolCallPart(
+                            name,
+                            self.gen_tool_args(args),
+                            tool_call_id=f"pyd_ai_tool_call_id__{name}",
+                        )
+                        for name, args in tool_calls
+                    ],
+                    model_name=self._model_name,
+                )
+            return super()._request(messages, model_settings, model_request_parameters)
+
     class PromptAwareModel(TestModel):  # type: ignore[misc]
         """Return different JSON summaries depending on carryover prompt content."""
 
@@ -456,6 +478,16 @@ async def test_delegate_tool_carryover_acp_integration(monkeypatch, tmp_path):
                 content = raw_output.get("content")
                 if isinstance(content, dict):
                     return content.get("summary")
+                if hasattr(content, "summary"):
+                    return getattr(content, "summary")
+                if isinstance(content, str):
+                    match = re.search(r"summary=['\"]([^'\"]+)['\"]", content)
+                    if match:
+                        return match.group(1)
+                    with contextlib.suppress(Exception):
+                        parsed = json.loads(content)
+                        if isinstance(parsed, dict):
+                            return parsed.get("summary")
         return None
 
     assert _extract_summary() == "no carryover"

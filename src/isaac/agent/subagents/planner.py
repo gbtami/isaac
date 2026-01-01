@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
-from pydantic_ai import RunContext
+from typing import Any
+
+from isaac.agent.ai_types import ToolContext
 
 from isaac.agent.brain.plan_schema import PlanSteps
 from isaac.agent.brain.plan_parser import parse_plan_from_text
@@ -61,12 +63,12 @@ PLANNER_TOOL_SPEC = DelegateToolSpec(
 
 
 async def planner(
-    ctx: RunContext,
+    ctx: ToolContext,
     task: str,
     context: str | None = None,
     session_id: str | None = None,
     carryover: bool = False,
-) -> dict[str, object]:
+) -> dict[str, Any]:
     """Delegate planning to a specialized planner agent."""
     result = await run_delegate_tool(
         PLANNER_TOOL_SPEC,

@@ -7,6 +7,7 @@ import logging
 from typing import Any, TYPE_CHECKING
 
 from isaac.agent import models as model_registry
+from isaac.agent.history_types import ChatMessage
 from isaac.agent.runner import stream_with_runner
 from isaac.log_utils import log_context as log_ctx, log_event
 
@@ -45,7 +46,7 @@ def auto_compact_token_limit(context_limit: int | None, ratio: float) -> int | N
     return max(limit, 1)
 
 
-def estimate_history_tokens(history: list[Any]) -> int:
+def estimate_history_tokens(history: list[ChatMessage]) -> int:
     """Estimate token usage from history content (roughly 4 bytes/token)."""
 
     total = 0
@@ -61,10 +62,10 @@ def estimate_history_tokens(history: list[Any]) -> int:
     return total
 
 
-def prepare_compaction_history(history: list[dict[str, Any]], context_limit: int | None) -> list[dict[str, Any]]:
+def prepare_compaction_history(history: list[ChatMessage], context_limit: int | None) -> list[ChatMessage]:
     """Shrink history content for compaction prompts to avoid context blow-ups."""
 
-    trimmed: list[dict[str, Any]] = []
+    trimmed: list[ChatMessage] = []
     for msg in history:
         if not isinstance(msg, dict):
             continue
@@ -140,7 +141,7 @@ def summary_rejected(summary: str) -> bool:
     )
 
 
-def fallback_summary(history: list[dict[str, Any]]) -> str:
+def fallback_summary(history: list[ChatMessage]) -> str:
     """Build a simple summary from existing history when the model fails."""
 
     lines: list[str] = []
@@ -184,7 +185,7 @@ def is_summary_message(text: str) -> bool:
     return summary_text.startswith(SUMMARY_PREFIX)
 
 
-def collect_user_messages(history: list[dict[str, Any]]) -> list[str]:
+def collect_user_messages(history: list[ChatMessage]) -> list[str]:
     """Collect non-summary user messages for compacted history rebuild."""
 
     messages: list[str] = []
@@ -198,7 +199,7 @@ def collect_user_messages(history: list[dict[str, Any]]) -> list[str]:
     return messages
 
 
-def build_compacted_history(user_messages: list[str], summary_text: str, max_tokens: int) -> list[dict[str, Any]]:
+def build_compacted_history(user_messages: list[str], summary_text: str, max_tokens: int) -> list[ChatMessage]:
     """Rebuild history as recent user messages followed by a summary block."""
 
     selected: list[str] = []
@@ -216,7 +217,7 @@ def build_compacted_history(user_messages: list[str], summary_text: str, max_tok
                 break
         selected.reverse()
 
-    history = [{"role": "user", "content": message} for message in selected if message.strip()]
+    history: list[ChatMessage] = [{"role": "user", "content": message} for message in selected if message.strip()]
 
     summary = summary_text.strip() if summary_text else ""
     if not summary:

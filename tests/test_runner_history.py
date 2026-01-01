@@ -6,6 +6,7 @@ from typing import Any
 from unittest.mock import AsyncMock
 
 import pytest
+from pydantic_ai import messages as ai_messages  # type: ignore
 from pydantic_ai.messages import FunctionToolCallEvent, ToolCallPart  # type: ignore
 
 from isaac.agent.runner import stream_with_runner
@@ -15,7 +16,7 @@ from isaac.agent.brain.tool_events import tool_history_summary
 
 class _CapturingRunner:
     def __init__(self) -> None:
-        self.captured_history: list[dict[str, str]] | None = None
+        self.captured_history: list[Any] | None = None
 
     def system_prompt(self) -> str:
         return "NEW_SYSTEM_PROMPT"
@@ -27,6 +28,25 @@ class _CapturingRunner:
             yield "ok"
 
         return _gen()
+
+
+def _flatten_history(messages: list[Any]) -> list[dict[str, str]]:
+    flattened: list[dict[str, str]] = []
+    for message in messages:
+        if isinstance(message, dict):
+            flattened.append(message)
+            continue
+        if isinstance(message, ai_messages.ModelRequest):
+            for part in message.parts:
+                if isinstance(part, ai_messages.SystemPromptPart):
+                    flattened.append({"role": "system", "content": str(part.content)})
+                elif isinstance(part, ai_messages.UserPromptPart):
+                    flattened.append({"role": "user", "content": str(part.content)})
+        elif isinstance(message, ai_messages.ModelResponse):
+            for part in message.parts:
+                if isinstance(part, ai_messages.TextPart):
+                    flattened.append({"role": "assistant", "content": str(part.content)})
+    return flattened
 
 
 @pytest.mark.asyncio
@@ -48,8 +68,9 @@ async def test_stream_with_runner_replaces_system_prompt_in_history() -> None:
     )
 
     assert runner.captured_history is not None
-    assert runner.captured_history[0] == {"role": "system", "content": "OLD_SYSTEM_PROMPT"}
-    assert any(msg.get("content") == "hi" for msg in runner.captured_history)
+    flattened = _flatten_history(runner.captured_history)
+    assert flattened[0] == {"role": "system", "content": "OLD_SYSTEM_PROMPT"}
+    assert any(msg.get("content") == "hi" for msg in flattened)
 
 
 def test_tool_history_summary_uses_inputs() -> None:

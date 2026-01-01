@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 from typing import Any, Awaitable, Callable, Iterable
 
-from pydantic_ai import RunContext
+from isaac.agent.ai_types import AgentRunner, ToolContext
 
 from isaac.agent.subagents import DELEGATE_TOOL_TIMEOUTS
 from isaac.agent.tools.executor import run_tool
@@ -20,7 +20,7 @@ from isaac.agent.tools.registry import (
 from isaac.log_utils import log_event
 
 
-def register_readonly_tools(agent: Any, *, tool_names: Iterable[str] | None = None) -> None:
+def register_readonly_tools(agent: AgentRunner, *, tool_names: Iterable[str] | None = None) -> None:
     """Register read-only tool wrappers on the given agent.
 
     The planner delegate uses a restricted toolset so it cannot mutate state.
@@ -29,7 +29,7 @@ def register_readonly_tools(agent: Any, *, tool_names: Iterable[str] | None = No
     _register_toolset(agent, tools=tools, logger=None)
 
 
-def register_tools(agent: Any, *, tool_names: Iterable[str] | None = None) -> None:
+def register_tools(agent: AgentRunner, *, tool_names: Iterable[str] | None = None) -> None:
     """Register the toolset on the given agent.
 
     The full toolset includes filesystem, command, and delegate tools.
@@ -39,7 +39,7 @@ def register_tools(agent: Any, *, tool_names: Iterable[str] | None = None) -> No
 
 
 def _register_toolset(
-    agent: Any,
+    agent: AgentRunner,
     *,
     tools: tuple[str, ...],
     logger: logging.Logger | None,
@@ -80,7 +80,7 @@ class _ToolRegistrar:
 
     def delegate_tool(
         self, tool_name: str
-    ) -> Callable[[RunContext[Any], str, str | None, str | None, bool], Awaitable[Any]]:
+    ) -> Callable[[ToolContext, str, str | None, str | None, bool], Awaitable[Any]]:
         """Build a wrapper for delegate tools that share the base delegate args.
 
         Delegate tools always accept task/context/session/carryover to keep the
@@ -88,7 +88,7 @@ class _ToolRegistrar:
         """
 
         async def _tool(
-            ctx: RunContext[Any],
+            ctx: ToolContext,
             task: str,
             context: str | None = None,
             session_id: str | None = None,
@@ -116,7 +116,7 @@ class _ToolRegistrar:
 
     async def list_files_tool(
         self,
-        ctx: RunContext[Any],
+        ctx: ToolContext,
         directory: str = ".",
         recursive: bool = True,
     ) -> Any:
@@ -125,7 +125,7 @@ class _ToolRegistrar:
 
     async def read_file_tool(
         self,
-        ctx: RunContext[Any],
+        ctx: ToolContext,
         path: str,
         start: int | None = None,
         lines: int | None = None,
@@ -135,7 +135,7 @@ class _ToolRegistrar:
 
     async def run_command_tool(
         self,
-        ctx: RunContext[Any],
+        ctx: ToolContext,
         command: str,
         cwd: str | None = None,
         timeout: float | None = None,
@@ -145,7 +145,7 @@ class _ToolRegistrar:
 
     async def edit_file_tool(
         self,
-        ctx: RunContext[Any],
+        ctx: ToolContext,
         path: str,
         content: str,
         create: bool = True,
@@ -155,7 +155,7 @@ class _ToolRegistrar:
 
     async def apply_patch_tool(
         self,
-        ctx: RunContext[Any],
+        ctx: ToolContext,
         path: str,
         patch: str,
         strip: int | None = None,
@@ -165,7 +165,7 @@ class _ToolRegistrar:
 
     async def file_summary_tool(
         self,
-        ctx: RunContext[Any],
+        ctx: ToolContext,
         path: str,
         head_lines: int | None = 20,
         tail_lines: int | None = 20,
@@ -181,7 +181,7 @@ class _ToolRegistrar:
 
     async def code_search_tool(
         self,
-        ctx: RunContext[Any],
+        ctx: ToolContext,
         pattern: str,
         directory: str = ".",
         glob: str | None = None,
@@ -210,7 +210,7 @@ class _ToolRegistrar:
 
     async def fetch_url_tool(
         self,
-        ctx: RunContext[Any],
+        ctx: ToolContext,
         url: str,
         max_bytes: int = DEFAULT_FETCH_MAX_BYTES,
         timeout: float | None = DEFAULT_FETCH_TIMEOUT,

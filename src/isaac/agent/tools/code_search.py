@@ -4,13 +4,13 @@ import asyncio
 import fnmatch
 import re
 from pathlib import Path
-from typing import Any, Optional
+from typing import Optional
 
-from pydantic_ai import RunContext
+from isaac.agent.ai_types import ToolContext
 
 
 async def code_search(
-    ctx: RunContext[Any] = None,
+    ctx: ToolContext | None = None,
     pattern: str = "",
     directory: str = ".",
     glob: Optional[str] = None,

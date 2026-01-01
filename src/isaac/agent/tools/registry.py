@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
-from typing import Any, Awaitable, Callable, Dict, Type
+from typing import Any, Awaitable, Callable
 
+from pydantic import BaseModel
 from .apply_patch import apply_patch
 from .code_search import code_search
 from .edit_file import edit_file
@@ -28,7 +29,7 @@ from .args import (
     RunCommandArgs,
 )
 
-ToolHandler = Callable[..., Awaitable[dict]]
+ToolHandler = Callable[..., Awaitable[dict[str, Any]]]
 
 DEFAULT_TOOL_TIMEOUT_S = 10.0
 RUN_COMMAND_TIMEOUT_S = 60.0
@@ -42,7 +43,7 @@ READ_ONLY_TOOLS = {
     "fetch_url",
 }
 
-TOOL_HANDLERS: Dict[str, ToolHandler] = {
+TOOL_HANDLERS: dict[str, ToolHandler] = {
     "list_files": list_files,
     "read_file": read_file,
     "run_command": run_command,
@@ -55,7 +56,7 @@ TOOL_HANDLERS: Dict[str, ToolHandler] = {
 }
 
 # Pydantic argument models for each tool, used for schema generation and validation.
-TOOL_ARG_MODELS: Dict[str, Type[Any]] = {
+TOOL_ARG_MODELS: dict[str, type[BaseModel]] = {
     "list_files": ListFilesArgs,
     "read_file": ReadFileArgs,
     "run_command": RunCommandArgs,
@@ -67,7 +68,7 @@ TOOL_ARG_MODELS: Dict[str, Type[Any]] = {
     **DELEGATE_TOOL_ARG_MODELS,
 }
 
-TOOL_DESCRIPTIONS: Dict[str, str] = {
+TOOL_DESCRIPTIONS: dict[str, str] = {
     "list_files": "List files and directories (defaults to current directory; set directory if you need a different root).",
     "read_file": "Read a file with optional line range",
     "run_command": "Execute a shell command and return its output (include the full command string; use for mkdir -p).",
@@ -82,7 +83,7 @@ TOOL_DESCRIPTIONS: Dict[str, str] = {
     **DELEGATE_TOOL_DESCRIPTIONS,
 }
 
-TOOL_REQUIRED_ARGS: Dict[str, list[str]] = {
+TOOL_REQUIRED_ARGS: dict[str, list[str]] = {
     name: list(model.model_json_schema().get("required", []))  # type: ignore[attr-defined]
     for name, model in TOOL_ARG_MODELS.items()
 }

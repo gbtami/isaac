@@ -2,9 +2,9 @@ from __future__ import annotations
 
 import difflib
 from pathlib import Path
-from typing import Any, Optional
+from typing import Optional
 
-from pydantic_ai import RunContext
+from isaac.agent.ai_types import ToolContext
 
 
 def _resolve(base: Optional[str], target: str, *, allow_outside: bool) -> Path | None:
@@ -26,7 +26,7 @@ def _resolve(base: Optional[str], target: str, *, allow_outside: bool) -> Path |
 
 
 async def edit_file(
-    ctx: RunContext[Any] = None,
+    ctx: ToolContext | None = None,
     path: str = "",
     content: str = "",
     create: bool = True,

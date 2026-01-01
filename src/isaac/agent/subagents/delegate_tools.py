@@ -9,14 +9,16 @@ import logging
 import time
 import uuid
 from dataclasses import dataclass
-from typing import Any, Awaitable, Callable
+from typing import Any, Awaitable, Callable, cast
 
 from dotenv import load_dotenv
+from pydantic import BaseModel
 from pydantic_ai import Agent as PydanticAgent  # type: ignore
 from pydantic_ai.run import AgentRunResultEvent  # type: ignore
 
 from acp.contrib.tool_calls import ToolCallTracker
 from acp.helpers import session_notification, text_block, tool_content
+from isaac.agent.ai_types import AgentRunner
 from isaac.agent import models as model_registry
 from isaac.agent.brain.prompt import SYSTEM_PROMPT
 from isaac.agent.models import ENV_FILE, load_models_config, _build_provider_model
@@ -31,7 +33,7 @@ DELEGATE_TOOL_SUMMARY_MAX_CHARS = 1200
 _delegate_depth = contextvars.ContextVar("delegate_tool_depth", default=0)
 _delegate_context = contextvars.ContextVar("delegate_tool_context", default=None)
 
-_DelegateHandler = Callable[..., Any]
+_DelegateHandler = Callable[..., Awaitable[dict[str, Any]]]
 
 logger = logging.getLogger(__name__)
 
@@ -86,19 +88,19 @@ class DelegateToolSpec:
     instructions: str
     system_prompt: str | None
     tool_names: tuple[str, ...]
-    output_type: Any | None = None
+    output_type: type[BaseModel] | None = None
     timeout_s: float = DELEGATE_TOOL_TIMEOUT_S
     max_depth: int = DELEGATE_TOOL_DEFAULT_DEPTH
     log_context: str | None = None
     include_delegate_tools: bool = False
-    summary_extractor: Callable[[Any], str | None] | None = None
+    summary_extractor: Callable[[BaseModel | str], str | None] | None = None
     min_summary_chars: int = 0
     continuation_prompt: str | None = None
     allow_unstructured_fallback: bool = True
 
 
 DELEGATE_TOOL_HANDLERS: dict[str, _DelegateHandler] = {}
-DELEGATE_TOOL_ARG_MODELS: dict[str, type[Any]] = {}
+DELEGATE_TOOL_ARG_MODELS: dict[str, type[BaseModel]] = {}
 DELEGATE_TOOL_DESCRIPTIONS: dict[str, str] = {}
 DELEGATE_TOOL_TIMEOUTS: dict[str, float] = {}
 
@@ -123,7 +125,7 @@ def register_delegate_tool(
     spec: DelegateToolSpec,
     *,
     handler: _DelegateHandler,
-    arg_model: type[Any],
+    arg_model: type[BaseModel],
 ) -> None:
     """Register a delegate tool definition.
 
@@ -198,7 +200,9 @@ def _expand_tool_names(spec: DelegateToolSpec) -> tuple[str, ...]:
 _OUTPUT_TYPE_UNSET = object()
 
 
-def _build_delegate_agent(spec: DelegateToolSpec, *, output_type_override: Any = _OUTPUT_TYPE_UNSET) -> Any:
+def _build_delegate_agent(
+    spec: DelegateToolSpec, *, output_type_override: type[BaseModel] | None | object = _OUTPUT_TYPE_UNSET
+) -> AgentRunner:
     """Create a delegate agent with optional output-type override.
 
     The override is used for fallback retries when structured output validation
@@ -215,8 +219,11 @@ def _build_delegate_agent(spec: DelegateToolSpec, *, output_type_override: Any =
     model_entry = models_cfg.get(model_id, {})
 
     model_obj, model_settings = _build_provider_model(model_id, model_entry)
-    output_type = spec.output_type if output_type_override is _OUTPUT_TYPE_UNSET else output_type_override
-    agent = PydanticAgent(
+    if output_type_override is _OUTPUT_TYPE_UNSET:
+        output_type = spec.output_type
+    else:
+        output_type = cast(type[BaseModel] | None, output_type_override)
+    agent: AgentRunner = PydanticAgent(
         model_obj,
         toolsets=(),
         system_prompt=spec.system_prompt or SYSTEM_PROMPT,
@@ -239,13 +246,13 @@ def _build_delegate_agent(spec: DelegateToolSpec, *, output_type_override: Any =
 class _DelegateRunOutcome:
     """Container for delegate run results and validation status."""
 
-    content: Any | None
+    content: BaseModel | str | None
     raw_text: str | None
     error: str | None
     validation_failed: bool = False
 
 
-def _summary_from_output(spec: DelegateToolSpec, output: Any) -> str | None:
+def _summary_from_output(spec: DelegateToolSpec, output: BaseModel | str | object) -> str | None:
     """Return a summary string for carryover and brevity checks.
 
     The summary is stored in memory for the same delegate session only.
@@ -253,7 +260,9 @@ def _summary_from_output(spec: DelegateToolSpec, output: Any) -> str | None:
 
     if spec.summary_extractor is not None:
         try:
-            return spec.summary_extractor(output)
+            if isinstance(output, (BaseModel, str)):
+                return spec.summary_extractor(output)
+            return None
         except Exception:
             return None
     if isinstance(output, str):
@@ -285,7 +294,7 @@ def _extract_json_candidate(text: str) -> str | None:
     return text[start : end + 1]
 
 
-def _parse_structured_output(spec: DelegateToolSpec, text: str) -> Any | None:
+def _parse_structured_output(spec: DelegateToolSpec, text: str) -> BaseModel | None:
     """Try to parse a structured output payload using the spec's output_type."""
 
     output_type = spec.output_type
@@ -341,7 +350,7 @@ def _build_permission_context(
 
 async def _run_delegate_once(
     spec: DelegateToolSpec,
-    agent: Any,
+    agent: AgentRunner,
     prompt: str,
     *,
     log_context: str | None,
@@ -355,7 +364,7 @@ async def _run_delegate_once(
     but only surface response text (never internal reasoning).
     """
 
-    structured: Any | None = None
+    structured: BaseModel | None = None
     cancel_event = asyncio.Event()
 
     tracker: ToolCallTracker | None = None

@@ -9,6 +9,7 @@ from acp import PROTOCOL_VERSION, text_block
 from acp.agent.connection import AgentSideConnection
 from acp.helpers import session_notification, update_agent_message
 from acp.schema import AgentMessageChunk, SessionNotification, UserMessageChunk
+from pydantic_ai import messages as ai_messages  # type: ignore
 from pydantic_ai.run import AgentRunResultEvent  # type: ignore
 
 from isaac.agent.agent import ACPAgent
@@ -140,13 +141,13 @@ class _RecordingRunner:
     async def run_stream_events(
         self,
         prompt_text: str,
-        messages: list[dict[str, str]] | None = None,
-        message_history: list[dict[str, str]] | None = None,
+        messages: list[object] | None = None,
+        message_history: list[object] | None = None,
         **_: object,
     ):
         prior = (message_history if message_history is not None else messages) or []
-        self.stream_messages = list(prior)
-        history = list(prior)
+        self.stream_messages = _flatten_history(list(prior))
+        history = list(self.stream_messages)
         history.append({"role": "user", "content": prompt_text})
         history.append({"role": "assistant", "content": self.output})
         self._new_messages = history
@@ -167,6 +168,25 @@ class _RecordingRunner:
 
     def new_messages(self) -> list[dict[str, str]]:
         return list(self._new_messages)
+
+
+def _flatten_history(messages: list[object]) -> list[dict[str, str]]:
+    flattened: list[dict[str, str]] = []
+    for message in messages:
+        if isinstance(message, dict):
+            flattened.append(message)
+            continue
+        if isinstance(message, ai_messages.ModelRequest):
+            for part in message.parts:
+                if isinstance(part, ai_messages.SystemPromptPart):
+                    flattened.append({"role": "system", "content": str(part.content)})
+                elif isinstance(part, ai_messages.UserPromptPart):
+                    flattened.append({"role": "user", "content": str(part.content)})
+        elif isinstance(message, ai_messages.ModelResponse):
+            for part in message.parts:
+                if isinstance(part, ai_messages.TextPart):
+                    flattened.append({"role": "assistant", "content": str(part.content)})
+    return flattened
 
 
 @pytest.mark.asyncio

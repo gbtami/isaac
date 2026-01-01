@@ -1,7 +1,7 @@
-from typing import Any, Optional
+from typing import Optional
 
 from pathlib import Path
-from pydantic_ai import RunContext
+from isaac.agent.ai_types import ToolContext
 
 
 def _resolve(base: Optional[str], target: str) -> Path:
@@ -12,7 +12,7 @@ def _resolve(base: Optional[str], target: str) -> Path:
 
 
 async def read_file(
-    ctx: RunContext[Any] = None,
+    ctx: ToolContext | None = None,
     path: str = "",
     start: Optional[int] = None,
     lines: Optional[int] = None,

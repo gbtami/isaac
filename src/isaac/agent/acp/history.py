@@ -5,12 +5,19 @@ from __future__ import annotations
 from typing import Any, Iterable, List
 
 from acp.schema import AgentMessageChunk, AgentPlanUpdate, ToolCallProgress, UserMessageChunk
+from isaac.agent.history_types import ChatMessage
 
 
-def build_chat_history(updates: Iterable[Any]) -> List[dict[str, str]]:
+class _ChatMessageWithSource(ChatMessage, total=False):
+    """Internal chat message variant with a source marker."""
+
+    _src: str
+
+
+def build_chat_history(updates: Iterable[Any]) -> List[ChatMessage]:
     """Convert ACP session/update notifications into role/content messages."""
 
-    history: list[dict[str, str]] = []
+    history: list[_ChatMessageWithSource] = []
     skip_next_assistant = False
     for update in updates:
         update_obj = getattr(update, "update", update)
@@ -42,7 +49,7 @@ def build_chat_history(updates: Iterable[Any]) -> List[dict[str, str]]:
             if text:
                 history.append({"role": "assistant", "content": f"Plan:\n{text}", "_src": "plan"})
     # Merge sequences from the same role (assistant/user) to avoid fragmented context.
-    merged: list[dict[str, str]] = []
+    merged: list[_ChatMessageWithSource] = []
     current_role: str | None = None
     current_src: str | None = None
     buffer: list[str] = []
@@ -63,9 +70,11 @@ def build_chat_history(updates: Iterable[Any]) -> List[dict[str, str]]:
             current_src = src
     if current_role is not None:
         merged.append({"role": current_role, "content": "".join(buffer)})
+    final: list[ChatMessage] = []
     for m in merged:
         m.pop("_src", None)
-    return merged
+        final.append({"role": m["role"], "content": m["content"]})
+    return final
 
 
 __all__ = ["build_chat_history"]

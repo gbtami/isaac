@@ -5,9 +5,9 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import inspect
-import logging
 import json
-from typing import Any, Callable
+import logging
+from typing import Any, Callable, Protocol, Sequence
 
 from pydantic_ai import exceptions as ai_exc  # type: ignore
 from pydantic_ai import messages as ai_messages  # type: ignore
@@ -19,6 +19,7 @@ from pydantic_ai.messages import (  # type: ignore
     ThinkingPartDelta,
 )
 from pydantic_ai.run import AgentRunResultEvent  # type: ignore
+from isaac.agent.history_types import ChatMessage, HistoryInput
 from isaac.log_utils import log_chunks_enabled, log_context as log_ctx, log_event
 
 logger = logging.getLogger("isaac.agent.llm")
@@ -26,14 +27,22 @@ logger = logging.getLogger("isaac.agent.llm")
 HISTORY_LOG_MAX = 8000
 
 
+class StreamRunner(Protocol):
+    """Protocol for pydantic-ai runners that stream events."""
+
+    def run_stream_events(
+        self, prompt_text: str, *, message_history: Sequence[ai_messages.ModelMessage] | None = None
+    ) -> Any: ...
+
+
 async def stream_with_runner(
-    runner: Any,
+    runner: StreamRunner,
     prompt_text: str,
     on_text: Callable[[str], asyncio.Future | Any],
     on_thought: Callable[[str], asyncio.Future | Any] | None = None,
     cancel_event: asyncio.Event | None = None,
     *,
-    history: Any | None = None,
+    history: HistoryInput | None = None,
     on_event: Callable[[Any], asyncio.Future | bool | None] | None = None,
     store_messages: Callable[[Any], None] | None = None,
     log_context: str | None = None,
@@ -55,37 +64,55 @@ async def stream_with_runner(
     output_parts: list[str] = []
     usage = None
 
-    def _sanitize_history(raw_history: Any) -> Any:
+    def _sanitize_history(raw_history: Sequence[ChatMessage] | None) -> list[ChatMessage] | None:
         """Drop invalid/empty history messages to avoid provider 400s."""
 
-        cleaned = []
-        if isinstance(raw_history, list):
-            for msg in raw_history:
-                if not isinstance(msg, dict):
-                    continue
-                role = msg.get("role")
-                content = msg.get("content")
-                if not role or content is None:
-                    continue
-                content_str = str(content).strip()
-                if content_str == "":
-                    continue
-                cleaned.append({"role": role, "content": content_str})
+        cleaned: list[ChatMessage] = []
+        if raw_history is None:
+            return None
+        for msg in raw_history:
+            role = msg.get("role")
+            content = msg.get("content")
+            if not role or content is None:
+                continue
+            content_str = str(content).strip()
+            if content_str == "":
+                continue
+            cleaned.append({"role": str(role), "content": content_str})
         return cleaned if cleaned else None
 
-    def _convert_to_model_messages(raw_history: list[dict[str, str]] | None) -> list[Any] | None:
-        """Pass through sanitized history; pydantic-ai accepts role/content dicts."""
+    def _convert_to_model_messages(
+        raw_history: Sequence[ChatMessage] | None,
+    ) -> list[ai_messages.ModelMessage] | None:
+        """Convert chat history dicts into pydantic-ai ModelMessage instances."""
 
-        return raw_history
+        if not raw_history:
+            return None
+        messages: list[ai_messages.ModelMessage] = []
+        for msg in raw_history:
+            role = msg.get("role")
+            content = msg.get("content")
+            if content is None:
+                continue
+            text = str(content)
+            if role == "assistant":
+                messages.append(ai_messages.ModelResponse(parts=[ai_messages.TextPart(content=text)]))
+            elif role == "system":
+                messages.append(ai_messages.ModelRequest(parts=[ai_messages.SystemPromptPart(content=text)]))
+            else:
+                messages.append(ai_messages.ModelRequest(parts=[ai_messages.UserPromptPart(content=text)]))
+        return messages or None
 
-    def _model_messages_to_chat_history(raw_history: list[Any]) -> list[dict[str, str]]:
+    def _model_messages_to_chat_history(
+        raw_history: Sequence[ai_messages.ModelMessage],
+    ) -> list[ChatMessage]:
         """Convert pydantic-ai model messages into role/content chat history.
 
         This preserves user/assistant text while avoiding tool-call metadata
         that some providers reject when the history is truncated.
         """
 
-        chat_history: list[dict[str, str]] = []
+        chat_history: list[ChatMessage] = []
         for message in raw_history:
             if isinstance(message, dict):
                 role = message.get("role")
@@ -108,42 +135,44 @@ async def stream_with_runner(
     event_iter = None
     try:
         thought_delta_buffer: list[str] = []
-        if history is not None:
+        history_list = list(history) if history is not None else None
+        if history_list is not None:
             history_preview = None
             try:
-                history_preview = json.dumps(history)[:HISTORY_LOG_MAX]
+                history_preview = json.dumps(history_list)[:HISTORY_LOG_MAX]
             except Exception:
-                history_preview = str(history)[:HISTORY_LOG_MAX]
+                history_preview = str(history_list)[:HISTORY_LOG_MAX]
             log_event(
                 logger,
                 "llm.history.raw",
                 level=logging.DEBUG,
                 history_preview=history_preview,
-                history_len=len(history) if isinstance(history, list) else None,
+                history_len=len(history_list),
             )
-            if isinstance(history, list) and history:
+            safe_history: list[ai_messages.ModelMessage] | None
+            if history_list:
                 model_types = (ai_messages.ModelRequest, ai_messages.ModelResponse)
-                if any(isinstance(msg, model_types) for msg in history):
-                    chat_history = _model_messages_to_chat_history(history)
+                if any(isinstance(msg, model_types) for msg in history_list):
+                    chat_history = _model_messages_to_chat_history(history_list)
                     sanitized = _sanitize_history(chat_history)
                     safe_history = _convert_to_model_messages(sanitized)
                 else:
-                    sanitized = _sanitize_history(history)
+                    sanitized = _sanitize_history(history_list)
                     safe_history = _convert_to_model_messages(sanitized)
             else:
-                sanitized = _sanitize_history(history)
+                sanitized = _sanitize_history(None)
                 safe_history = _convert_to_model_messages(sanitized)
             sanitized_preview = None
             try:
-                sanitized_preview = json.dumps(safe_history)[:HISTORY_LOG_MAX]
+                sanitized_preview = json.dumps(sanitized)[:HISTORY_LOG_MAX]
             except Exception:
-                sanitized_preview = str(safe_history)[:HISTORY_LOG_MAX]
+                sanitized_preview = str(sanitized)[:HISTORY_LOG_MAX]
             log_event(
                 logger,
                 "llm.history.sanitized",
                 level=logging.DEBUG,
                 history_preview=sanitized_preview,
-                history_len=len(safe_history) if isinstance(safe_history, list) else None,
+                history_len=len(sanitized) if isinstance(sanitized, list) else None,
             )
             event_iter = runner.run_stream_events(prompt_text, message_history=safe_history)
         if event_iter is None:

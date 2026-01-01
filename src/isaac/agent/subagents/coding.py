@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
-from pydantic_ai import RunContext
+from typing import Any
+
+from isaac.agent.ai_types import ToolContext
 
 from isaac.agent.subagents.args import CodingArgs
 from isaac.agent.subagents.delegate_tools import DelegateToolSpec, register_delegate_tool, run_delegate_tool
@@ -76,12 +78,12 @@ CODING_TOOL_SPEC = DelegateToolSpec(
 
 
 async def coding(
-    ctx: RunContext,
+    ctx: ToolContext,
     task: str,
     context: str | None = None,
     session_id: str | None = None,
     carryover: bool = False,
-) -> dict[str, object]:
+) -> dict[str, Any]:
     """Delegate implementation work to a coding-focused agent."""
     return await run_delegate_tool(
         CODING_TOOL_SPEC,

@@ -15,6 +15,7 @@ import configparser
 from pathlib import Path
 from typing import Any, Dict
 
+from pydantic_ai.models import Model  # type: ignore
 from pydantic_ai.models.anthropic import AnthropicModel, AnthropicModelSettings  # type: ignore
 from pydantic_ai.models.cerebras import CerebrasModel  # type: ignore
 from pydantic_ai.models.google import GoogleModel, GoogleModelSettings  # type: ignore
@@ -22,6 +23,7 @@ from pydantic_ai.models.mistral import MistralModel  # type: ignore
 from pydantic_ai.models.openai import OpenAIChatModel, OpenAIChatModelSettings  # type: ignore
 from pydantic_ai.models.openrouter import OpenRouterModel, OpenRouterModelSettings  # type: ignore
 from pydantic_ai.models.test import TestModel  # type: ignore
+from pydantic_ai.settings import ModelSettings  # type: ignore
 
 from pydantic_ai.providers.anthropic import AnthropicProvider  # type: ignore
 from pydantic_ai.providers.cerebras import CerebrasProvider  # type: ignore
@@ -213,7 +215,7 @@ def _fetch_models_dev_limits() -> Dict[tuple[str, str], int]:
     return index
 
 
-def _build_provider_model(model_id: str, model_entry: Dict[str, Any]) -> Any:
+def _build_provider_model(model_id: str, model_entry: Dict[str, Any]) -> tuple[Model, ModelSettings | None]:
     provider = (model_entry.get("provider") or "").lower()
     model_spec = model_entry.get("model") or "test"
     api_key = model_entry.get("api_key")

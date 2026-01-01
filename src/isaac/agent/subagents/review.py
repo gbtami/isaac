@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
-from pydantic_ai import RunContext
+from typing import Any
+
+from isaac.agent.ai_types import ToolContext
 
 from isaac.agent.subagents.args import ReviewArgs
 from isaac.agent.subagents.delegate_tools import DelegateToolSpec, register_delegate_tool, run_delegate_tool
@@ -69,12 +71,12 @@ REVIEW_TOOL_SPEC = DelegateToolSpec(
 
 
 async def review(
-    ctx: RunContext,
+    ctx: ToolContext,
     task: str,
     context: str | None = None,
     session_id: str | None = None,
     carryover: bool = False,
-) -> dict[str, object]:
+) -> dict[str, Any]:
     """Delegate a focused review to a specialized agent."""
     return await run_delegate_tool(
         REVIEW_TOOL_SPEC,

@@ -6,9 +6,9 @@ import asyncio
 import tempfile
 import textwrap
 from pathlib import Path
-from typing import Any, Optional
+from typing import Optional
 
-from pydantic_ai import RunContext
+from isaac.agent.ai_types import ToolContext
 
 
 def _resolve(base: Optional[str], target: str) -> Path:
@@ -19,7 +19,7 @@ def _resolve(base: Optional[str], target: str) -> Path:
 
 
 async def apply_patch(
-    ctx: RunContext[Any] = None,
+    ctx: ToolContext | None = None,
     path: str = "",
     patch: str = "",
     strip: Optional[int] = None,
