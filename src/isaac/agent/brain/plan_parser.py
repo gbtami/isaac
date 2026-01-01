@@ -1,7 +1,7 @@
 """Planning helpers for a single-agent approach.
 
 The model is prompted to emit a short plan (e.g., markdown list). This module
-parses that output into ACP plan entries when present.
+parses that output into PlanSteps when present.
 """
 
 from __future__ import annotations
@@ -9,12 +9,11 @@ from __future__ import annotations
 import re
 from typing import List
 
-from acp.helpers import plan_entry, update_plan
-from acp.schema import AgentPlanUpdate
+from isaac.agent.brain.plan_schema import PlanSteps, PlanStep
 
 
-def parse_plan_from_text(output: str) -> AgentPlanUpdate | None:
-    """Parse a simple markdown/numbered list into an ACP AgentPlanUpdate.
+def parse_plan_from_text(output: str) -> PlanSteps | None:
+    """Parse a simple markdown/numbered list into PlanSteps.
 
     A plan is preferred when a "Plan:" header is present, but we also accept
     numbered/bulleted lists (with at least two steps) to capture model outputs
@@ -66,10 +65,10 @@ def parse_plan_from_text(output: str) -> AgentPlanUpdate | None:
     if not items:
         return None
 
-    entries = [plan_entry(item) for item in items if item]
-    if not entries:
+    steps = [PlanStep(content=item) for item in items if item]
+    if not steps:
         return None
-    return update_plan(entries)
+    return PlanSteps(entries=steps)
 
 
 def _split_inline_items(text: str) -> list[str]:

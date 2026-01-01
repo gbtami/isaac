@@ -176,13 +176,13 @@ async def test_model_tool_call_requests_permission(monkeypatch: pytest.MonkeyPat
     model = TestModel(call_tools=["run_command"], custom_output_text="done")
     ai_runner = PydanticAgent(model)
     register_tools(ai_runner)
-    from isaac.agent.brain import prompt_handler
+    from isaac.agent.brain import session_ops
 
     def _build(_model_id: str, _register: object, toolsets=None, **kwargs: object) -> object:
         _ = toolsets
         return ai_runner
 
-    monkeypatch.setattr(prompt_handler, "create_subagent_for_model", _build)
+    monkeypatch.setattr(session_ops, "create_subagent_for_model", _build)
     agent = ACPAgent(conn)
     session = await agent.new_session(cwd=str(tmp_path), mcp_servers=[])
 
@@ -219,13 +219,13 @@ async def test_model_run_command_denied_blocks_execution(monkeypatch: pytest.Mon
     model = TestModel(call_tools=["run_command"], custom_output_text="done")
     ai_runner = PydanticAgent(model)
     register_tools(ai_runner)
-    from isaac.agent.brain import prompt_handler
+    from isaac.agent.brain import session_ops
 
     def _build(_model_id: str, _register: object, toolsets=None, **kwargs: object) -> object:
         _ = toolsets
         return ai_runner
 
-    monkeypatch.setattr(prompt_handler, "create_subagent_for_model", _build)
+    monkeypatch.setattr(session_ops, "create_subagent_for_model", _build)
     agent = ACPAgent(conn)
     session = await agent.new_session(cwd=str(tmp_path), mcp_servers=[])
     agent._session_modes[session.session_id] = "ask"

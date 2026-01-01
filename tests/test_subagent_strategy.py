@@ -22,10 +22,13 @@ from typing import Any
 from isaac.agent import ACPAgent
 from isaac.agent.brain.prompt_runner import PromptEnv
 from isaac.agent.brain.plan_schema import PlanStep, PlanSteps
-from isaac.agent.brain.prompt_handler import PromptHandler
-from isaac.agent.brain.prompt_handler import SessionState
+from isaac.agent.brain import compaction as compaction_utils
+from isaac.agent.brain.session_state import SessionState
 from pydantic_ai.run import AgentRunResult, AgentRunResultEvent  # type: ignore
 from isaac.agent.tools import register_tools
+
+
+COMPACT_USER_MAX_TOKENS = 20_000
 
 
 class _FakeRunner:
@@ -67,13 +70,13 @@ async def test_subagent_planner_plan_updates(tmp_path, monkeypatch):
     plan = PlanSteps(entries=[PlanStep(content="alpha", priority="high"), PlanStep(content="beta")])
     runner = _FakeRunner(plan)
 
-    from isaac.agent.brain import prompt_handler
+    from isaac.agent.brain import session_ops
 
     def _build(_model_id: str, _register: object, toolsets=None, **kwargs: object):
         _ = toolsets
         return runner
 
-    monkeypatch.setattr(prompt_handler, "create_subagent_for_model", _build)
+    monkeypatch.setattr(session_ops, "create_subagent_for_model", _build)
     agent = ACPAgent(conn)
 
     session = await agent.new_session(cwd=str(tmp_path), mcp_servers=[])
@@ -107,13 +110,13 @@ async def test_subagent_plan_refreshes_each_prompt(tmp_path, monkeypatch):
     plan2 = PlanSteps(entries=[PlanStep(content="first"), PlanStep(content="second")])
     runner = _FakeRunner(plan1)
 
-    from isaac.agent.brain import prompt_handler
+    from isaac.agent.brain import session_ops
 
     def _build(_model_id: str, _register: object, toolsets=None, **kwargs: object):
         _ = toolsets
         return runner
 
-    monkeypatch.setattr(prompt_handler, "create_subagent_for_model", _build)
+    monkeypatch.setattr(session_ops, "create_subagent_for_model", _build)
     agent = ACPAgent(conn)
 
     session = await agent.new_session(cwd=str(tmp_path), mcp_servers=[])
@@ -186,9 +189,6 @@ async def test_delegate_tool_isolation_default(monkeypatch, tool_name: str):
 
 @pytest.mark.asyncio
 async def test_subagent_history_compaction(monkeypatch):
-    monkeypatch.setattr(PromptHandler, "_MAX_HISTORY_MESSAGES", 3)
-    monkeypatch.setattr(PromptHandler, "_PRESERVE_RECENT_MESSAGES", 1)
-
     compaction_calls: list[list[Any]] = []
 
     async def fake_stream_with_runner(
@@ -201,16 +201,22 @@ async def test_subagent_history_compaction(monkeypatch):
         compaction_calls.append(list(history or []))
         return "summary here", None
 
-    monkeypatch.setattr("isaac.agent.brain.prompt_handler.stream_with_runner", fake_stream_with_runner)
+    monkeypatch.setattr("isaac.agent.brain.compaction.stream_with_runner", fake_stream_with_runner)
 
+    noop = AsyncMock()
     env = PromptEnv(
         session_modes={},
         session_last_chunk={},
-        send_update=AsyncMock(),
+        send_message_chunk=noop,
+        send_thought_chunk=noop,
+        send_tool_start=noop,
+        send_tool_finish=noop,
+        send_plan_update=noop,
+        send_notification=noop,
+        send_protocol_update=noop,
         request_run_permission=AsyncMock(return_value=True),
         set_usage=lambda *_: None,
     )
-    handler = PromptHandler(env, register_tools=lambda *_: None)
     state = SessionState(
         runner=object(),
         model_id="m",
@@ -222,11 +228,20 @@ async def test_subagent_history_compaction(monkeypatch):
         ],
     )
 
-    await handler._maybe_compact_history(state)
+    await compaction_utils.maybe_compact_history(
+        env=env,
+        state=state,
+        session_id=None,
+        model_id=state.model_id,
+        max_history_messages=3,
+        auto_compact_ratio=0.9,
+        compact_user_message_max_tokens=COMPACT_USER_MAX_TOKENS,
+    )
 
     assert compaction_calls, "Compaction should have been invoked"
-    assert len(state.history) == 2  # summary + preserved message
-    assert state.history[0]["role"] == "system"
+    assert len(state.history) == 3  # user messages + summary
+    assert state.history[-1]["role"] == "user"
+    assert "summary" in state.history[-1]["content"].lower()
 
 
 @pytest.mark.asyncio
@@ -264,13 +279,13 @@ async def test_subagent_records_tool_history(tmp_path, monkeypatch):
 
     runner = CommandRunner()
 
-    from isaac.agent.brain import prompt_handler
+    from isaac.agent.brain import session_ops
 
     def _build(_model_id: str, _register: object, toolsets=None, **kwargs: object):
         _ = toolsets
         return runner
 
-    monkeypatch.setattr(prompt_handler, "create_subagent_for_model", _build)
+    monkeypatch.setattr(session_ops, "create_subagent_for_model", _build)
     agent = ACPAgent(conn)
 
     session = await agent.new_session(cwd=str(tmp_path), mcp_servers=[])

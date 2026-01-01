@@ -3,12 +3,14 @@ from __future__ import annotations
 import asyncio
 from collections.abc import AsyncIterator
 from typing import Any
+from unittest.mock import AsyncMock
 
 import pytest
 from pydantic_ai.messages import FunctionToolCallEvent, ToolCallPart  # type: ignore
 
 from isaac.agent.runner import stream_with_runner
-from isaac.agent.brain.prompt_runner import PromptRunner
+from isaac.agent.brain.prompt_runner import PromptEnv, PromptRunner
+from isaac.agent.brain.tool_events import tool_history_summary
 
 
 class _CapturingRunner:
@@ -51,7 +53,7 @@ async def test_stream_with_runner_replaces_system_prompt_in_history() -> None:
 
 
 def test_tool_history_summary_uses_inputs() -> None:
-    summary = PromptRunner._tool_history_summary(
+    summary = tool_history_summary(
         "list_files",
         raw_output={"content": "ok"},
         status="completed",
@@ -64,24 +66,26 @@ def test_tool_history_summary_uses_inputs() -> None:
 async def test_tool_kinds_in_updates():
     captured: list[Any] = []
 
-    async def _send(update, **_: Any):
-        captured.append(update.update)
+    async def _send_start(_session_id: str, event: Any) -> None:
+        captured.append(event)
 
-    class Env:
-        session_modes: dict[str, str] = {}
-        session_last_chunk: dict[str, str | None] = {}
-
-        async def send_update(self, update, **_: Any):
-            await _send(update)
-
-        async def request_run_permission(self, *_args: Any, **_kwargs: Any) -> bool:
-            return True
-
-        def set_usage(self, *_args: Any, **_kwargs: Any) -> None:  # pragma: no cover - not used
-            return None
-
-    env = PromptRunner(env=Env())
-    handler = env._build_runner_event_handler("s1", {}, {}, None)
+    noop = AsyncMock()
+    env = PromptRunner(
+        env=PromptEnv(
+            session_modes={},
+            session_last_chunk={},
+            send_message_chunk=noop,
+            send_thought_chunk=noop,
+            send_tool_start=_send_start,
+            send_tool_finish=noop,
+            send_plan_update=noop,
+            send_notification=noop,
+            send_protocol_update=noop,
+            request_run_permission=AsyncMock(return_value=True),
+            set_usage=lambda *_: None,
+        )
+    )
+    handler = env._build_runner_event_handler("s1", {}, None)
     event = FunctionToolCallEvent(
         part=ToolCallPart(tool_name="list_files", args={"directory": "/tmp"}, tool_call_id="tc1")
     )

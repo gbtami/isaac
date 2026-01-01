@@ -29,7 +29,7 @@ async def apply_patch(
     """Apply a unified diff patch to a file using the `patch` command."""
     resolved = _resolve(cwd, path)
     if not resolved.exists():
-        return {"content": "", "error": f"File not found: {path}"}
+        return {"path": path, "content": "", "error": f"File not found: {path}"}
     try:
         old_text = resolved.read_text(encoding="utf-8")
     except Exception:
@@ -71,16 +71,17 @@ async def apply_patch(
                 rc, stdout_text, stderr_text = await _run_patch(dedented)
         if rc != 0:
             error_msg = stderr_text or stdout_text or f"Patch failed ({rc})"
-            return {"content": stdout_text, "error": error_msg}
+            return {"path": path, "content": stdout_text, "error": error_msg}
         try:
             new_text = resolved.read_text(encoding="utf-8")
         except Exception:
             new_text = ""
         return {
+            "path": path,
             "content": stdout_text or "Patch applied",
             "error": None,
             "new_text": new_text,
             "old_text": old_text,
         }
     except FileNotFoundError:
-        return {"content": "", "error": "`patch` command not found"}
+        return {"path": path, "content": "", "error": "`patch` command not found"}

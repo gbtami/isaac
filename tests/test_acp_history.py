@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from isaac.agent.brain.history import build_chat_history
+from isaac.agent.acp.history import build_chat_history
 from acp import text_block
 from acp.helpers import session_notification, update_agent_message, tool_content
 from acp.schema import ToolCallProgress, UserMessageChunk

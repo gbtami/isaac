@@ -71,7 +71,10 @@ class EditFileArgs(BaseModel):
     content: str = Field(
         ...,
         min_length=1,
-        description="New content to write into the file.",
+        description=(
+            "Full file contents to write (cannot be empty). "
+            "Do not use edit_file to create directories; use run_command mkdir -p instead."
+        ),
     )
     create: bool = Field(
         True,

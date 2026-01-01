@@ -40,22 +40,33 @@ async def edit_file(
 
     Args:
         path: Path to the file to edit.
-        content: Complete replacement content for the file.
+        content: Complete replacement content for the file (must be non-empty).
         create: Whether to create the file if it does not exist.
         start: Optional starting line (1-based) for partial replacement.
         end: Optional ending line (1-based, inclusive) for partial replacement.
     """
     if not path:
-        return {"content": None, "error": "Missing required arguments: path", "returncode": -1}
+        return {
+            "path": path,
+            "content": None,
+            "error": "Missing required arguments: path",
+            "returncode": -1,
+        }
     resolved = _resolve(cwd, path, allow_outside=allow_outside)
     if resolved is None:
         return {
+            "path": path,
             "content": None,
             "error": "Path is outside allowed working directory",
             "returncode": -1,
         }
     if resolved.exists() and resolved.is_dir():
-        return {"content": None, "error": f"Path '{path}' is a directory", "returncode": -1}
+        return {
+            "path": path,
+            "content": None,
+            "error": f"Path '{path}' is a directory",
+            "returncode": -1,
+        }
     old_text = ""
     if resolved.exists():
         try:
@@ -64,7 +75,12 @@ async def edit_file(
             old_text = ""
 
     if not resolved.exists() and not create:
-        return {"content": "", "error": f"File '{path}' does not exist", "returncode": -1}
+        return {
+            "path": path,
+            "content": "",
+            "error": f"File '{path}' does not exist",
+            "returncode": -1,
+        }
 
     partial_edit = start is not None or end is not None
 
@@ -73,6 +89,7 @@ async def edit_file(
         if partial_edit:
             if not resolved.exists():
                 return {
+                    "path": path,
                     "content": "",
                     "error": f"File '{path}' does not exist for partial edit",
                     "returncode": -1,
@@ -109,6 +126,7 @@ async def edit_file(
         )
         result_content = f"{summary}\n{diff}" if diff else summary
         return {
+            "path": path,
             "content": result_content,
             "diff": diff,
             "new_text": new_text,
@@ -117,4 +135,4 @@ async def edit_file(
             "returncode": 0,
         }
     except Exception as exc:  # pragma: no cover - unexpected filesystem errors
-        return {"content": "", "error": str(exc), "returncode": -1}
+        return {"path": path, "content": "", "error": str(exc), "returncode": -1}

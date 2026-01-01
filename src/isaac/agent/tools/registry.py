@@ -70,8 +70,11 @@ TOOL_ARG_MODELS: Dict[str, Type[Any]] = {
 TOOL_DESCRIPTIONS: Dict[str, str] = {
     "list_files": "List files and directories (defaults to current directory; set directory if you need a different root).",
     "read_file": "Read a file with optional line range",
-    "run_command": "Execute a shell command and return its output (include the full command string).",
-    "edit_file": "Replace the contents of a file (requires a path and content; path must not be a directory).",
+    "run_command": "Execute a shell command and return its output (include the full command string; use for mkdir -p).",
+    "edit_file": (
+        "Replace the contents of a file (requires path + full content; content cannot be empty; "
+        "do not use for directories)."
+    ),
     "apply_patch": "Apply a unified diff patch to a file",
     "file_summary": "Summarize a file (head/tail and line count)",
     "code_search": "Search for a pattern in files using ripgrep",

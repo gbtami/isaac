@@ -7,6 +7,7 @@ from acp.agent.connection import AgentSideConnection
 from acp import RequestPermissionResponse
 from acp.schema import AllowedOutcome
 from isaac.agent import ACPAgent
+from isaac.agent.brain import session_ops
 from isaac.agent.tools import register_tools
 from pydantic_ai import Agent as PydanticAgent  # type: ignore
 from pydantic_ai.models.test import TestModel  # type: ignore
@@ -31,9 +32,7 @@ def make_function_agent(conn: AgentSideConnection) -> ACPAgent:
         else:
             conn.request_permission = _default_perm  # type: ignore[attr-defined]
     # Patch model builders to use deterministic test agents.
-    from isaac.agent.brain import prompt_handler
-
-    prompt_handler.create_subagent_for_model = lambda *_args, **_kwargs: runner  # type: ignore[assignment]
+    session_ops.create_subagent_for_model = lambda *_args, **_kwargs: runner  # type: ignore[assignment]
 
     return ACPAgent(conn)
 
@@ -45,8 +44,6 @@ def make_error_agent(conn: AgentSideConnection) -> ACPAgent:
         async def run_stream_events(self, prompt: str):  # pragma: no cover - simple stub
             raise RuntimeError("rate limited")
 
-    from isaac.agent.brain import prompt_handler
-
-    prompt_handler.create_subagent_for_model = lambda *_args, **_kwargs: ErrorRunner()  # type: ignore[assignment]
+    session_ops.create_subagent_for_model = lambda *_args, **_kwargs: ErrorRunner()  # type: ignore[assignment]
 
     return ACPAgent(conn)

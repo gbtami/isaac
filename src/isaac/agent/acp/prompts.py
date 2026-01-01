@@ -9,8 +9,9 @@ from typing import Any
 from acp import PromptResponse
 from acp.helpers import ContentBlock
 
-from isaac.agent.brain.prompt_runner import PromptEnv
+from isaac.agent.acp.prompt_env import build_prompt_env
 from isaac.agent.brain.prompt_handler import PromptHandler
+from isaac.agent.brain.prompt_result import PromptResult
 from isaac.agent.plan_shortcuts import build_plan_shortcut_notification, parse_plan_shortcut
 from isaac.agent.prompt_utils import extract_prompt_text
 from isaac.agent.slash import handle_slash_command
@@ -23,7 +24,7 @@ logger = logging.getLogger(__name__)
 class PromptMixin:
     def _build_prompt_handler(self) -> PromptHandler:
         """Construct the prompt handler."""
-        env = PromptEnv(
+        env = build_prompt_env(
             session_modes=self._session_modes,
             session_last_chunk=self._session_last_chunk,
             send_update=self._send_update,
@@ -77,11 +78,16 @@ class PromptMixin:
         if cancel_event.is_set():
             return PromptResponse(stop_reason="cancelled")
 
-        return await self._prompt_handler.handle_prompt(
+        result = await self._prompt_handler.handle_prompt(
             session_id,
             prompt_text,
             cancel_event,
         )
+        return self._prompt_result(result)
+
+    @staticmethod
+    def _prompt_result(result: PromptResult) -> PromptResponse:
+        return PromptResponse(stop_reason=result.stop_reason)
 
     async def cancel(self, session_id: str, **_: Any) -> None:
         """Stop in-flight prompt/tool work for a session (Prompt Turn cancellation)."""

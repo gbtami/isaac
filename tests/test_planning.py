@@ -18,19 +18,25 @@ def test_plan_parser_handles_steps_list_line():
 
 @pytest.mark.asyncio
 async def test_run_command_permission_includes_string_args():
-    send_update = AsyncMock()
+    noop = AsyncMock()
+    send_tool_start = AsyncMock()
     request_perm = AsyncMock(return_value=True)
     env = PromptEnv(
         session_modes={"s": "ask"},
         session_last_chunk={},
-        send_update=send_update,
+        send_message_chunk=noop,
+        send_thought_chunk=noop,
+        send_tool_start=send_tool_start,
+        send_tool_finish=noop,
+        send_plan_update=noop,
+        send_notification=noop,
+        send_protocol_update=noop,
         request_run_permission=request_perm,
         set_usage=lambda *_: None,
     )
     runner = PromptRunner(env)
     handler = runner._build_runner_event_handler(
         "s",
-        tool_trackers={},
         run_command_ctx_tokens={},
         plan_progress=None,
     )
@@ -41,7 +47,7 @@ async def test_run_command_permission_includes_string_args():
     request_perm.assert_awaited_once()
     assert request_perm.await_args.kwargs["command"] == "echo hi"
 
-    updates = [call.args[0] for call in send_update.await_args_list]  # type: ignore[attr-defined]
-    assert updates
-    start_update = updates[0].update
-    assert getattr(start_update, "raw_input", {}).get("command") == "echo hi"
+    send_tool_start.assert_awaited_once()
+    call = send_tool_start.await_args
+    event = call.args[1]
+    assert event.raw_input.get("command") == "echo hi"

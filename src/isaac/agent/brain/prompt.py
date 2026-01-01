@@ -18,6 +18,7 @@ Core behaviors:
 - Respect user intent; do not add speculative features.
 - Prefer direct execution; delegate only when a specialist tool is clearly useful.
 - When delegating, pass only essential context and state the expected output clearly.
+- Use edit_file only for files and always provide full, non-empty content; use run_command mkdir -p for directories.
 """
 
 SUBAGENT_INSTRUCTIONS = """

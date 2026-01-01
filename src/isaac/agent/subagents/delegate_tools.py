@@ -361,6 +361,14 @@ async def _run_delegate_once(
     tracker: ToolCallTracker | None = None
     if tool_call_id and session_id and send_update:
         tracker = ToolCallTracker(id_factory=lambda: tool_call_id)
+        # Seed tracker state so progress updates can reuse the existing ACP tool call id
+        # without emitting a duplicate ToolCallStart update.
+        tracker.start(
+            external_id=tool_call_id,
+            title=spec.name,
+            status="in_progress",
+            raw_input={"tool": spec.name},
+        )
 
     buffer: list[str] = []
     last_sent = 0.0

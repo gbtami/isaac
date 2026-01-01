@@ -4,20 +4,18 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from dataclasses import dataclass, field
 from typing import Any, Dict
-
-from acp.helpers import session_notification, text_block, update_agent_message
-from acp.schema import PromptResponse
 from pydantic_ai.messages import FunctionToolResultEvent  # type: ignore
 
 from isaac.agent import models as model_registry
+from isaac.agent.brain.plan_helpers import plan_from_planner_result
 from isaac.agent.brain.prompt_runner import PromptEnv, PromptRunner
-from isaac.agent.brain.plan_parser import parse_plan_from_text
-from isaac.agent.brain.model_errors import ModelBuildError
-from isaac.agent.brain.plan_schema import PlanSteps
-from isaac.agent.brain.agent_factory import create_subagent_for_model
-from isaac.agent.brain.plan_updates import plan_update_from_steps, plan_with_status
+from isaac.agent.brain.prompt_result import PromptResult
+from isaac.agent.brain.history_utils import extract_usage_total, trim_history
+from isaac.agent.brain.compaction import maybe_compact_history
+from isaac.agent.brain.recent_files import inject_recent_files_context, record_recent_file
+from isaac.agent.brain.session_ops import build_runner, respond_model_error, set_session_model
+from isaac.agent.brain.session_state import SessionState
 from isaac.agent.runner import stream_with_runner
 from isaac.agent.subagents.delegate_tools import (
     DelegateToolContext,
@@ -31,22 +29,14 @@ from isaac.log_utils import log_context as log_ctx, log_event
 logger = logging.getLogger(__name__)
 
 
-@dataclass
-class SessionState:
-    """State for sessions using the prompt handler."""
-
-    runner: Any | None = None
-    model_id: str | None = None
-    history: list[Any] = field(default_factory=list)
-    model_error: str | None = None
-    model_error_notified: bool = False
-
-
 class PromptHandler:
     """Single-runner prompt handler that can use delegate planning tools."""
 
     _MAX_HISTORY_MESSAGES = 30
-    _PRESERVE_RECENT_MESSAGES = 8
+    _MAX_RECENT_FILES = 5
+    _RECENT_FILES_CONTEXT = 3
+    _AUTO_COMPACT_RATIO = 0.9
+    _COMPACT_USER_MESSAGE_MAX_TOKENS = 20_000
 
     def __init__(
         self,
@@ -64,7 +54,14 @@ class PromptHandler:
             session_id,
             SessionState(model_id=model_registry.current_model_id()),
         )
-        await self._build_runner(session_id, state, toolsets, system_prompt=system_prompt)
+        await build_runner(
+            env=self.env,
+            session_id=session_id,
+            state=state,
+            register_tools=self._register_tools,
+            toolsets=toolsets,
+            system_prompt=system_prompt,
+        )
 
     async def set_session_model(
         self, session_id: str, model_id: str, toolsets: list[Any], system_prompt: str | None = None
@@ -73,42 +70,36 @@ class PromptHandler:
             session_id,
             SessionState(model_id=model_registry.current_model_id()),
         )
-        try:
-            executor = create_subagent_for_model(
-                model_id, self._register_tools, toolsets=toolsets, system_prompt=system_prompt
-            )
-            state.runner = executor
-            state.model_id = model_id
-            state.history = []
-            state.model_error = None
-            state.model_error_notified = False
-        except Exception as exc:
-            msg = f"Model load failed: {exc}"
-            state.runner = None
-            state.model_error = msg
-            state.model_error_notified = False
-            await self.env.send_update(
-                session_notification(
-                    session_id,
-                    update_agent_message(text_block(msg)),
-                )
-            )
-            raise ModelBuildError(msg) from exc
+        await set_session_model(
+            env=self.env,
+            session_id=session_id,
+            state=state,
+            model_id=model_id,
+            register_tools=self._register_tools,
+            toolsets=toolsets,
+            system_prompt=system_prompt,
+        )
 
     async def handle_prompt(
         self,
         session_id: str,
         prompt_text: str,
         cancel_event: asyncio.Event,
-    ) -> PromptResponse:
+    ) -> PromptResult:
         state = self._sessions.setdefault(
             session_id,
             SessionState(model_id=model_registry.current_model_id()),
         )
         if state.runner is None:
-            await self._build_runner(session_id, state, toolsets=None)
+            await build_runner(
+                env=self.env,
+                session_id=session_id,
+                state=state,
+                register_tools=self._register_tools,
+                toolsets=None,
+            )
         if state.model_error or state.runner is None:
-            return await self._respond_model_error(session_id, state)
+            return await respond_model_error(env=self.env, session_id=session_id, state=state)
 
         with log_ctx(session_id=session_id, model_id=state.model_id):
             log_event(
@@ -117,12 +108,21 @@ class PromptHandler:
                 prompt_preview=prompt_text[:160].replace("\n", "\\n"),
             )
 
-        history = self._trim_history(state.history, self._MAX_HISTORY_MESSAGES)
+        await maybe_compact_history(
+            env=self.env,
+            state=state,
+            session_id=session_id,
+            model_id=state.model_id,
+            max_history_messages=self._MAX_HISTORY_MESSAGES,
+            auto_compact_ratio=self._AUTO_COMPACT_RATIO,
+            compact_user_message_max_tokens=self._COMPACT_USER_MESSAGE_MAX_TOKENS,
+        )
+        history = trim_history(state.history, self._MAX_HISTORY_MESSAGES)
+        context_history = inject_recent_files_context(history, state.recent_files, self._RECENT_FILES_CONTEXT)
         plan_progress: dict[str, Any] | None = {"plan": None, "idx": 0}
         _push_chunk = self._prompt_runner._make_chunk_sender(session_id)  # type: ignore[attr-defined]
         _push_thought = self._prompt_runner._make_thought_sender(session_id)  # type: ignore[attr-defined]
 
-        tool_trackers: Dict[str, Any] = {}
         run_command_ctx_tokens: Dict[str, Any] = {}
 
         def _record_history(msg: dict[str, Any]) -> None:
@@ -139,18 +139,16 @@ class PromptHandler:
             tool_name = getattr(result_part, "tool_name", None) or ""
             if tool_name != "planner":
                 return
-            plan_update = self._plan_from_planner_result(result_part)
+            plan_update = plan_from_planner_result(result_part)
             if plan_update is None:
                 return
             if plan_progress is not None:
                 plan_progress["plan"] = plan_update
                 plan_progress["idx"] = 0
-            initial = plan_with_status(plan_update, active_index=0)
-            await self.env.send_update(session_notification(session_id, initial))
+            await self.env.send_plan_update(session_id, plan_update, 0, None)
 
         base_handler = self._prompt_runner._build_runner_event_handler(  # type: ignore[attr-defined]
             session_id,
-            tool_trackers,
             run_command_ctx_tokens,
             plan_progress,
             record_history=_record_history,
@@ -170,24 +168,21 @@ class PromptHandler:
                 plan_progress["plan"] = saved_plan
                 plan_progress["idx"] = saved_idx
                 await _maybe_capture_plan(event)
+                record_recent_file(state.recent_files, event, self._MAX_RECENT_FILES)
                 return handled
             await _maybe_capture_plan(event)
-            return await base_handler(event)
+            handled = await base_handler(event)
+            record_recent_file(state.recent_files, event, self._MAX_RECENT_FILES)
+            return handled
 
-        await self._maybe_compact_history(state)
-
-        def _store_messages(msgs: Any) -> None:
-            try:
-                state.history.extend(list(msgs or []))
-            except Exception:
-                return
+        state.history.append({"role": "user", "content": prompt_text})
 
         # Provide parent permission routing to delegate tool runs in this prompt turn.
         delegate_token = set_delegate_tool_context(
             DelegateToolContext(
                 session_id=session_id,
                 request_run_permission=self.env.request_run_permission,
-                send_update=self.env.send_update,
+                send_update=self.env.send_protocol_update,
             )
         )
         try:
@@ -197,9 +192,8 @@ class PromptHandler:
                 _push_chunk,
                 _push_thought,
                 cancel_event,
-                history=history,
+                history=context_history,
                 on_event=_on_event,
-                store_messages=_store_messages,
                 log_context="subagent",
             )
         finally:
@@ -212,17 +206,23 @@ class PromptHandler:
             msg = response_text.removeprefix("Provider error:").strip()
             with log_ctx(session_id=session_id, model_id=state.model_id):
                 log_event(logger, "prompt.handle.error", level=logging.WARNING, error=msg)
-            await self.env.send_update(
-                session_notification(
-                    session_id,
-                    update_agent_message(text_block(f"Model/provider error: {msg}")),
-                )
-            )
+            await self.env.send_notification(session_id, f"Model/provider error: {msg}")
             return self._prompt_runner._prompt_end()  # type: ignore[attr-defined]
         if plan_progress and plan_progress.get("plan"):
-            completed = plan_with_status(plan_progress["plan"], status_all="completed")
-            await self.env.send_update(session_notification(session_id, completed))
-        self.env.set_usage(session_id, normalize_usage(usage))
+            await self.env.send_plan_update(session_id, plan_progress["plan"], None, "completed")
+        if response_text:
+            state.history.append({"role": "assistant", "content": response_text})
+        with log_ctx(session_id=session_id, model_id=state.model_id):
+            log_event(
+                logger,
+                "prompt.history.updated",
+                level=logging.DEBUG,
+                history_len=len(state.history),
+                last_preview=(state.history[-1].get("content", "") if state.history else "")[:120].replace("\n", "\\n"),
+            )
+        normalized_usage = normalize_usage(usage)
+        state.last_usage_total_tokens = extract_usage_total(normalized_usage)
+        self.env.set_usage(session_id, normalized_usage)
         with log_ctx(session_id=session_id, model_id=state.model_id):
             log_event(logger, "prompt.handle.complete")
         return self._prompt_runner._prompt_end()  # type: ignore[attr-defined]
@@ -250,6 +250,7 @@ class PromptHandler:
         return {
             "history": list(state.history),
             "model_id": state.model_id,
+            "recent_files": list(state.recent_files),
         }
 
     async def restore_snapshot(self, session_id: str, snapshot: dict[str, Any]) -> None:
@@ -259,113 +260,4 @@ class PromptHandler:
         )
         state.history = list(snapshot.get("history") or [])
         state.model_id = snapshot.get("model_id") or state.model_id
-
-    async def _maybe_compact_history(self, state: SessionState) -> None:
-        """Compact older history into a summary when it grows too large."""
-
-        runner = state.runner
-        if runner is None:
-            return
-        if len(state.history) <= self._MAX_HISTORY_MESSAGES:
-            return
-
-        to_compact = state.history[: -self._PRESERVE_RECENT_MESSAGES] or []
-        preserved = state.history[-self._PRESERVE_RECENT_MESSAGES :] if state.history else []
-        if not to_compact:
-            return
-
-        summary_prompt = (
-            "Summarize the earlier conversation for future turns. "
-            "List key tasks, decisions, files touched, commands run, and outstanding follow-ups."
-        )
-
-        async def _noop(_: str) -> None:
-            return None
-
-        summary_text = None
-        try:
-            summary_text, _ = await stream_with_runner(
-                runner,
-                summary_prompt,
-                _noop,
-                _noop,
-                asyncio.Event(),
-                history=to_compact,
-                log_context="history_compact",
-            )
-        except Exception:
-            summary_text = None
-
-        summary_content = (summary_text or "").strip()
-        summary_msg = {"role": "system", "content": f"Conversation summary:\n{summary_content}".strip()}
-        state.history = [summary_msg] + preserved
-
-    @staticmethod
-    def _trim_history(history: list[Any], limit: int) -> list[Any]:
-        if limit <= 0:
-            return []
-        if len(history) <= limit:
-            return list(history)
-        return list(history[-limit:])
-
-    async def _build_runner(
-        self,
-        session_id: str,
-        state: SessionState,
-        toolsets: list[Any] | None = None,
-        system_prompt: str | None = None,
-    ) -> None:
-        try:
-            executor = create_subagent_for_model(
-                model_registry.current_model_id(),
-                self._register_tools,
-                toolsets=toolsets,
-                system_prompt=system_prompt,
-            )
-            state.model_id = model_registry.current_model_id()
-            state.runner = executor
-            state.history = []
-            state.model_error = None
-            state.model_error_notified = False
-        except Exception as exc:
-            msg = f"Model load failed: {exc}"
-            state.runner = None
-            state.model_error = msg
-            state.model_error_notified = False
-            await self.env.send_update(
-                session_notification(
-                    session_id,
-                    update_agent_message(text_block(msg)),
-                )
-            )
-
-    async def _respond_model_error(self, session_id: str, state: SessionState) -> PromptResponse:
-        msg = state.model_error or "Model unavailable for this session."
-        if not state.model_error_notified:
-            await self.env.send_update(
-                session_notification(
-                    session_id,
-                    update_agent_message(text_block(msg)),
-                )
-            )
-            state.model_error_notified = True
-        return PromptResponse(stop_reason="refusal")
-
-    def _plan_from_planner_result(self, result_part: Any) -> Any | None:
-        content = getattr(result_part, "content", None)
-        plan_obj = content
-        if isinstance(plan_obj, dict):
-            if plan_obj.get("error"):
-                return None
-            if "content" in plan_obj:
-                plan_obj = plan_obj.get("content")
-        if isinstance(plan_obj, PlanSteps) and plan_obj.entries:
-            plan_update = plan_update_from_steps(plan_obj.entries)
-            if plan_update is not None:
-                return plan_update
-
-        if isinstance(plan_obj, str):
-            return parse_plan_from_text(plan_obj or "")
-        if isinstance(plan_obj, dict):
-            return parse_plan_from_text(str(plan_obj))
-        return None
+        state.recent_files = list(snapshot.get("recent_files") or [])

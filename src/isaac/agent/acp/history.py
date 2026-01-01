@@ -9,6 +9,7 @@ from acp.schema import AgentMessageChunk, AgentPlanUpdate, ToolCallProgress, Use
 
 def build_chat_history(updates: Iterable[Any]) -> List[dict[str, str]]:
     """Convert ACP session/update notifications into role/content messages."""
+
     history: list[dict[str, str]] = []
     skip_next_assistant = False
     for update in updates:
@@ -65,3 +66,6 @@ def build_chat_history(updates: Iterable[Any]) -> List[dict[str, str]]:
     for m in merged:
         m.pop("_src", None)
     return merged
+
+
+__all__ = ["build_chat_history"]

@@ -4,21 +4,14 @@ from __future__ import annotations
 
 import contextlib
 from dataclasses import dataclass
+import logging
 from typing import Any, Awaitable, Callable, Dict
 
-from acp.contrib.tool_calls import ToolCallTracker
-from acp.helpers import (
-    session_notification,
-    text_block,
-    tool_content,
-    tool_diff_content,
-    update_agent_message,
-    update_agent_thought,
-)
-from acp.schema import SessionNotification, ToolKind
 from pydantic_ai.messages import FunctionToolCallEvent, FunctionToolResultEvent, RetryPromptPart
-from isaac.agent.brain.plan_updates import plan_with_status
+from isaac.agent.brain.events import ToolCallFinish, ToolCallStart
+from isaac.agent.brain.tool_events import should_record_tool_history, tool_history_summary, tool_kind
 from isaac.agent.brain.tool_args import coerce_tool_args
+from isaac.log_utils import log_event
 from isaac.agent.tools.run_command import (
     RunCommandContext,
     pop_run_command_permission,
@@ -27,6 +20,8 @@ from isaac.agent.tools.run_command import (
     set_run_command_permission,
 )
 
+logger = logging.getLogger(__name__)
+
 
 @dataclass
 class PromptEnv:
@@ -34,21 +29,15 @@ class PromptEnv:
 
     session_modes: Dict[str, str]
     session_last_chunk: Dict[str, str | None]
-    send_update: Callable[[SessionNotification], Awaitable[None]]
+    send_message_chunk: Callable[[str, str], Awaitable[None]]
+    send_thought_chunk: Callable[[str, str], Awaitable[None]]
+    send_tool_start: Callable[[str, ToolCallStart], Awaitable[None]]
+    send_tool_finish: Callable[[str, ToolCallFinish], Awaitable[None]]
+    send_plan_update: Callable[[str, Any, int | None, str | None], Awaitable[None]]
+    send_notification: Callable[[str, str], Awaitable[None]]
+    send_protocol_update: Callable[[Any], Awaitable[None]]
     request_run_permission: Callable[[str, str, str, str | None], Awaitable[bool]]
     set_usage: Callable[[str, Any | None], None]
-
-
-def _is_delegate_tool(tool_name: str) -> bool:
-    """Check if a tool name belongs to a registered delegate tool."""
-
-    if not tool_name:
-        return False
-    try:
-        from isaac.agent.subagents import DELEGATE_TOOL_HANDLERS
-    except Exception:
-        return False
-    return tool_name in DELEGATE_TOOL_HANDLERS
 
 
 class PromptRunner:
@@ -63,30 +52,19 @@ class PromptRunner:
             if chunk == last:
                 return
             self.env.session_last_chunk[session_id] = chunk
-            await self.env.send_update(
-                session_notification(
-                    session_id,
-                    update_agent_message(text_block(chunk)),
-                )
-            )
+            await self.env.send_message_chunk(session_id, chunk)
 
         return _push_chunk
 
     def _make_thought_sender(self, session_id: str) -> Callable[[str], Awaitable[None]]:
         async def _push_thought(chunk: str) -> None:
-            await self.env.send_update(
-                session_notification(
-                    session_id,
-                    update_agent_thought(text_block(chunk)),
-                )
-            )
+            await self.env.send_thought_chunk(session_id, chunk)
 
         return _push_thought
 
     def _build_runner_event_handler(
         self,
         session_id: str,
-        tool_trackers: Dict[str, ToolCallTracker],
         run_command_ctx_tokens: Dict[str, Any],
         plan_progress: dict[str, Any] | None = None,
         record_history: Callable[[dict[str, str]], None] | None = None,
@@ -98,22 +76,22 @@ class PromptRunner:
                 tool_name = getattr(event.part, "tool_name", None) or ""
                 raw_args = getattr(event.part, "args", None)
                 args = coerce_tool_args(raw_args)
-                tracker = ToolCallTracker(id_factory=lambda: event.tool_call_id)
-                tool_trackers[event.tool_call_id] = tracker
-                start = tracker.start(
-                    external_id=event.tool_call_id,
-                    title=tool_name,
-                    kind=self._tool_kind(tool_name),
-                    status="in_progress",
+                log_event(
+                    logger,
+                    "tool.call.requested",
+                    level=logging.DEBUG,
+                    tool=tool_name,
+                    tool_call_id=event.tool_call_id,
+                    args=args,
+                )
+                start = ToolCallStart(
+                    tool_call_id=event.tool_call_id,
+                    tool_name=tool_name,
+                    kind=tool_kind(tool_name),
                     raw_input={"tool": tool_name, **args},
                 )
-                await self.env.send_update(session_notification(session_id, start))
+                await self.env.send_tool_start(session_id, start)
                 tool_call_inputs[event.tool_call_id] = args
-                if record_history:
-                    summary = self._tool_history_summary(tool_name, {}, "in_progress", raw_input=args)
-                    if summary:
-                        with contextlib.suppress(Exception):
-                            record_history({"role": "assistant", "content": summary})
                 if tool_name == "run_command":
                     allowed = True
                     mode = self.env.session_modes.get(session_id, "ask")
@@ -132,33 +110,24 @@ class PromptRunner:
                     token = set_run_command_context(RunCommandContext(request_permission=_permission))
                     run_command_ctx_tokens[event.tool_call_id] = token
                     if not allowed:
-                        denied = tracker.progress(
-                            external_id=event.tool_call_id,
+                        denied = ToolCallFinish(
+                            tool_call_id=event.tool_call_id,
+                            tool_name=tool_name,
                             status="failed",
                             raw_output={
                                 "tool": tool_name,
                                 "content": None,
                                 "error": "permission denied",
                             },
-                            content=[tool_content(text_block("Command blocked: permission denied"))],
                         )
-                        await self.env.send_update(session_notification(session_id, denied))
+                        await self.env.send_tool_finish(session_id, denied)
                         return True
                 return True
-                # Record call intent in history.
-                if record_history:
-                    summary = self._tool_history_summary(tool_name, {}, "in_progress", raw_input=args)
-                    if summary:
-                        with contextlib.suppress(Exception):
-                            record_history({"role": "assistant", "content": summary})
 
             if isinstance(event, FunctionToolResultEvent):
                 token = run_command_ctx_tokens.pop(event.tool_call_id, None)
                 if token is not None:
                     reset_run_command_context(token)
-                tracker = tool_trackers.pop(event.tool_call_id, None) or ToolCallTracker(
-                    id_factory=lambda: event.tool_call_id
-                )
                 call_input = tool_call_inputs.pop(event.tool_call_id, {})
                 result_part = event.result
                 tool_name = getattr(result_part, "tool_name", None) or ""
@@ -177,26 +146,20 @@ class PromptRunner:
                     status = "failed"
                 else:
                     raw_output.setdefault("error", None)
-                summary = raw_output.get("error") or raw_output.get("content") or ""
-                content_blocks: list[Any] = []
                 new_text = raw_output.get("new_text")
                 old_text = raw_output.get("old_text")
-                if tool_name in {"edit_file", "apply_patch"} and isinstance(new_text, str):
-                    path = str(raw_output.get("path") or "")
-                    with contextlib.suppress(Exception):
-                        content_blocks.append(tool_diff_content(path, new_text, old_text))
-                if not content_blocks and summary:
-                    content_blocks = [tool_content(text_block(str(summary)))]
-                progress = tracker.progress(
-                    external_id=event.tool_call_id,
+                finish = ToolCallFinish(
+                    tool_call_id=event.tool_call_id,
+                    tool_name=tool_name,
                     status=status,
                     raw_output=raw_output,
-                    content=content_blocks or None,
+                    old_text=old_text if isinstance(old_text, str) else None,
+                    new_text=new_text if isinstance(new_text, str) else None,
                 )
-                await self.env.send_update(session_notification(session_id, progress))
+                await self.env.send_tool_finish(session_id, finish)
 
-                if record_history:
-                    summary = self._tool_history_summary(tool_name, raw_output, status, raw_input=call_input)
+                if record_history and should_record_tool_history(tool_name):
+                    summary = tool_history_summary(tool_name, raw_output, status, raw_input=call_input)
                     if summary:
                         with contextlib.suppress(Exception):
                             record_history({"role": "assistant", "content": summary})
@@ -210,10 +173,9 @@ class PromptRunner:
                             idx += 1
                             plan_progress["idx"] = idx
                             if idx >= len(entries):
-                                plan_note = plan_with_status(plan_progress["plan"], status_all="completed")
+                                await self.env.send_plan_update(session_id, plan_progress["plan"], None, "completed")
                             else:
-                                plan_note = plan_with_status(plan_progress["plan"], active_index=idx)
-                            await self.env.send_update(session_notification(session_id, plan_note))
+                                await self.env.send_plan_update(session_id, plan_progress["plan"], idx, None)
                 return True
 
             return False
@@ -222,81 +184,14 @@ class PromptRunner:
 
     @staticmethod
     def _prompt_cancel() -> Any:
-        from acp.schema import PromptResponse  # local import to avoid cycles
+        from isaac.agent.brain.prompt_result import PromptResult
 
-        return PromptResponse(stop_reason="cancelled")
+        return PromptResult(stop_reason="cancelled")
 
     @staticmethod
     def _prompt_end() -> Any:
-        from acp.schema import PromptResponse  # local import to avoid cycles
+        from isaac.agent.brain.prompt_result import PromptResult
 
-        return PromptResponse(stop_reason="end_turn")
+        return PromptResult(stop_reason="end_turn")
 
-    @staticmethod
-    def _tool_history_summary(
-        tool_name: str, raw_output: dict[str, Any], status: str, raw_input: dict[str, Any] | None = None
-    ) -> str | None:
-        content = raw_output.get("content")
-        summary_prefix = f"{tool_name} ({status})"
-        if tool_name == "run_command":
-            cmd = raw_output.get("command") or raw_output.get("cmd") or (raw_input or {}).get("command")
-            cwd = raw_output.get("cwd") or (raw_input or {}).get("cwd")
-            cmd_str = str(cmd).strip() if cmd else ""
-            cwd_str = f" (cwd: {cwd})" if cwd else ""
-            if cmd_str:
-                return f"Ran command: {cmd_str}{cwd_str} [{status}]"
-            return f"Ran command [{status}]"
-        if tool_name in {"edit_file", "apply_patch"}:
-            path = raw_output.get("path") or (raw_input or {}).get("path")
-            path_str = f" {path}" if path else ""
-            return f"Updated file{path_str} [{status}]"
-        if tool_name == "read_file":
-            path = raw_output.get("path") or (raw_input or {}).get("path")
-            if path:
-                return f"Read file {path} [{status}]"
-        if tool_name == "list_files":
-            root = raw_output.get("directory") or raw_output.get("path") or (raw_input or {}).get("directory")
-            if root:
-                return f"Listed files in {root} [{status}]"
-        if tool_name == "file_summary":
-            path = raw_output.get("path") or (raw_input or {}).get("path")
-            if path:
-                return f"Summarized file {path} [{status}]"
-        if _is_delegate_tool(tool_name):
-            task = raw_output.get("task") or (raw_input or {}).get("task")
-            task_str = f": {task}" if task else ""
-            return f"Delegated to {tool_name}{task_str} [{status}]"
-        if tool_name == "code_search":
-            pattern = raw_output.get("pattern") or (raw_input or {}).get("pattern")
-            directory = raw_output.get("directory") or (raw_input or {}).get("directory")
-            if pattern:
-                where = f" in {directory}" if directory else ""
-                return f"Searched for '{pattern}'{where} [{status}]"
-        if tool_name == "fetch_url":
-            fetched = raw_output.get("url") or raw_output.get("source") or raw_output.get("request_url")
-            status_code = raw_output.get("status_code")
-            detail = f" ({status_code})" if status_code else ""
-            if fetched:
-                return f"Fetched URL {fetched}{detail} [{status}]"
-        if tool_name:
-            return f"{summary_prefix}"
-        if content:
-            return f"Tool result [{status}]: {content}"
-        return None
-
-    @staticmethod
-    def _tool_kind(tool_name: str) -> ToolKind:
-        name = tool_name.lower().strip()
-        if name in {"read_file", "list_files", "file_summary"}:
-            return "read"
-        if name in {"edit_file", "apply_patch"}:
-            return "edit"
-        if name in {"code_search"}:
-            return "search"
-        if name in {"run_command"}:
-            return "execute"
-        if name in {"fetch_url"}:
-            return "fetch"
-        if _is_delegate_tool(name):
-            return "think"
-        return "other"
+    # Tool history helpers moved to isaac.agent.brain.tool_events.

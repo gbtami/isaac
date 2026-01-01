@@ -10,6 +10,7 @@ import json
 from typing import Any, Callable
 
 from pydantic_ai import exceptions as ai_exc  # type: ignore
+from pydantic_ai import messages as ai_messages  # type: ignore
 
 from pydantic_ai.messages import (  # type: ignore
     PartDeltaEvent,
@@ -77,6 +78,33 @@ async def stream_with_runner(
 
         return raw_history
 
+    def _model_messages_to_chat_history(raw_history: list[Any]) -> list[dict[str, str]]:
+        """Convert pydantic-ai model messages into role/content chat history.
+
+        This preserves user/assistant text while avoiding tool-call metadata
+        that some providers reject when the history is truncated.
+        """
+
+        chat_history: list[dict[str, str]] = []
+        for message in raw_history:
+            if isinstance(message, dict):
+                role = message.get("role")
+                content = message.get("content")
+                if role and content is not None:
+                    chat_history.append({"role": str(role), "content": str(content)})
+                continue
+            if isinstance(message, ai_messages.ModelRequest):
+                for part in getattr(message, "parts", ()) or ():
+                    if isinstance(part, ai_messages.SystemPromptPart):
+                        chat_history.append({"role": "system", "content": str(part.content)})
+                    elif isinstance(part, ai_messages.UserPromptPart):
+                        chat_history.append({"role": "user", "content": str(part.content)})
+            elif isinstance(message, ai_messages.ModelResponse):
+                for part in getattr(message, "parts", ()) or ():
+                    if isinstance(part, ai_messages.TextPart):
+                        chat_history.append({"role": "assistant", "content": str(part.content)})
+        return chat_history
+
     event_iter = None
     try:
         thought_delta_buffer: list[str] = []
@@ -93,8 +121,15 @@ async def stream_with_runner(
                 history_preview=history_preview,
                 history_len=len(history) if isinstance(history, list) else None,
             )
-            if isinstance(history, list) and history and not isinstance(history[0], dict):
-                safe_history = history
+            if isinstance(history, list) and history:
+                model_types = (ai_messages.ModelRequest, ai_messages.ModelResponse)
+                if any(isinstance(msg, model_types) for msg in history):
+                    chat_history = _model_messages_to_chat_history(history)
+                    sanitized = _sanitize_history(chat_history)
+                    safe_history = _convert_to_model_messages(sanitized)
+                else:
+                    sanitized = _sanitize_history(history)
+                    safe_history = _convert_to_model_messages(sanitized)
             else:
                 sanitized = _sanitize_history(history)
                 safe_history = _convert_to_model_messages(sanitized)

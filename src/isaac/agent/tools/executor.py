@@ -3,11 +3,15 @@
 from __future__ import annotations
 
 import inspect
+import logging
 from typing import Any
 
 from pydantic import ValidationError
 
 from isaac.agent.tools.registry import TOOL_ARG_MODELS, TOOL_HANDLERS, TOOL_REQUIRED_ARGS
+from isaac.log_utils import log_event
+
+logger = logging.getLogger(__name__)
 
 
 async def run_tool(function_name: str, ctx: Any | None = None, **kwargs: Any) -> dict:
@@ -25,7 +29,23 @@ async def run_tool(function_name: str, ctx: Any | None = None, **kwargs: Any) ->
             from pydantic_ai.exceptions import ToolRetryError  # type: ignore
             from pydantic_ai.messages import RetryPromptPart  # type: ignore
 
-            raise ToolRetryError(RetryPromptPart(content=msg, tool_name=function_name))
+            tool_call_id = getattr(ctx, "tool_call_id", None)
+            log_event(
+                logger,
+                "tool.retry.missing_args",
+                level=logging.WARNING,
+                tool=function_name,
+                tool_call_id=tool_call_id,
+                missing=missing_required,
+                args=kwargs,
+            )
+            raise ToolRetryError(
+                RetryPromptPart(
+                    content=msg,
+                    tool_name=function_name,
+                    tool_call_id=tool_call_id or None,
+                )
+            )
         return {"content": None, "error": msg}
 
     if args_model is not None:
@@ -38,7 +58,23 @@ async def run_tool(function_name: str, ctx: Any | None = None, **kwargs: Any) ->
                 from pydantic_ai.exceptions import ToolRetryError  # type: ignore
                 from pydantic_ai.messages import RetryPromptPart  # type: ignore
 
-                raise ToolRetryError(RetryPromptPart(content=msg, tool_name=function_name))
+                tool_call_id = getattr(ctx, "tool_call_id", None)
+                log_event(
+                    logger,
+                    "tool.retry.validation",
+                    level=logging.WARNING,
+                    tool=function_name,
+                    tool_call_id=tool_call_id,
+                    error=str(exc),
+                    args=kwargs,
+                )
+                raise ToolRetryError(
+                    RetryPromptPart(
+                        content=msg,
+                        tool_name=function_name,
+                        tool_call_id=tool_call_id or None,
+                    )
+                )
             return {"content": None, "error": msg}
     else:
         call_kwargs = dict(kwargs)

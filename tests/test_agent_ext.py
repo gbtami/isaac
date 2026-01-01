@@ -13,7 +13,7 @@ from pydantic_ai.run import AgentRunResultEvent  # type: ignore
 
 from isaac.agent.agent import ACPAgent
 from isaac.agent import models as model_registry
-from isaac.agent.brain.history import build_chat_history
+from isaac.agent.acp.history import build_chat_history
 
 
 def _make_user_chunk(session_id: str, text: str) -> SessionNotification:
@@ -177,13 +177,13 @@ async def test_history_preserved_across_prompts(monkeypatch, tmp_path: Path):
     conn = AsyncMock(spec=AgentSideConnection)
     conn.session_update = AsyncMock()
     executor = _RecordingRunner("done")
-    from isaac.agent.brain import prompt_handler
+    from isaac.agent.brain import session_ops
 
     def _build(_model_id: str, _register: object, toolsets=None, **kwargs: object) -> object:
         _ = toolsets
         return executor
 
-    monkeypatch.setattr(prompt_handler, "create_subagent_for_model", _build)
+    monkeypatch.setattr(session_ops, "create_subagent_for_model", _build)
     agent = ACPAgent(conn)
     session = await agent.new_session(cwd=str(tmp_path), mcp_servers=[])
 
