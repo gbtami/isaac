@@ -204,6 +204,12 @@ class PromptHandler:
             with log_ctx(session_id=session_id, model_id=state.model_id):
                 log_event(logger, "prompt.handle.cancelled")
             return self._prompt_runner._prompt_cancel()  # type: ignore[attr-defined]
+        if response_text.startswith("Provider timeout:"):
+            msg = response_text.removeprefix("Provider timeout:").strip()
+            with log_ctx(session_id=session_id, model_id=state.model_id):
+                log_event(logger, "prompt.handle.timeout", level=logging.WARNING, error=msg)
+            await self.env.send_notification(session_id, f"Model/provider timeout: {msg}")
+            return self._prompt_runner._prompt_end()  # type: ignore[attr-defined]
         if response_text.startswith("Provider error:"):
             msg = response_text.removeprefix("Provider error:").strip()
             with log_ctx(session_id=session_id, model_id=state.model_id):

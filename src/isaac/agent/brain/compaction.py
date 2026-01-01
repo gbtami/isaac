@@ -137,6 +137,7 @@ def summary_rejected(summary: str) -> bool:
             "first turn",
             "please provide the task",
             "no conversation to summarize",
+            "provider timeout",
         )
     )
 

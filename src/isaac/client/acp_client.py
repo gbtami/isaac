@@ -277,7 +277,11 @@ class ACPClient(Client):
             display_text = content.text
             if self._state.collect_models:
                 self._state.model_buffer = (self._state.model_buffer or []) + [display_text]
-            self._maybe_update_usage_summary(display_text)
+            if self._maybe_update_usage_summary(display_text):
+                if not display_text.endswith("\n"):
+                    display_text = f"{display_text}\n"
+                print_agent_text(display_text)
+                return
             print_agent_text(display_text)
             return
         if isinstance(content, ImageContentBlock):
@@ -293,16 +297,17 @@ class ACPClient(Client):
         rendered = f"{prefix} {display_text}" if prefix else display_text
         print_agent_text(rendered)
 
-    def _maybe_update_usage_summary(self, text: str) -> None:
+    def _maybe_update_usage_summary(self, text: str) -> bool:
         """Capture usage lines so the UI can display token/usage summaries."""
         if text.startswith("Usage:"):
             self._state.usage_summary = text
             self._state.notify_changed()
-            return
+            return True
         if text.startswith("Usage not available") or text.startswith("Usage data unavailable"):
             self._state.usage_summary = text
             self._state.notify_changed()
-            return
+            return True
+        return False
 
 
 def _format_delegate_output(tool_name: str, payload: Any) -> str:

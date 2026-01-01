@@ -6,6 +6,7 @@ from unittest.mock import AsyncMock
 from acp.agent.connection import AgentSideConnection
 from acp import RequestPermissionResponse
 from acp.schema import AllowedOutcome
+import httpx
 from isaac.agent import ACPAgent
 from isaac.agent.brain import session_ops
 from isaac.agent.tools import register_tools
@@ -41,9 +42,26 @@ def make_error_agent(conn: AgentSideConnection) -> ACPAgent:
     """Agent whose runner fails to simulate provider errors."""
 
     class ErrorRunner:
-        async def run_stream_events(self, prompt: str):  # pragma: no cover - simple stub
+        async def run_stream_events(  # pragma: no cover - simple stub
+            self, prompt: str, *, message_history=None
+        ):
             raise RuntimeError("rate limited")
 
     session_ops.create_subagent_for_model = lambda *_args, **_kwargs: ErrorRunner()  # type: ignore[assignment]
+
+    return ACPAgent(conn)
+
+
+def make_timeout_agent(conn: AgentSideConnection) -> ACPAgent:
+    """Agent whose runner fails to simulate provider timeouts."""
+
+    class TimeoutRunner:
+        async def run_stream_events(  # pragma: no cover - simple stub
+            self, prompt: str, *, message_history=None
+        ):
+            request = httpx.Request("GET", "https://example.com")
+            raise httpx.ReadTimeout("Request timed out.", request=request)
+
+    session_ops.create_subagent_for_model = lambda *_args, **_kwargs: TimeoutRunner()  # type: ignore[assignment]
 
     return ACPAgent(conn)

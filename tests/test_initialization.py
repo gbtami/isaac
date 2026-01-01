@@ -7,7 +7,7 @@ from acp.agent.connection import AgentSideConnection
 from acp.schema import AgentMessageChunk
 from unittest.mock import AsyncMock
 
-from tests.utils import make_function_agent, make_error_agent
+from tests.utils import make_function_agent, make_error_agent, make_timeout_agent
 
 
 @pytest.mark.asyncio
@@ -55,6 +55,23 @@ async def test_provider_error_is_sent_to_client():
         if isinstance(call.kwargs.get("update"), AgentMessageChunk)
     ]
     assert any("Model/provider error" in getattr(u.content, "text", "") for u in updates)
+
+
+@pytest.mark.asyncio
+async def test_provider_timeout_is_sent_to_client():
+    conn = AsyncMock(spec=AgentSideConnection)
+    agent = make_timeout_agent(conn)
+
+    session_id = "timeout-session"
+    response = await agent.prompt(prompt=[text_block("do something")], session_id=session_id)
+
+    assert response.stop_reason == "end_turn"
+    updates = [
+        call.kwargs["update"]
+        for call in conn.session_update.call_args_list
+        if isinstance(call.kwargs.get("update"), AgentMessageChunk)
+    ]
+    assert any("Model/provider timeout" in getattr(u.content, "text", "") for u in updates)
 
 
 @pytest.mark.asyncio

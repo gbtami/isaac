@@ -365,6 +365,7 @@ async def _run_delegate_once(
     """
 
     structured: BaseModel | None = None
+    suppress_structured_output = False
     cancel_event = asyncio.Event()
 
     tracker: ToolCallTracker | None = None
@@ -437,6 +438,8 @@ async def _run_delegate_once(
     async def _on_text(chunk: str) -> None:
         if not chunk:
             return
+        if suppress_structured_output and spec.output_type is not None:
+            return
         buffer.append(chunk)
         await _flush()
 
@@ -447,13 +450,14 @@ async def _run_delegate_once(
         await _flush_thought()
 
     async def _capture(event: Any) -> bool:
-        nonlocal structured
+        nonlocal structured, suppress_structured_output
         if spec.output_type is None:
             return False
         if isinstance(event, AgentRunResultEvent):
             output = getattr(event.result, "output", None)
             if isinstance(output, spec.output_type):
                 structured = output
+                suppress_structured_output = True
         return False
 
     async def _run_stream() -> tuple[str | None, Any | None]:
@@ -485,6 +489,9 @@ async def _run_delegate_once(
 
     if response is None:
         return _DelegateRunOutcome(content=None, raw_text=None, error="Delegate agent cancelled.")
+    if response.startswith("Provider timeout:"):
+        msg = response.removeprefix("Provider timeout:").strip()
+        return _DelegateRunOutcome(content=None, raw_text=response, error=msg)
     if response.startswith("Provider error:"):
         msg = response.removeprefix("Provider error:").strip()
         return _DelegateRunOutcome(content=None, raw_text=response, error=msg)

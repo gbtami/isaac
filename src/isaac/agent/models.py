@@ -6,6 +6,7 @@ Supports switching models/providers at runtime (used by the `/model` command).
 
 from __future__ import annotations
 
+import inspect
 import json
 import logging
 import os
@@ -15,6 +16,7 @@ import configparser
 from pathlib import Path
 from typing import Any, Dict
 
+import httpx
 from pydantic_ai.models import Model  # type: ignore
 from pydantic_ai.models.anthropic import AnthropicModel, AnthropicModelSettings  # type: ignore
 from pydantic_ai.models.cerebras import CerebrasModel  # type: ignore
@@ -37,6 +39,10 @@ from pydantic_ai.providers.openrouter import OpenRouterProvider  # type: ignore
 logger = logging.getLogger(__name__)
 
 OLLAMA_BASE_URL = "http://localhost:11434/v1"
+DEFAULT_LLM_TIMEOUT_S = float(os.getenv("ISAAC_LLM_TIMEOUT_S", "60"))
+DEFAULT_LLM_CONNECT_TIMEOUT_S = float(os.getenv("ISAAC_LLM_CONNECT_TIMEOUT_S", "5"))
+DEFAULT_LLM_RETRIES = int(os.getenv("ISAAC_LLM_RETRIES", "2"))
+_HTTP_CLIENTS: dict[str, httpx.AsyncClient] = {}
 
 FUNCTION_MODEL_ID = "function:function"
 HIDDEN_MODELS = {FUNCTION_MODEL_ID}
@@ -215,6 +221,32 @@ def _fetch_models_dev_limits() -> Dict[tuple[str, str], int]:
     return index
 
 
+def _get_http_client(provider: str) -> httpx.AsyncClient:
+    """Return a cached HTTP client with explicit timeouts and retries."""
+
+    client = _HTTP_CLIENTS.get(provider)
+    if client and not client.is_closed:
+        return client
+    timeout = httpx.Timeout(
+        DEFAULT_LLM_TIMEOUT_S,
+        connect=DEFAULT_LLM_CONNECT_TIMEOUT_S,
+        read=DEFAULT_LLM_TIMEOUT_S,
+        write=DEFAULT_LLM_TIMEOUT_S,
+    )
+    transport = httpx.AsyncHTTPTransport(retries=DEFAULT_LLM_RETRIES)
+    client = httpx.AsyncClient(timeout=timeout, transport=transport)
+    _HTTP_CLIENTS[provider] = client
+    return client
+
+
+def _provider_with_http_client(provider_cls: type, provider: str, **kwargs: object) -> Any:
+    """Build a provider using a shared HTTP client when supported."""
+
+    if "http_client" in inspect.signature(provider_cls).parameters:
+        kwargs["http_client"] = _get_http_client(provider)
+    return provider_cls(**kwargs)
+
+
 def _build_provider_model(model_id: str, model_entry: Dict[str, Any]) -> tuple[Model, ModelSettings | None]:
     provider = (model_entry.get("provider") or "").lower()
     model_spec = model_entry.get("model") or "test"
@@ -228,7 +260,7 @@ def _build_provider_model(model_id: str, model_entry: Dict[str, Any]) -> tuple[M
         key = api_key or os.getenv("OPENAI_API_KEY")
         if not key:
             raise RuntimeError("OPENAI_API_KEY is required for openai models")
-        provider_obj = OpenAIProvider(api_key=key)
+        provider_obj = _provider_with_http_client(OpenAIProvider, "openai", api_key=key)
         settings: OpenAIChatModelSettings | None = None
         if _openai_model_supports_reasoning_effort(str(model_spec)):
             settings = OpenAIChatModelSettings(openai_reasoning_effort="medium")
@@ -238,7 +270,7 @@ def _build_provider_model(model_id: str, model_entry: Dict[str, Any]) -> tuple[M
         key = api_key or os.getenv("ANTHROPIC_API_KEY")
         if not key:
             raise RuntimeError("ANTHROPIC_API_KEY is required for anthropic models")
-        provider_obj = AnthropicProvider(api_key=key)
+        provider_obj = _provider_with_http_client(AnthropicProvider, "anthropic", api_key=key)
         settings = AnthropicModelSettings(anthropic_thinking={"type": "enabled", "budget_tokens": 512})
         return AnthropicModel(model_spec, provider=provider_obj), settings
 
@@ -246,21 +278,21 @@ def _build_provider_model(model_id: str, model_entry: Dict[str, Any]) -> tuple[M
         key = api_key or os.getenv("MISTRAL_API_KEY")
         if not key:
             raise RuntimeError("MISTRAL_API_KEY is required for mistral models")
-        provider_obj = MistralProvider(api_key=key)
+        provider_obj = _provider_with_http_client(MistralProvider, "mistral", api_key=key)
         return MistralModel(model_spec, provider=provider_obj), None
 
     if provider == "cerebras":
         key = api_key or os.getenv("CEREBRAS_API_KEY")
         if not key:
             raise RuntimeError("CEREBRAS_API_KEY is required for cerebras models")
-        provider_obj = CerebrasProvider(api_key=key)
+        provider_obj = _provider_with_http_client(CerebrasProvider, "cerebras", api_key=key)
         return CerebrasModel(model_spec, provider=provider_obj), None
 
     if provider == "google":
         key = api_key or os.getenv("GOOGLE_API_KEY")
         if not key:
             raise RuntimeError("GOOGLE_API_KEY is required for google models")
-        provider_obj = GoogleProvider(api_key=key)
+        provider_obj = _provider_with_http_client(GoogleProvider, "google", api_key=key)
         settings = GoogleModelSettings(google_thinking_config={"include_thoughts": True})
         return GoogleModel(model_spec, provider=provider_obj), settings
 
@@ -268,13 +300,13 @@ def _build_provider_model(model_id: str, model_entry: Dict[str, Any]) -> tuple[M
         key = api_key or os.getenv("OPENROUTER_API_KEY")
         if not key:
             raise RuntimeError("OPENROUTER_API_KEY is required for openrouter models")
-        provider_obj = OpenRouterProvider(api_key=key)
+        provider_obj = _provider_with_http_client(OpenRouterProvider, "openrouter", api_key=key)
         settings = OpenRouterModelSettings(openrouter_reasoning={"effort": "medium"})
         return OpenRouterModel(model_spec, provider=provider_obj), settings
 
     if provider == "ollama":
         # Force JSON mode so local models emit parseable tool payloads.
-        provider_obj = OllamaProvider(base_url=OLLAMA_BASE_URL)
+        provider_obj = _provider_with_http_client(OllamaProvider, "ollama", base_url=OLLAMA_BASE_URL)
         return OpenAIChatModel(model_spec, provider=provider_obj), None
 
     if provider == "function":

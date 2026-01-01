@@ -9,6 +9,7 @@ import json
 import logging
 from typing import Any, Callable, Protocol, Sequence
 
+import httpx
 from pydantic_ai import exceptions as ai_exc  # type: ignore
 from pydantic_ai import messages as ai_messages  # type: ignore
 
@@ -302,6 +303,10 @@ async def stream_with_runner(
         log_event(logger, "llm.stream.validation_failure", level=logging.WARNING, error=msg)
         friendly = "Model output failed validation; please retry or adjust the request."
         return friendly, usage
+    except httpx.TimeoutException as exc:
+        msg = str(exc) or "Request timed out."
+        log_event(logger, "llm.stream.timeout", level=logging.WARNING, error=msg)
+        return f"Provider timeout: {msg}", None
     except Exception as exc:  # pragma: no cover - provider errors
         msg = str(exc)
         log_event(logger, "llm.stream.error", level=logging.WARNING, error=msg)
