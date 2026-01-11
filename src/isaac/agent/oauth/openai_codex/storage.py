@@ -12,7 +12,7 @@ from typing import Any
 
 CONFIG_DIR = Path(os.getenv("XDG_CONFIG_HOME") or (Path.home() / ".config")) / "isaac"
 CONFIG_DIR.mkdir(parents=True, exist_ok=True)
-TOKENS_FILE = CONFIG_DIR / "oauth_tokens.json"
+TOKENS_FILE = CONFIG_DIR / "openai_codex_tokens.json"
 
 
 @dataclass

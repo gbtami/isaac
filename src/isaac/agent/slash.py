@@ -29,7 +29,7 @@ from isaac.agent.oauth.openai_codex import (
     maybe_open_browser as maybe_open_openai,
 )
 from isaac.agent.oauth.openai_codex import save_openai_tokens
-from isaac.agent.oauth.openai_codex.models import sync_openai_codex_models
+from isaac.agent.oauth.openai_codex.model import sync_openai_codex_models
 from isaac.agent.usage import format_usage_summary, normalize_usage
 
 SLASH_HANDLERS: dict[str, "SlashCommandDef"] = {}

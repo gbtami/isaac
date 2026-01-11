@@ -12,7 +12,7 @@ from typing import Any
 
 import httpx
 
-from isaac.agent.oauth.storage import OAuthTokenSet
+from isaac.agent.oauth.openai_codex.storage import OAuthTokenSet
 
 OPENAI_CODEX_BASE_URL = os.getenv("ISAAC_OPENAI_CODEX_BASE_URL", "https://chatgpt.com/backend-api/codex")
 OPENAI_CODEX_ORIGINATOR = os.getenv("ISAAC_OPENAI_OAUTH_ORIGINATOR", "isaac")

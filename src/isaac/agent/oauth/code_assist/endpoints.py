@@ -4,6 +4,9 @@ from __future__ import annotations
 
 import os
 
+# Code Assist uses sandbox (daily/autopush) plus prod endpoints. Requests prefer
+# sandboxes for model traffic, while load/onboarding prefers prod for authoritative
+# account/tier/project data (mirrors code-puppy behavior).
 DEFAULT_CODE_ASSIST_ENDPOINTS = [
     "https://daily-cloudcode-pa.sandbox.googleapis.com",
     "https://autopush-cloudcode-pa.sandbox.googleapis.com",
