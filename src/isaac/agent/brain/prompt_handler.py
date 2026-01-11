@@ -234,6 +234,8 @@ class PromptHandler:
             return self._prompt_runner._prompt_end()  # type: ignore[attr-defined]
         if plan_progress and plan_progress.get("plan"):
             await self.env.send_plan_update(session_id, plan_progress["plan"], None, "completed")
+        if response_text and not response_text.endswith("\n"):
+            await self.env.send_message_chunk(session_id, "\n")
         if response_text:
             state.history.append({"role": "assistant", "content": response_text})
         with log_ctx(session_id=session_id, model_id=state.model_id):
