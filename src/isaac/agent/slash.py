@@ -87,10 +87,10 @@ def _list_models(agent: Any, session_id: str) -> SessionNotification:
             lines.append(line)
     else:
         lines.append("No models configured.")
-    return session_notification(
-        session_id,
-        update_agent_message(text_block("\n".join(lines))),
-    )
+    message = "\n".join(lines)
+    if not message.endswith("\n"):
+        message = f"{message}\n"
+    return session_notification(session_id, update_agent_message(text_block(message)))
 
 
 @register_slash_command(
