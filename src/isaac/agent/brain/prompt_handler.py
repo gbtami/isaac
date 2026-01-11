@@ -9,6 +9,7 @@ from pydantic_ai.messages import FunctionToolResultEvent  # type: ignore
 
 from isaac.agent import models as model_registry
 from isaac.agent.ai_types import ToolRegister
+from isaac.agent.brain.prompt import SUBAGENT_INSTRUCTIONS, SYSTEM_PROMPT
 from isaac.agent.history_types import ChatMessage
 from isaac.agent.brain.plan_helpers import plan_from_planner_result
 from isaac.agent.brain.prompt_runner import PromptEnv, PromptRunner
@@ -26,6 +27,8 @@ from isaac.agent.subagents.delegate_tools import (
 )
 from isaac.agent.tools import register_tools as default_register_tools
 from isaac.agent.usage import normalize_usage
+from isaac.agent.oauth.openai_codex.prompt import compose_codex_user_prompt
+from isaac.agent.oauth.code_assist.prompt import compose_antigravity_user_prompt
 from isaac.log_utils import log_context as log_ctx, log_event
 
 logger = logging.getLogger(__name__)
@@ -50,6 +53,18 @@ class PromptHandler:
         self._register_tools = register_tools or default_register_tools
         self._prompt_runner = PromptRunner(env)
         self._sessions: Dict[str, SessionState] = {}
+
+    def _prepare_prompt_text(self, state: SessionState, prompt_text: str) -> str:
+        model_id = state.model_id or ""
+        model_entry = model_registry.list_models().get(model_id, {})
+        provider = str(model_entry.get("provider") or "").lower()
+        if provider == "openai-codex" and not state.history:
+            system_prompt = state.system_prompt or SYSTEM_PROMPT
+            return compose_codex_user_prompt(system_prompt, prompt_text, SUBAGENT_INSTRUCTIONS)
+        if provider == "code-assist" and not state.history:
+            system_prompt = state.system_prompt or SYSTEM_PROMPT
+            return compose_antigravity_user_prompt(system_prompt, prompt_text, SUBAGENT_INSTRUCTIONS)
+        return prompt_text
 
     async def init_session(self, session_id: str, toolsets: list[Any], system_prompt: str | None = None) -> None:
         state = self._sessions.setdefault(
@@ -177,6 +192,7 @@ class PromptHandler:
             record_recent_file(state.recent_files, event, self._MAX_RECENT_FILES)
             return handled
 
+        prompt_text = self._prepare_prompt_text(state, prompt_text)
         state.history.append({"role": "user", "content": prompt_text})
 
         # Provide parent permission routing to delegate tool runs in this prompt turn.

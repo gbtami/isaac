@@ -32,6 +32,7 @@ async def set_session_model(
         )
         state.runner = executor
         state.model_id = model_id
+        state.system_prompt = system_prompt
         state.history = []
         state.recent_files = []
         state.last_usage_total_tokens = None
@@ -66,6 +67,7 @@ async def build_runner(
         )
         state.model_id = model_registry.current_model_id()
         state.runner = executor
+        state.system_prompt = system_prompt
         state.history = []
         state.recent_files = []
         state.last_usage_total_tokens = None

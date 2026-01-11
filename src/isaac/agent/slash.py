@@ -15,6 +15,21 @@ from acp.helpers import session_notification, update_agent_message, text_block
 from acp.schema import AvailableCommand, AvailableCommandInput, UnstructuredCommandInput
 
 from isaac.agent import models as model_registry
+from isaac.agent.oauth.code_assist import (
+    begin_code_assist_oauth,
+    clear_code_assist_tokens,
+    code_assist_status,
+    finalize_code_assist_login,
+)
+from isaac.agent.oauth.code_assist.auth import maybe_open_browser as maybe_open_code_assist
+from isaac.agent.oauth import openai_token_status
+from isaac.agent.oauth.openai_codex import (
+    begin_openai_oauth,
+    clear_openai_tokens,
+    maybe_open_browser as maybe_open_openai,
+)
+from isaac.agent.oauth.openai_codex import save_openai_tokens
+from isaac.agent.oauth.openai_codex.models import sync_openai_codex_models
 from isaac.agent.usage import format_usage_summary, normalize_usage
 
 SLASH_HANDLERS: dict[str, "SlashCommandDef"] = {}
@@ -173,6 +188,142 @@ async def _handle_restore(agent: Any, session_id: str, _command: str, _argument:
             update_agent_message(text_block("Restore not supported.")),
         )
     return await handler(session_id)
+
+
+@register_slash_command(
+    "/auth",
+    description="Show OAuth login status for providers.",
+    hint="/auth",
+)
+def _handle_auth(_agent: Any, session_id: str, _command: str, _argument: str) -> SessionNotification:
+    lines = [
+        openai_token_status(),
+        code_assist_status(),
+        "Use /login <openai|code-assist> to authenticate.",
+    ]
+    return session_notification(session_id, update_agent_message(text_block("\n".join(lines))))
+
+
+@register_slash_command(
+    "/login",
+    description="Authenticate to a provider (openai|code-assist).",
+    hint="/login <openai|code-assist>",
+)
+async def _handle_login(agent: Any, session_id: str, _command: str, argument: str) -> SessionNotification:
+    provider = (argument or "").strip().lower()
+    if not provider:
+        lines = [
+            "Usage: /login <openai|code-assist>",
+            openai_token_status(),
+            code_assist_status(),
+        ]
+        return session_notification(session_id, update_agent_message(text_block("\n".join(lines))))
+
+    try:
+        if provider in {"openai", "openai-codex"}:
+            session = await begin_openai_oauth()
+            opened = maybe_open_openai(session.auth_url)
+            await _send_oauth_notice(
+                agent,
+                session_id,
+                provider="OpenAI Codex",
+                auth_url=session.auth_url,
+                opened=opened,
+            )
+            tokens = await session.exchange_tokens()
+            save_openai_tokens(tokens)
+            sync = await sync_openai_codex_models(tokens)
+            lines = ["OpenAI Codex login complete."]
+            if sync.error:
+                lines.append(f"Model sync skipped: {sync.error}")
+            else:
+                if sync.added:
+                    lines.append(f"Added {sync.added} Codex model(s) ({sync.total} total).")
+                else:
+                    lines.append(f"Codex models already up to date ({sync.total} total).")
+                if sync.used_fallback:
+                    lines.append("Used fallback model list; rerun /login openai to retry discovery.")
+            lines.append("Use /models to view the updated list.")
+            message = "\n".join(lines)
+            return session_notification(session_id, update_agent_message(text_block(message)))
+
+        if provider in {"code-assist", "codeassist"}:
+            session = await begin_code_assist_oauth()
+            opened = maybe_open_code_assist(session.auth_url)
+            await _send_oauth_notice(
+                agent,
+                session_id,
+                provider="Code Assist",
+                auth_url=session.auth_url,
+                opened=opened,
+            )
+            tokens = await session.exchange_tokens()
+            await finalize_code_assist_login(tokens)
+            message = "Code Assist login complete. Use /model code-assist:gemini-2.5-flash."
+            return session_notification(session_id, update_agent_message(text_block(message)))
+
+        return session_notification(
+            session_id,
+            update_agent_message(text_block("Usage: /login <openai|code-assist>")),
+        )
+    except Exception as exc:  # noqa: BLE001
+        return session_notification(session_id, update_agent_message(text_block(f"Login failed: {exc}")))
+
+
+@register_slash_command(
+    "/logout",
+    description="Clear stored OAuth credentials (openai|code-assist|all).",
+    hint="/logout <openai|code-assist|all>",
+)
+def _handle_logout(_agent: Any, session_id: str, _command: str, argument: str) -> SessionNotification:
+    provider = (argument or "").strip().lower()
+    if not provider:
+        return session_notification(
+            session_id,
+            update_agent_message(text_block("Usage: /logout <openai|code-assist|all>")),
+        )
+
+    if provider in {"openai", "openai-codex"}:
+        clear_openai_tokens()
+        message = "OpenAI Codex tokens cleared."
+        return session_notification(session_id, update_agent_message(text_block(message)))
+
+    if provider in {"code-assist", "codeassist"}:
+        clear_code_assist_tokens()
+        message = "Code Assist tokens cleared."
+        return session_notification(session_id, update_agent_message(text_block(message)))
+
+    if provider == "all":
+        clear_openai_tokens()
+        clear_code_assist_tokens()
+        message = "OAuth tokens cleared."
+        return session_notification(session_id, update_agent_message(text_block(message)))
+
+    return session_notification(
+        session_id,
+        update_agent_message(text_block("Usage: /logout <openai|code-assist|all>")),
+    )
+
+
+async def _send_oauth_notice(
+    agent: Any,
+    session_id: str,
+    provider: str,
+    auth_url: str,
+    opened: bool,
+) -> None:
+    sender = getattr(agent, "_send_update", None)
+    if not callable(sender):
+        return
+    notice = [
+        f"{provider} OAuth login started.",
+        f"Open this URL in your browser: {auth_url}",
+    ]
+    if opened:
+        notice.insert(1, "Attempted to open your browser automatically.")
+    else:
+        notice.insert(1, "Browser did not open automatically.")
+    await sender(session_notification(session_id, update_agent_message(text_block("\n".join(notice)))))
 
 
 async def handle_slash_command(agent: Any, session_id: str, prompt: str) -> SessionNotification | None:

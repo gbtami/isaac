@@ -14,6 +14,7 @@ class SessionState:
 
     runner: Any | None = None
     model_id: str | None = None
+    system_prompt: str | None = None
     history: list[ChatMessage] = field(default_factory=list)
     recent_files: list[str] = field(default_factory=list)
     last_usage_total_tokens: int | None = None

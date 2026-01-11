@@ -14,7 +14,7 @@ import re
 import urllib.request
 import configparser
 from pathlib import Path
-from typing import Any, Dict
+from typing import Any, Callable, Dict
 
 import httpx
 from pydantic_ai.models import Model  # type: ignore
@@ -22,7 +22,12 @@ from pydantic_ai.models.anthropic import AnthropicModel, AnthropicModelSettings 
 from pydantic_ai.models.cerebras import CerebrasModel  # type: ignore
 from pydantic_ai.models.google import GoogleModel, GoogleModelSettings  # type: ignore
 from pydantic_ai.models.mistral import MistralModel  # type: ignore
-from pydantic_ai.models.openai import OpenAIChatModel, OpenAIChatModelSettings  # type: ignore
+from pydantic_ai.models.openai import (  # type: ignore
+    OpenAIChatModel,
+    OpenAIChatModelSettings,
+    OpenAIResponsesModel,
+    OpenAIResponsesModelSettings,
+)
 from pydantic_ai.models.openrouter import OpenRouterModel, OpenRouterModelSettings  # type: ignore
 from pydantic_ai.models.test import TestModel  # type: ignore
 from pydantic_ai.settings import ModelSettings  # type: ignore
@@ -35,6 +40,13 @@ from pydantic_ai.providers.ollama import OllamaProvider  # type: ignore
 from pydantic_ai.providers.openai import OpenAIProvider  # type: ignore
 from pydantic_ai.providers.openrouter import OpenRouterProvider  # type: ignore
 
+from isaac.agent.oauth.code_assist import CodeAssistModel
+from isaac.agent.oauth.openai_codex import (
+    OPENAI_CODEX_BASE_URL,
+    has_openai_tokens,
+    openai_auth_request_hook,
+)
+from isaac.agent.oauth.openai_codex.client import OpenAICodexAsyncClient
 
 logger = logging.getLogger(__name__)
 
@@ -61,6 +73,11 @@ DEFAULT_CONFIG = {
             "model": "gpt-4o-mini",
             "description": "OpenAI GPT-4o mini",
         },
+        "openai-codex:gpt-5.2-codex": {
+            "provider": "openai-codex",
+            "model": "gpt-5.2-codex",
+            "description": "OpenAI Codex (OAuth, ChatGPT login)",
+        },
         "anthropic:claude-3-5-sonnet-20240620": {
             "provider": "anthropic",
             "model": "claude-3-5-sonnet-20240620",
@@ -70,6 +87,11 @@ DEFAULT_CONFIG = {
             "provider": "google",
             "model": "gemini-2.5-flash",
             "description": "Google Gemini 2.5 Flash",
+        },
+        "code-assist:gemini-2.5-flash": {
+            "provider": "code-assist",
+            "model": "gemini-2.5-flash",
+            "description": "Google Code Assist (OAuth via Google login)",
         },
         "openrouter:openai/gpt-oss-120b": {
             "provider": "openrouter",
@@ -115,15 +137,16 @@ def load_models_config() -> Dict[str, Any]:
 
     # Backfill missing defaults
     config.setdefault("models", {})
+    models = config["models"]
     for key, value in DEFAULT_CONFIG["models"].items():
-        config["models"].setdefault(key, value)
+        models.setdefault(key, value)
 
     # Ensure function model stays safe for testing (no auto tool calls)
-    fn_model = config["models"].get(FUNCTION_MODEL_ID, {})
+    fn_model = models.get(FUNCTION_MODEL_ID, {})
     fn_model["provider"] = "function"
     fn_model["model"] = "function"
     fn_model.setdefault("description", DEFAULT_CONFIG["models"][FUNCTION_MODEL_ID]["description"])
-    config["models"][FUNCTION_MODEL_ID] = fn_model
+    models[FUNCTION_MODEL_ID] = fn_model
 
     return config
 
@@ -221,10 +244,18 @@ def _fetch_models_dev_limits() -> Dict[tuple[str, str], int]:
     return index
 
 
-def _get_http_client(provider: str) -> httpx.AsyncClient:
+def _get_http_client(
+    provider: str,
+    *,
+    event_hooks: dict[str, list[Callable[..., Any]]] | None = None,
+    client_cls: type[httpx.AsyncClient] = httpx.AsyncClient,
+) -> httpx.AsyncClient:
     """Return a cached HTTP client with explicit timeouts and retries."""
 
-    client = _HTTP_CLIENTS.get(provider)
+    cache_key = provider if event_hooks is None else f"{provider}:hooks"
+    if client_cls is not httpx.AsyncClient:
+        cache_key = f"{cache_key}:{client_cls.__name__}"
+    client = _HTTP_CLIENTS.get(cache_key)
     if client and not client.is_closed:
         return client
     timeout = httpx.Timeout(
@@ -234,15 +265,15 @@ def _get_http_client(provider: str) -> httpx.AsyncClient:
         write=DEFAULT_LLM_TIMEOUT_S,
     )
     transport = httpx.AsyncHTTPTransport(retries=DEFAULT_LLM_RETRIES)
-    client = httpx.AsyncClient(timeout=timeout, transport=transport)
-    _HTTP_CLIENTS[provider] = client
+    client = client_cls(timeout=timeout, transport=transport, event_hooks=event_hooks)
+    _HTTP_CLIENTS[cache_key] = client
     return client
 
 
 def _provider_with_http_client(provider_cls: type, provider: str, **kwargs: object) -> Any:
     """Build a provider using a shared HTTP client when supported."""
 
-    if "http_client" in inspect.signature(provider_cls).parameters:
+    if "http_client" in inspect.signature(provider_cls).parameters and "http_client" not in kwargs:
         kwargs["http_client"] = _get_http_client(provider)
     return provider_cls(**kwargs)
 
@@ -265,6 +296,26 @@ def _build_provider_model(model_id: str, model_entry: Dict[str, Any]) -> tuple[M
         if _openai_model_supports_reasoning_effort(str(model_spec)):
             settings = OpenAIChatModelSettings(openai_reasoning_effort="medium")
         return OpenAIChatModel(model_spec, provider=provider_obj), settings
+
+    if provider == "openai-codex":
+        if not has_openai_tokens():
+            raise RuntimeError("OpenAI Codex OAuth tokens not found. Run /login openai first.")
+        http_client = _get_http_client(
+            "openai-codex",
+            event_hooks={"request": [openai_auth_request_hook]},
+            client_cls=OpenAICodexAsyncClient,
+        )
+        provider_obj = _provider_with_http_client(
+            OpenAIProvider,
+            "openai-codex",
+            api_key="oauth",
+            base_url=OPENAI_CODEX_BASE_URL,
+            http_client=http_client,
+        )
+        oauth_settings: OpenAIResponsesModelSettings | None = None
+        if _openai_model_supports_reasoning_effort(str(model_spec)):
+            oauth_settings = OpenAIResponsesModelSettings(openai_reasoning_effort="medium")
+        return OpenAIResponsesModel(model_spec, provider=provider_obj), oauth_settings
 
     if provider == "anthropic":
         key = api_key or os.getenv("ANTHROPIC_API_KEY")
@@ -295,6 +346,9 @@ def _build_provider_model(model_id: str, model_entry: Dict[str, Any]) -> tuple[M
         provider_obj = _provider_with_http_client(GoogleProvider, "google", api_key=key)
         settings = GoogleModelSettings(google_thinking_config={"include_thoughts": True})
         return GoogleModel(model_spec, provider=provider_obj), settings
+
+    if provider == "code-assist":
+        return CodeAssistModel(str(model_spec)), None
 
     if provider == "openrouter":
         key = api_key or os.getenv("OPENROUTER_API_KEY")

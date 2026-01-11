@@ -292,11 +292,25 @@ async def stream_with_runner(
                             store_messages(msgs)
                 except Exception:
                     pass
-                if not output_parts:
-                    try:
-                        await on_text(str(full))
-                    except Exception:
-                        pass
+                try:
+                    full_text = "" if full is None else str(full)
+                    if not output_parts:
+                        await on_text(full_text)
+                    else:
+                        streamed_text = "".join(output_parts)
+                        if full_text and full_text != streamed_text:
+                            if full_text.startswith(streamed_text):
+                                await on_text(full_text[len(streamed_text) :])
+                            else:
+                                log_event(
+                                    logger,
+                                    "llm.stream.final.mismatch",
+                                    level=logging.DEBUG,
+                                    streamed_preview=streamed_text[:200].replace("\n", "\\n"),
+                                )
+                                await on_text(full_text)
+                except Exception:
+                    pass
                 return str(full), usage
     except (ai_exc.ModelRetry, ai_exc.UnexpectedModelBehavior) as exc:
         msg = str(exc)

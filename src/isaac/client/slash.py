@@ -111,6 +111,26 @@ def _handle_thinking(
     return True
 
 
+@register_slash_command("/status", description="Show current session status.", hint="/status")
+def _handle_status(
+    _conn: ClientSideConnection,
+    _session_id: str,
+    state: SessionUIState,
+    _permission_reset: Callable[[], None],
+    _argument: str,
+) -> bool:
+    print(f"Session: {state.session_id or 'unknown'}")
+    print(f"Mode: {state.current_mode or 'unknown'}")
+    print(f"Model: {state.current_model or 'unknown'}")
+    if state.cwd:
+        print(f"Cwd: {state.cwd}")
+    if state.mcp_servers:
+        print(f"MCP: {', '.join(state.mcp_servers)}")
+    if state.usage_summary:
+        print(state.usage_summary)
+    return True
+
+
 @register_slash_command("/exit", description="Exit the client.", hint="/exit")
 @register_slash_command("/quit", description="Exit the client.", hint="/quit")
 def _handle_exit(
@@ -159,8 +179,10 @@ async def handle_slash_command(
 
     entry = SLASH_HANDLERS.get(command)
     if entry is None:
-        # Always forward unknown slash commands to the agent for maximum ACP interop.
-        return False
+        if command in state.available_agent_commands:
+            return False
+        print(f"[unknown command: {command} (try /help)]")
+        return True
 
     try:
         result = entry.handler(conn, session_id, state, permission_reset, argument)
