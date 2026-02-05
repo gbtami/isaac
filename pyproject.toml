@@ -15,7 +15,7 @@ classifiers = [
 ]
 dependencies = [
     "agent-client-protocol==0.7.0",
-    "pydantic-ai==1.51.0",
+    "pydantic-ai==1.55.0",
     "aiocache==0.12.3",
     "prompt-toolkit==3.0.52",
     "python-dotenv==1.2.1",
