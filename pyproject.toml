@@ -1,17 +1,25 @@
 [project]
-name = "isaac"
+name = "isaac-acp"
 version = "0.1.0"
-description = "Simple ACP agent"
+description = "ACP-compliant coding agent and reference client."
+readme = "README.md"
+license = { text = "MIT" }
+authors = [{ name = "Isaac Contributors" }]
 requires-python = ">=3.10"
+keywords = ["acp", "agent-client-protocol", "agent", "cli", "repl"]
 classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Environment :: Console",
+    "Intended Audience :: Developers",
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
     "License :: OSI Approved :: MIT License",
-    "Intended Audience :: Developers",
+    "Topic :: Software Development",
     "Topic :: Software Development :: Libraries",
+    "Typing :: Typed",
 ]
 dependencies = [
     "agent-client-protocol==0.8.0",
@@ -22,6 +30,12 @@ dependencies = [
     "pathspec==0.12.1",
     "rich==14.2.0",
 ]
+
+[project.urls]
+Homepage = "https://github.com/gbtami/isaac"
+Repository = "https://github.com/gbtami/isaac"
+Issues = "https://github.com/gbtami/isaac/issues"
+ACP-Spec = "https://agentclientprotocol.com/protocol/"
 
 [project.scripts]
 isaac = "isaac.agent:main_entry"

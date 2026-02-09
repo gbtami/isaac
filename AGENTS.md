@@ -21,7 +21,7 @@ This project uses `uv` for environment and project management.
 
 ## Cross-client Testing (install to user site)
 To test isaac with other ACP clients after code changes without bumping the version install isaac to your user site and run it from there:
-- Install: `uv build --wheel` then `python -m pip install --user --no-deps --force-reinstall dist/isaac-*.whl` to ensure the new code is picked up.
+- Install: `uv build --wheel` then `python -m pip install --user --no-deps --force-reinstall dist/isaac_acp-*.whl` to ensure the new code is picked up.
 - Run with another client: `cd ~/toad && uv run toad acp "isaac" --project-dir ~/playground`
 
 ## Environment variables
@@ -33,7 +33,7 @@ To test isaac with other ACP clients after code changes without bumping the vers
 - Lint: `uv run ruff check .`
 - Types: `uv run mypy src tests`
 - Tests: `uv run pytest`
-- Package install check: `uv build --wheel` then `python -m pip install --user --no-deps --force-reinstall dist/isaac-*.whl`
+- Package install check: `uv build --wheel` then `python -m pip install --user --no-deps --force-reinstall dist/isaac_acp-*.whl`
 
 ## Tooling (pydantic-ai)
 - All tool functions must take `RunContext[...]` as the first argument; registration uses the public `Agent.tool` decorator (no private attributes).
