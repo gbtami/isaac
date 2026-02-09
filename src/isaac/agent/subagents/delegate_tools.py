@@ -364,7 +364,6 @@ async def _run_delegate_once(
     """
 
     structured: BaseModel | None = None
-    suppress_structured_output = False
     cancel_event = asyncio.Event()
     thought_buffer: list[str] = []
     thought_last_sent = 0.0
@@ -390,8 +389,7 @@ async def _run_delegate_once(
         thought_last_sent = now
         await _emit_thought(text)
 
-    async def _on_text(chunk: str) -> None:
-        _ = chunk
+    async def _drop_text(_: str) -> None:
         return None
 
     async def _on_thought(chunk: str) -> None:
@@ -401,21 +399,20 @@ async def _run_delegate_once(
         await _flush_thought()
 
     async def _capture(event: Any) -> bool:
-        nonlocal structured, suppress_structured_output
+        nonlocal structured
         if spec.output_type is None:
             return False
         if isinstance(event, AgentRunResultEvent):
             output = getattr(event.result, "output", None)
             if isinstance(output, spec.output_type):
                 structured = output
-                suppress_structured_output = True
         return False
 
     async def _run_stream() -> tuple[str | None, Any | None]:
         return await stream_with_runner(
             agent,
             prompt,
-            _on_text,
+            _drop_text,
             _on_thought,
             cancel_event,
             on_event=_capture,
