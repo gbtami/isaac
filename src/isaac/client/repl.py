@@ -71,7 +71,51 @@ async def interactive_loop(conn: ClientSideConnection, session_id: str, state: S
         except Exception:
             return
 
+    async def _select_option(
+        label: str,
+        options: list[str],
+        current_value: str | None,
+    ) -> str | None:
+        if not options:
+            return None
+        default_value = current_value if current_value in options else options[0]
+        print(f"Select {label}:")
+        for idx, option in enumerate(options, start=1):
+            marker = "*" if option == default_value else " "
+            suffix = " (current)" if option == default_value else ""
+            print(f"  {marker} {idx}. {option}{suffix}")
+
+        while True:
+            try:
+                with patch_stdout():
+                    selected = await session.prompt_async(
+                        [
+                            (
+                                "class:prompt.sep",
+                                f"{label} [1-{len(options)}] (Enter=current, q=cancel) $ ",
+                            )
+                        ],
+                        default="",
+                    )
+            except (EOFError, KeyboardInterrupt):
+                return None
+
+            value = selected.strip()
+            if not value:
+                return default_value
+            if value.lower() in {"q", "quit", "cancel"}:
+                return None
+            if value.isdigit():
+                index = int(value)
+                if 1 <= index <= len(options):
+                    return options[index - 1]
+            for option in options:
+                if option.lower() == value.lower():
+                    return option
+            print(f"[invalid {label} selection: {value}]")
+
     state.refresh_ui = _invalidate_toolbar
+    state.select_option = _select_option
     state.local_slash_commands = set(SLASH_HANDLERS.keys())
     if state.show_welcome_on_start:
         print(build_welcome_banner(state), end="")

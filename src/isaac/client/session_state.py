@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Callable
+from typing import TYPE_CHECKING, Awaitable, Callable
 
 if TYPE_CHECKING:
     from isaac.client.display import ThinkingStatus
+
+OptionSelector = Callable[[str, list[str], str | None], Awaitable[str | None]]
 
 
 @dataclass
@@ -27,6 +29,7 @@ class SessionUIState:
     session_id: str | None = None
     cwd: str | None = None
     refresh_ui: Callable[[], None] | None = None
+    select_option: OptionSelector | None = None
     thinking_status: "ThinkingStatus | None" = None
 
     def notify_changed(self) -> None:

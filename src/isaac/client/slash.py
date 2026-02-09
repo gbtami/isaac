@@ -42,6 +42,28 @@ def register_slash_command(name: str, description: str, hint: str) -> Callable[[
     return _decorator
 
 
+def _allowed_config_values(state: SessionUIState, key: str) -> list[str]:
+    return sorted(state.config_option_values.get(key, set()))
+
+
+async def _pick_config_value(
+    state: SessionUIState,
+    *,
+    key: str,
+    label: str,
+    current_value: str | None,
+) -> str | None:
+    options = _allowed_config_values(state, key)
+    if not options:
+        print(f"[agent did not advertise any {label} options]")
+        return None
+    selector = state.select_option
+    if selector is None:
+        print(f"[available {label} options: {', '.join(options)}]")
+        return None
+    return await selector(label, options, current_value)
+
+
 @register_slash_command("/help", description="Show available slash commands.", hint="/help")
 def _handle_help(
     _conn: ClientSideConnection,
@@ -62,7 +84,7 @@ def _handle_help(
     return True
 
 
-@register_slash_command("/model", description="Set model to the given id.", hint="/model <id>")
+@register_slash_command("/model", description="Set or pick model id.", hint="/model [id]")
 async def _handle_model(
     conn: ClientSideConnection,
     session_id: str,
@@ -70,11 +92,20 @@ async def _handle_model(
     _permission_reset: Callable[[], None],
     argument: str,
 ) -> bool:
-    if not argument:
-        print("Usage: /model <id> (use /models to list available models)")
-        return True
-    selection = argument.split()[0]
-    allowed = state.config_option_values.get(MODEL_CONFIG_KEY, set())
+    if argument:
+        selection = argument.split()[0]
+    else:
+        picked = await _pick_config_value(
+            state,
+            key=MODEL_CONFIG_KEY,
+            label="model",
+            current_value=state.current_model,
+        )
+        if not picked:
+            return True
+        selection = picked
+
+    allowed = _allowed_config_values(state, MODEL_CONFIG_KEY)
     if allowed and selection not in allowed:
         print(f"[unknown model: {selection}]")
         return True
@@ -139,7 +170,7 @@ def _handle_exit(
     raise SystemExit(0)
 
 
-@register_slash_command("/mode", description="Set agent mode (ask|yolo).", hint="/mode <ask|yolo>")
+@register_slash_command("/mode", description="Set or pick agent mode.", hint="/mode [id]")
 async def _handle_mode(
     conn: ClientSideConnection,
     session_id: str,
@@ -147,15 +178,24 @@ async def _handle_mode(
     permission_reset: Callable[[], None],
     argument: str,
 ) -> bool:
-    parts = argument.split()
-    if not parts:
-        print("Usage: /mode <ask|yolo>")
+    if argument:
+        mode = argument.split()[0]
+    else:
+        picked = await _pick_config_value(
+            state,
+            key=MODE_CONFIG_KEY,
+            label="mode",
+            current_value=state.current_mode,
+        )
+        if not picked:
+            return True
+        mode = picked
+
+    allowed = _allowed_config_values(state, MODE_CONFIG_KEY)
+    if allowed and mode not in allowed:
+        print(f"[unknown mode: {mode}]")
         return True
-    allowed = state.config_option_values.get(MODE_CONFIG_KEY, set())
-    if allowed and parts[0] not in allowed:
-        print(f"[unknown mode: {parts[0]}]")
-        return True
-    await set_mode(conn, session_id, state, parts[0])
+    await set_mode(conn, session_id, state, mode)
     permission_reset()
     return True
 
