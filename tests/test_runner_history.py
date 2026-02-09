@@ -8,8 +8,10 @@ from unittest.mock import AsyncMock
 import pytest
 from pydantic_ai import messages as ai_messages  # type: ignore
 from pydantic_ai.messages import FunctionToolCallEvent, ToolCallPart  # type: ignore
+from pydantic_ai.messages import PartDeltaEvent, TextPartDelta  # type: ignore
+from pydantic_ai.run import AgentRunResultEvent  # type: ignore
 
-from isaac.agent.runner import stream_with_runner
+from isaac.agent.runner import _final_text_correction, stream_with_runner
 from isaac.agent.brain.prompt_runner import PromptEnv, PromptRunner
 from isaac.agent.brain.tool_events import tool_history_summary
 
@@ -113,3 +115,53 @@ async def test_tool_kinds_in_updates():
     await handler(event)
     kinds = [getattr(u, "kind", None) for u in captured if u]
     assert "read" in kinds
+
+
+@pytest.mark.asyncio
+async def test_stream_with_runner_suppresses_duplicate_final_output() -> None:
+    class _DuplicateStreamRunner:
+        async def run_stream_events(self, *_: Any, **__: Any):
+            async def _gen() -> AsyncIterator[Any]:
+                # Duplicate chunk followed by the same final output.
+                yield PartDeltaEvent(index=0, delta=TextPartDelta(content_delta="hello"))
+                yield PartDeltaEvent(index=0, delta=TextPartDelta(content_delta="hello"))
+
+                class _Result:
+                    output = "hello"
+                    usage = None
+
+                    @staticmethod
+                    def new_messages() -> list[Any]:
+                        return []
+
+                yield AgentRunResultEvent(result=_Result())
+
+            return _gen()
+
+    seen: list[str] = []
+
+    async def on_text(text: str) -> None:
+        if not seen or seen[-1] != text:
+            seen.append(text)
+
+    full, _usage = await stream_with_runner(
+        _DuplicateStreamRunner(),
+        "prompt",
+        on_text=on_text,
+        cancel_event=asyncio.Event(),
+    )
+    assert full == "hello"
+    assert seen == ["hello"]
+
+
+def test_final_text_correction_prefix_suffix_and_fallback() -> None:
+    # Streamed prefix: append only the missing tail.
+    assert _final_text_correction("Bud", "Budapest") == "apest"
+    # Streamed suffix: rewrite the line with the full final text.
+    assert _final_text_correction("apest", "Budapest") == "\r\x1b[2KBudapest"
+    # Streamed middle substring: rewrite to final full text.
+    assert _final_text_correction("uda", "Budapest") == "\r\x1b[2KBudapest"
+    # Final already present in stream: do nothing.
+    assert _final_text_correction("BudapestBudapest", "Budapest") is None
+    # Generic single-line mismatch fallback: rewrite to final full text.
+    assert _final_text_correction("xyz", "Budapest") == "\r\x1b[2KBudapest"

@@ -7,6 +7,7 @@ import ast
 import contextlib
 from io import StringIO
 from threading import Lock
+import sys
 
 from prompt_toolkit.formatted_text import ANSI  # type: ignore
 from prompt_toolkit.shortcuts import print_formatted_text  # type: ignore
@@ -89,11 +90,21 @@ def _render_text(text: str, style: str | None) -> Text:
 
 
 def print_agent_text(text: str) -> None:
+    # Preserve cursor-control ANSI (e.g. `\r\x1b[2K`) used to correct
+    # provisional streamed text in-place.
+    if "\r" in text or "\x1b[" in text:
+        sys.stdout.write(text)
+        sys.stdout.flush()
+        return
     _render_and_print(_render_text(text, None), end="")
 
 
 def print_thought(text: str) -> None:
-    _render_and_print(_render_text(text, "#aaaaaa"), end="")
+    if not text:
+        return
+    payload = text if text.endswith("\n") else f"{text}\n"
+    prefixed = "".join(f"thinking | {line}" if line.strip() else line for line in payload.splitlines(keepends=True))
+    _render_and_print(_render_text(prefixed, "bright_black italic"), end="")
 
 
 def print_diff(text: str) -> None:

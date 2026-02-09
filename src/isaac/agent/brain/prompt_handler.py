@@ -137,8 +137,12 @@ class PromptHandler:
         history = trim_history(state.history, self._MAX_HISTORY_MESSAGES)
         context_history = inject_recent_files_context(history, state.recent_files, self._RECENT_FILES_CONTEXT)
         plan_progress: dict[str, Any] | None = {"plan": None, "idx": 0}
-        _push_chunk = self._prompt_runner._make_chunk_sender(session_id)  # type: ignore[attr-defined]
         _push_thought = self._prompt_runner._make_thought_sender(session_id)  # type: ignore[attr-defined]
+
+        # Keep tool/plan/thought updates streaming, but emit assistant text only once
+        # at end-of-turn to avoid duplicate/provisional chunk rendering artifacts.
+        async def _drop_chunk(_: str) -> None:
+            return None
 
         run_command_ctx_tokens: Dict[str, Any] = {}
 
@@ -207,7 +211,7 @@ class PromptHandler:
             response_text, usage = await stream_with_runner(
                 state.runner,
                 prompt_text,
-                _push_chunk,
+                _drop_chunk,
                 _push_thought,
                 cancel_event,
                 history=context_history,
@@ -232,12 +236,12 @@ class PromptHandler:
                 log_event(logger, "prompt.handle.error", level=logging.WARNING, error=msg)
             await self.env.send_notification(session_id, f"Model/provider error: {msg}")
             return self._prompt_runner._prompt_end()  # type: ignore[attr-defined]
+        if response_text:
+            payload = response_text if response_text.endswith("\n") else f"{response_text}\n"
+            await self.env.send_message_chunk(session_id, payload)
+            state.history.append({"role": "assistant", "content": response_text})
         if plan_progress and plan_progress.get("plan"):
             await self.env.send_plan_update(session_id, plan_progress["plan"], None, "completed")
-        if response_text and not response_text.endswith("\n"):
-            await self.env.send_message_chunk(session_id, "\n")
-        if response_text:
-            state.history.append({"role": "assistant", "content": response_text})
         with log_ctx(session_id=session_id, model_id=state.model_id):
             log_event(
                 logger,

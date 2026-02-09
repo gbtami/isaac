@@ -28,6 +28,37 @@ logger = logging.getLogger("isaac.agent.llm")
 HISTORY_LOG_MAX = 8000
 
 
+def _final_text_correction(streamed_text: str, full_text: str) -> str | None:
+    """Compute corrective output to reconcile streamed and final text.
+
+    Returns:
+    - `None` when no extra output is needed.
+    - A suffix to append when stream is a strict prefix of final output.
+    - A line rewrite (`\\r\\x1b[2K...`) when stream is a visible suffix missing
+      leading characters on a single line.
+    - A newline + full text fallback for other mismatches.
+    """
+
+    if not full_text:
+        return None
+    if not streamed_text:
+        return full_text
+    if full_text == streamed_text:
+        return None
+    if full_text.startswith(streamed_text):
+        return full_text[len(streamed_text) :]
+    if full_text in streamed_text:
+        return None
+    single_line = "\n" not in full_text and "\n" not in streamed_text
+    if streamed_text and streamed_text in full_text and single_line:
+        return f"\r\x1b[2K{full_text}"
+    if full_text.endswith(streamed_text) and single_line:
+        return f"\r\x1b[2K{full_text}"
+    if single_line:
+        return f"\r\x1b[2K{full_text}"
+    return f"\n{full_text}"
+
+
 class StreamRunner(Protocol):
     """Protocol for pydantic-ai runners that stream events."""
 
@@ -298,17 +329,16 @@ async def stream_with_runner(
                         await on_text(full_text)
                     else:
                         streamed_text = "".join(output_parts)
-                        if full_text and full_text != streamed_text:
-                            if full_text.startswith(streamed_text):
-                                await on_text(full_text[len(streamed_text) :])
-                            else:
-                                log_event(
-                                    logger,
-                                    "llm.stream.final.mismatch",
-                                    level=logging.DEBUG,
-                                    streamed_preview=streamed_text[:200].replace("\n", "\\n"),
-                                )
-                                await on_text(full_text)
+                        correction = _final_text_correction(streamed_text, full_text)
+                        if correction:
+                            log_event(
+                                logger,
+                                "llm.stream.final.corrected",
+                                level=logging.DEBUG,
+                                streamed_preview=streamed_text[:200].replace("\n", "\\n"),
+                                final_preview=full_text[:200].replace("\n", "\\n"),
+                            )
+                            await on_text(correction)
                 except Exception:
                     pass
                 return str(full), usage
