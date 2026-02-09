@@ -40,6 +40,14 @@ def _format_model_intro(model_id: str | None) -> str:
     return model_id
 
 
+def _format_usage_summary(usage_summary: str | None) -> str:
+    if not usage_summary:
+        return "n/a"
+    if usage_summary.startswith("Usage:"):
+        return usage_summary[len("Usage:") :].strip() or "n/a"
+    return usage_summary
+
+
 def build_status_toolbar(state: SessionUIState) -> list[tuple[str, str]]:
     mode = state.current_mode or "unknown"
     model = state.current_model or "unknown"
@@ -83,17 +91,27 @@ def build_status_toolbar(state: SessionUIState) -> list[tuple[str, str]]:
 
 
 def build_welcome_banner(state: SessionUIState) -> str:
+    return build_status_banner(state)
+
+
+def build_status_banner(state: SessionUIState) -> str:
     cwd = format_path(state.cwd)
     session_id = state.session_id or "<unknown>"
+    mode = state.current_mode or "unknown"
     model_line = _format_model_intro(state.current_model)
+    mcp = ", ".join(state.mcp_servers) if state.mcp_servers else "none"
+    usage = _format_usage_summary(state.usage_summary)
 
     lines = [
-        "🍏 Welcome to Isaac CLI! 🍏",
+        "🍏 Isaac CLI Status 🍏",
         "Send /help for help information.",
         "",
-        f"Directory: {cwd}",
         f"Session: {session_id}",
+        f"Mode: {mode}",
         f"Model: {model_line}",
+        f"Cwd: {cwd}",
+        f"MCP: {mcp}",
+        f"Usage: {usage}",
     ]
     content_width = max(_display_width(line) for line in lines)
     padded_lines: list[str] = []

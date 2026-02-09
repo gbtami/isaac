@@ -7,10 +7,11 @@ import logging
 from dataclasses import dataclass
 from typing import Awaitable, Callable
 
-from acp import ClientSideConnection
+from acp import ClientSideConnection, text_block
 
 from isaac.client.acp_client import MODE_CONFIG_KEY, MODEL_CONFIG_KEY, set_mode, set_session_config_option_value
 from isaac.client.session_state import SessionUIState
+from isaac.client.status_box import build_status_banner
 from isaac.client.thinking import toggle_thinking
 from isaac.log_utils import log_event
 
@@ -138,22 +139,22 @@ def _handle_thinking(
 
 
 @register_slash_command("/status", description="Show current session status.", hint="/status")
-def _handle_status(
+async def _handle_status(
     _conn: ClientSideConnection,
     _session_id: str,
     state: SessionUIState,
     _permission_reset: Callable[[], None],
     _argument: str,
 ) -> bool:
-    print(f"Session: {state.session_id or 'unknown'}")
-    print(f"Mode: {state.current_mode or 'unknown'}")
-    print(f"Model: {state.current_model or 'unknown'}")
-    if state.cwd:
-        print(f"Cwd: {state.cwd}")
-    if state.mcp_servers:
-        print(f"MCP: {', '.join(state.mcp_servers)}")
-    if state.usage_summary:
-        print(state.usage_summary)
+    previous_suppress = state.suppress_usage_output
+    state.suppress_usage_output = True
+    try:
+        await _conn.prompt(prompt=[text_block("/usage")], session_id=_session_id)
+    except Exception as exc:
+        log_event(logger, "client.status.refresh_usage.error", level=logging.DEBUG, error=str(exc))
+    finally:
+        state.suppress_usage_output = previous_suppress
+    print(build_status_banner(state), end="")
     return True
 
 

@@ -22,6 +22,7 @@ class SessionUIState:
     show_thinking: bool = True
     cancel_requested: bool = False
     usage_summary: str | None = None
+    suppress_usage_output: bool = False
     available_agent_commands: dict[str, str] = field(default_factory=dict)
     local_slash_commands: set[str] = field(default_factory=set)
     config_option_ids: dict[str, str] = field(default_factory=dict)
