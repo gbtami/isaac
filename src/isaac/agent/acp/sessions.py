@@ -9,20 +9,32 @@ import uuid
 from pathlib import Path
 from typing import Any
 
-from acp import LoadSessionResponse, NewSessionResponse, SetSessionModeResponse, SetSessionModelResponse
-from acp.schema import ListSessionsResponse, SessionInfo, SessionNotification
+from acp import LoadSessionResponse, NewSessionResponse, RequestError, SetSessionModeResponse, SetSessionModelResponse
+from acp.schema import (
+    ConfigOptionUpdate,
+    ListSessionsResponse,
+    SessionConfigOption,
+    SessionConfigOptionSelect,
+    SessionConfigSelectOption,
+    SessionInfo,
+    SessionNotification,
+    SetSessionConfigOptionResponse,
+)
 
 from isaac.agent import models as model_registry
 from isaac.agent.brain.model_errors import ModelBuildError
 from isaac.agent.brain.prompt import SYSTEM_PROMPT
 from isaac.agent.mcp_support import build_mcp_toolsets
-from isaac.agent.session_modes import build_mode_state
+from isaac.agent.session_modes import available_modes, build_mode_state
 from isaac.log_utils import log_context, log_event
 
 logger = logging.getLogger(__name__)
 
 
 class SessionLifecycleMixin:
+    MODE_CONFIG_ID = "mode"
+    MODEL_CONFIG_ID = "model"
+
     def _build_session_system_prompt(self, cwd: Path) -> str | None:
         """Build a per-session system prompt with AGENTS.md prepended if present."""
 
@@ -64,10 +76,15 @@ class SessionLifecycleMixin:
                 cwd_path,
                 mcp_servers,
                 current_mode="ask",
+                current_model=model_id,
             )
             mode_state = build_mode_state(self._session_modes, session_id, current_mode="ask")
             await self._send_available_commands(session_id)
-            return NewSessionResponse(session_id=session_id, modes=mode_state)
+            return NewSessionResponse(
+                session_id=session_id,
+                modes=mode_state,
+                config_options=self._session_config_options(session_id),
+            )
 
     async def load_session(
         self,
@@ -95,7 +112,25 @@ class SessionLifecycleMixin:
         self._session_mcp_servers[session_id] = mcp_servers
         mode = stored_meta.get("mode") or self._session_modes.get(session_id, "ask")
         self._session_modes[session_id] = mode
-        model_id = self._prompt_handler.model_id(session_id) or self._current_model_id()
+        model_id = stored_meta.get("model") or self._prompt_handler.model_id(session_id) or self._current_model_id()
+        if model_id != (self._prompt_handler.model_id(session_id) or self._current_model_id()):
+            try:
+                await self._prompt_handler.set_session_model(
+                    session_id,
+                    model_id,
+                    toolsets=self._session_toolsets.get(session_id, []),
+                    system_prompt=self._session_system_prompts.get(session_id),
+                )
+            except Exception as exc:  # noqa: BLE001
+                log_event(
+                    logger,
+                    "acp.session.load.model_restore_failed",
+                    level=logging.WARNING,
+                    session_id=session_id,
+                    model_id=model_id,
+                    error=str(exc),
+                )
+                model_id = self._prompt_handler.model_id(session_id) or self._current_model_id()
         self._session_model_ids[session_id] = model_id
         history = self._load_session_history(session_id)
         self._session_history[session_id].extend(history)
@@ -104,11 +139,12 @@ class SessionLifecycleMixin:
             cwd_path,
             mcp_servers,
             current_mode=mode,
+            current_model=model_id,
         )
         for note in history:
             await self._conn.session_update(session_id=note.session_id, update=note.update)  # type: ignore[arg-type]
         await self._send_available_commands(session_id)
-        return LoadSessionResponse()
+        return LoadSessionResponse(config_options=self._session_config_options(session_id))
 
     async def list_sessions(self, cursor: str | None = None, cwd: str | None = None, **_: Any) -> ListSessionsResponse:
         """Return known sessions; minimal implementation without paging."""
@@ -122,17 +158,44 @@ class SessionLifecycleMixin:
             )
         return ListSessionsResponse(sessions=sessions, next_cursor=None)
 
+    async def fork_session(
+        self,
+        cwd: str,
+        session_id: str,
+        mcp_servers: list[Any] | None = None,
+        **_: Any,
+    ) -> Any:
+        """Forking is not implemented yet."""
+        _ = (cwd, session_id, mcp_servers)
+        raise RequestError.method_not_found("session/fork")
+
+    async def resume_session(
+        self,
+        cwd: str,
+        session_id: str,
+        mcp_servers: list[Any] | None = None,
+        **_: Any,
+    ) -> Any:
+        """Resuming is not implemented yet."""
+        _ = (cwd, session_id, mcp_servers)
+        raise RequestError.method_not_found("session/resume")
+
     async def set_session_mode(self, mode_id: str, session_id: str, **_: Any) -> SetSessionModeResponse | None:
         """Update the current session mode and broadcast (Session Modes)."""
         with log_context(session_id=session_id, mode_id=mode_id):
             log_event(logger, "acp.session.mode")
+        allowed_mode_ids = {item["id"] for item in self._available_modes()}
+        if mode_id not in allowed_mode_ids:
+            raise RequestError.invalid_params({"message": f"Unknown mode id: {mode_id}"})
         self._session_modes[session_id] = mode_id
         await self._send_update(self._mode_update(session_id, mode_id))
+        await self._send_update(self._config_options_update(session_id))
         self._persist_session_meta(
             session_id,
             self._session_cwds.get(session_id, Path.cwd()),
             self._session_mcp_servers.get(session_id, []),
             current_mode=mode_id,
+            current_model=self._session_model_ids.get(session_id, self._current_model_id()),
         )
         return SetSessionModeResponse()
 
@@ -155,7 +218,33 @@ class SessionLifecycleMixin:
             with contextlib.suppress(Exception):
                 model_registry.set_current_model(previous_model_id)
             raise
+        await self._send_update(self._config_options_update(session_id))
+        self._persist_session_meta(
+            session_id,
+            self._session_cwds.get(session_id, Path.cwd()),
+            self._session_mcp_servers.get(session_id, []),
+            current_mode=self._session_modes.get(session_id, "ask"),
+            current_model=model_id,
+        )
         return SetSessionModelResponse()
+
+    async def set_session_config_option(
+        self,
+        config_id: str,
+        session_id: str,
+        value: str,
+        **_: Any,
+    ) -> SetSessionConfigOptionResponse:
+        """Set session config options (mode/model) via ACP session-config-options API."""
+        with log_context(session_id=session_id, config_id=config_id, value=value):
+            log_event(logger, "acp.session.config_option")
+        if config_id == self.MODE_CONFIG_ID:
+            await self.set_session_mode(mode_id=value, session_id=session_id)
+            return SetSessionConfigOptionResponse(config_options=self._session_config_options(session_id))
+        if config_id == self.MODEL_CONFIG_ID:
+            await self.set_session_model(model_id=value, session_id=session_id)
+            return SetSessionConfigOptionResponse(config_options=self._session_config_options(session_id))
+        raise RequestError.invalid_params({"message": f"Unknown config option id: {config_id}"})
 
     def _mode_update(self, session_id: str, mode_id: str) -> SessionNotification:
         from acp.helpers import session_notification
@@ -169,6 +258,65 @@ class SessionLifecycleMixin:
     def _current_model_id(self) -> str:
         return model_registry.current_model_id()
 
+    @staticmethod
+    def _available_modes() -> list[dict[str, str]]:
+        return available_modes()
+
+    def _session_config_options(self, session_id: str) -> list[SessionConfigOption]:
+        mode_id = self._session_modes.get(session_id, "ask")
+        model_id = self._session_model_ids.get(session_id, self._current_model_id())
+        mode_options = [
+            SessionConfigSelectOption(
+                name=entry["name"],
+                value=entry["id"],
+                description=entry.get("description"),
+            )
+            for entry in self._available_modes()
+        ]
+        model_options = [
+            SessionConfigSelectOption(
+                name=model_id_entry,
+                value=model_id_entry,
+                description=str(meta.get("description") or "") or None,
+            )
+            for model_id_entry, meta in model_registry.list_user_models().items()
+        ]
+        return [
+            SessionConfigOption(
+                root=SessionConfigOptionSelect(
+                    id=self.MODE_CONFIG_ID,
+                    name="Mode",
+                    description="How the agent handles permission prompts.",
+                    category="session",
+                    type="select",
+                    current_value=mode_id,
+                    options=mode_options,
+                )
+            ),
+            SessionConfigOption(
+                root=SessionConfigOptionSelect(
+                    id=self.MODEL_CONFIG_ID,
+                    name="Model",
+                    description="Model used for this session.",
+                    category="session",
+                    type="select",
+                    current_value=model_id,
+                    options=model_options,
+                )
+            ),
+        ]
+
+    def _config_options_update(self, session_id: str) -> SessionNotification:
+        from acp.helpers import session_notification
+
+        return session_notification(
+            session_id,
+            ConfigOptionUpdate(
+                session_update="config_option_update",
+                config_options=self._session_config_options(session_id),
+            ),
+        )
+
     def _persist_session_meta(
         self,
         session_id: str,
@@ -176,8 +324,15 @@ class SessionLifecycleMixin:
         mcp_servers: list[Any] | None,
         *,
         current_mode: str,
+        current_model: str,
     ) -> None:
-        self._session_store.persist_meta(session_id, cwd, mcp_servers or [], current_mode=current_mode)
+        self._session_store.persist_meta(
+            session_id,
+            cwd,
+            mcp_servers or [],
+            current_mode=current_mode,
+            current_model=current_model,
+        )
 
     def _load_session_meta(self, session_id: str) -> dict[str, Any]:
         return self._session_store.load_meta(session_id)
@@ -187,8 +342,6 @@ class SessionLifecycleMixin:
 
     @staticmethod
     def _require_absolute_cwd(cwd: str) -> Path:
-        from acp import RequestError
-
         path = Path(cwd or "").expanduser()
         if not path.is_absolute():
             raise RequestError.invalid_request({"message": "cwd must be an absolute path"})

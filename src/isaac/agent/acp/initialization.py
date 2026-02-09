@@ -52,7 +52,6 @@ class InitializationMixin:
             mcp_capabilities=McpCapabilities(http=True, sse=True),
             session_capabilities=SessionCapabilities(list=SessionListCapabilities()),
         )
-        capabilities.field_meta = {"extMethods": ["model/list", "model/set"]}
 
         return InitializeResponse(
             protocol_version=PROTOCOL_VERSION,

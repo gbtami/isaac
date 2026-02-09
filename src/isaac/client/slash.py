@@ -9,7 +9,7 @@ from typing import Awaitable, Callable
 
 from acp import ClientSideConnection
 
-from isaac.client.acp_client import set_mode
+from isaac.client.acp_client import MODE_CONFIG_KEY, MODEL_CONFIG_KEY, set_mode, set_session_config_option_value
 from isaac.client.session_state import SessionUIState
 from isaac.client.thinking import toggle_thinking
 from isaac.log_utils import log_event
@@ -74,23 +74,18 @@ async def _handle_model(
         print("Usage: /model <id> (use /models to list available models)")
         return True
     selection = argument.split()[0]
+    allowed = state.config_option_values.get(MODEL_CONFIG_KEY, set())
+    if allowed and selection not in allowed:
+        print(f"[unknown model: {selection}]")
+        return True
     try:
-        resp = await conn.ext_method("model/set", {"session_id": session_id, "model_id": selection})
-        if isinstance(resp, dict) and resp.get("error"):
-            print(f"[failed to set model: {resp['error']}]")
-            return True
+        await set_session_config_option_value(conn, session_id, state, MODEL_CONFIG_KEY, selection)
         state.current_model = selection
         state.notify_changed()
         print(f"[model set to {selection}]")
         return True
     except Exception as exc:
-        try:
-            await conn.set_session_model(model_id=selection, session_id=session_id)
-            state.current_model = selection
-            state.notify_changed()
-            print(f"[model set to {selection}]")
-        except Exception as inner_exc:  # noqa: BLE001
-            print(f"[failed to set model: {inner_exc or exc}]")
+        print(f"[failed to set model: {exc}]")
     return True
 
 
@@ -155,6 +150,10 @@ async def _handle_mode(
     parts = argument.split()
     if not parts:
         print("Usage: /mode <ask|yolo>")
+        return True
+    allowed = state.config_option_values.get(MODE_CONFIG_KEY, set())
+    if allowed and parts[0] not in allowed:
+        print(f"[unknown mode: {parts[0]}]")
         return True
     await set_mode(conn, session_id, state, parts[0])
     permission_reset()

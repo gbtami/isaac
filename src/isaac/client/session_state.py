@@ -22,6 +22,8 @@ class SessionUIState:
     usage_summary: str | None = None
     available_agent_commands: dict[str, str] = field(default_factory=dict)
     local_slash_commands: set[str] = field(default_factory=set)
+    config_option_ids: dict[str, str] = field(default_factory=dict)
+    config_option_values: dict[str, set[str]] = field(default_factory=dict)
     session_id: str | None = None
     cwd: str | None = None
     refresh_ui: Callable[[], None] | None = None

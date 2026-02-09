@@ -19,7 +19,7 @@ def _raise_model_error(*_: object, **__: object) -> object:
 
 
 @pytest.mark.asyncio
-async def test_set_session_model_changes_runner(monkeypatch, tmp_path: Path):
+async def test_set_session_config_option_model_changes_runner(monkeypatch, tmp_path: Path):
     monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "xdg"))
     monkeypatch.setenv("HOME", str(tmp_path))
     monkeypatch.setattr(model_registry, "MODELS_FILE", tmp_path / "xdg" / "isaac" / "models.json")
@@ -28,7 +28,11 @@ async def test_set_session_model_changes_runner(monkeypatch, tmp_path: Path):
     agent = make_function_agent(conn)
     session = await agent.new_session(cwd="/", mcp_servers=[])
 
-    await agent.set_session_model(model_id="function:function", session_id=session.session_id)
+    await agent.set_session_config_option(
+        config_id="model",
+        session_id=session.session_id,
+        value="function:function",
+    )
 
     response = await agent.prompt(prompt=[text_block("hello")], session_id=session.session_id)
 

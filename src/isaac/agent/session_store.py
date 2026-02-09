@@ -38,11 +38,13 @@ class SessionStore:
         mcp_servers: Iterable[Any],
         *,
         current_mode: str,
+        current_model: str,
     ) -> None:
         meta = {
             "cwd": str(cwd),
             "mcpServers": [self._dump_model(server) for server in (mcp_servers or [])],
             "mode": current_mode,
+            "model": current_model,
         }
         meta_path = self.session_dir(session_id) / "meta.json"
         meta_path.write_text(json.dumps(meta, indent=2), encoding="utf-8")

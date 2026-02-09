@@ -17,8 +17,9 @@ from acp import PROTOCOL_VERSION
 from acp.core import connect_to_agent
 from acp.schema import ClientCapabilities, FileSystemCapability, Implementation
 
+from isaac.acp_compat import enable_session_config_options_api
 from isaac.client.mcp_config import load_mcp_config
-from isaac.client.acp_client import ACPClient
+from isaac.client.acp_client import ACPClient, apply_session_config_options
 from isaac.client.repl import interactive_loop
 from isaac.client.session_state import SessionUIState
 from isaac.log_utils import build_log_config, configure_logging, log_event
@@ -27,6 +28,7 @@ logger = logging.getLogger(__name__)
 
 
 async def run_client(program: str, args: Iterable[str], mcp_servers: list[Any]) -> int:
+    enable_session_config_options_api()
     _setup_client_logging()
     log_event(logger, "client.start", program=program)
 
@@ -82,17 +84,13 @@ async def run_client(program: str, args: Iterable[str], mcp_servers: list[Any]) 
     session = await conn.new_session(cwd=cwd, mcp_servers=mcp_servers)
     state.session_id = session.session_id
     state.cwd = cwd
-    try:
-        ext_models = await conn.ext_method("model/list", {"session_id": session.session_id})
-        if isinstance(ext_models, dict):
-            current = ext_models.get("current")
-            if isinstance(current, str):
-                state.current_model = current
-                state.notify_changed()
-    except Exception:
-        state.current_model = state.current_model
+    if getattr(session, "config_options", None):
+        apply_session_config_options(state, session.config_options or [])
     if getattr(session, "modes", None) and getattr(session.modes, "current_mode_id", None):
         state.current_mode = session.modes.current_mode_id
+        state.notify_changed()
+    if getattr(session, "models", None) and getattr(session.models, "current_model_id", None):
+        state.current_model = session.models.current_model_id
         state.notify_changed()
 
     try:

@@ -108,7 +108,11 @@ async def _handle_model(agent: Any, session_id: str, _: str, argument: str) -> S
         return session_notification(session_id, update_agent_message(text_block(message)))
 
     try:
-        await agent.set_session_model(argument, session_id)
+        await agent.set_session_config_option(
+            config_id=getattr(agent, "MODEL_CONFIG_ID", "model"),
+            value=argument,
+            session_id=session_id,
+        )
         _set_current_model(agent, session_id, argument)
         message = f"Model set to {argument}."
     except Exception as exc:  # noqa: BLE001

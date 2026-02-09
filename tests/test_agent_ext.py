@@ -32,7 +32,7 @@ def _make_agent_chunk(session_id: str, text: str) -> SessionNotification:
 
 
 @pytest.mark.asyncio
-async def test_initialize_advertises_ext_methods(monkeypatch, tmp_path: Path):
+async def test_initialize_does_not_advertise_legacy_model_extensions(monkeypatch, tmp_path: Path):
     monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "xdg"))
     monkeypatch.setenv("HOME", str(tmp_path))
     conn = AsyncMock(spec=AgentSideConnection)
@@ -41,12 +41,13 @@ async def test_initialize_advertises_ext_methods(monkeypatch, tmp_path: Path):
     resp = await agent.initialize(protocol_version=PROTOCOL_VERSION)
 
     meta = getattr(resp.agent_capabilities, "field_meta", {}) or {}
-    assert "extMethods" in meta
-    assert {"model/list", "model/set"}.issubset(set(meta["extMethods"]))
+    ext_methods = set(meta.get("extMethods", []))
+    assert "model/list" not in ext_methods
+    assert "model/set" not in ext_methods
 
 
 @pytest.mark.asyncio
-async def test_ext_methods_list_and_set(monkeypatch, tmp_path: Path):
+async def test_session_config_options_include_mode_and_model(monkeypatch, tmp_path: Path):
     monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "xdg"))
     monkeypatch.setenv("HOME", str(tmp_path))
     monkeypatch.setattr(
@@ -77,18 +78,31 @@ async def test_ext_methods_list_and_set(monkeypatch, tmp_path: Path):
     agent = ACPAgent(conn)
     session = await agent.new_session(cwd=str(tmp_path), mcp_servers=[])
 
-    listing = await agent.ext_method("model/list", {"session_id": session.session_id})
-    assert listing.get("current")
-    models = listing.get("models", [])
-    assert isinstance(models, list)
-    target_id = models[0]["id"]
+    assert session.config_options
+    assert _config_current_value(session.config_options, "mode") == "ask"
+    assert _config_current_value(session.config_options, "model") == fn_model_id
 
-    resp = await agent.ext_method(
-        "model/set",
-        {"session_id": session.session_id, "model_id": target_id},
+    target_id = "function:user-function"
+    resp = await agent.set_session_config_option(
+        config_id="model",
+        session_id=session.session_id,
+        value=target_id,
     )
-    assert resp.get("current") == target_id
+    assert _config_current_value(resp.config_options, "model") == target_id
     assert model_registry.current_model_id() == target_id
+
+
+@pytest.mark.asyncio
+async def test_set_session_config_option_updates_mode(monkeypatch, tmp_path: Path):
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "xdg"))
+    monkeypatch.setenv("HOME", str(tmp_path))
+    conn = AsyncMock(spec=AgentSideConnection)
+    agent = ACPAgent(conn)
+    session = await agent.new_session(cwd=str(tmp_path), mcp_servers=[])
+
+    resp = await agent.set_session_config_option(config_id="mode", session_id=session.session_id, value="yolo")
+    assert _config_current_value(resp.config_options, "mode") == "yolo"
+    assert agent._session_modes[session.session_id] == "yolo"
 
 
 @pytest.mark.asyncio
@@ -187,6 +201,16 @@ def _flatten_history(messages: list[object]) -> list[dict[str, str]]:
                 if isinstance(part, ai_messages.TextPart):
                     flattened.append({"role": "assistant", "content": str(part.content)})
     return flattened
+
+
+def _config_current_value(config_options: list[object], option_id: str) -> str | None:
+    for option in config_options:
+        root = getattr(option, "root", option)
+        if getattr(root, "id", None) == option_id:
+            value = getattr(root, "current_value", None)
+            if isinstance(value, str):
+                return value
+    return None
 
 
 @pytest.mark.asyncio

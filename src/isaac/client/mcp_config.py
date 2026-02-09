@@ -7,7 +7,7 @@ import sys
 from pathlib import Path
 from typing import Any
 
-from acp.schema import EnvVariable, HttpHeader, HttpMcpServer, SseMcpServer, StdioMcpServer
+from acp.schema import EnvVariable, HttpHeader, HttpMcpServer, McpServerStdio, SseMcpServer
 
 
 def load_mcp_config(path: str) -> list[Any]:
@@ -33,7 +33,7 @@ def load_mcp_config(path: str) -> list[Any]:
             if not command:
                 continue
             servers.append(
-                StdioMcpServer(
+                McpServerStdio(
                     name=name,
                     command=command,
                     args=entry.get("args", []),

@@ -28,13 +28,15 @@ from acp.schema import (
     AgentPlanUpdate,
     AllowedOutcome,
     AudioContentBlock,
-    DeniedOutcome,
-    FileEditToolCallContent,
-    CurrentModeUpdate,
-    EmbeddedResourceContentBlock,
     AvailableCommandsUpdate,
+    ConfigOptionUpdate,
+    CurrentModeUpdate,
+    DeniedOutcome,
+    EmbeddedResourceContentBlock,
+    FileEditToolCallContent,
     ImageContentBlock,
     ResourceContentBlock,
+    SessionConfigSelectOption,
     TextContentBlock,
     ToolCallProgress,
     ToolCallStart,
@@ -54,6 +56,71 @@ from isaac.client.session_state import SessionUIState
 from isaac.log_utils import log_context as log_ctx, log_event
 
 logger = logging.getLogger(__name__)
+MODE_CONFIG_KEY = "mode"
+MODEL_CONFIG_KEY = "model"
+
+
+def _iter_select_values(options: list[Any]) -> set[str]:
+    values: set[str] = set()
+    for option in options:
+        if isinstance(option, SessionConfigSelectOption):
+            values.add(option.value)
+            continue
+        nested = getattr(option, "options", None)
+        if isinstance(nested, list):
+            values.update(_iter_select_values(nested))
+    return values
+
+
+def _semantic_config_key(root_option: Any) -> str | None:
+    option_id = str(getattr(root_option, "id", "") or "").lower()
+    category = str(getattr(root_option, "category", "") or "").lower()
+    name = str(getattr(root_option, "name", "") or "").lower()
+    values = _iter_select_values(list(getattr(root_option, "options", []) or []))
+    if option_id in {MODE_CONFIG_KEY, "agent_mode"}:
+        return MODE_CONFIG_KEY
+    if option_id in {MODEL_CONFIG_KEY, "model_id"}:
+        return MODEL_CONFIG_KEY
+    if category == MODE_CONFIG_KEY or "mode" in name:
+        return MODE_CONFIG_KEY
+    if category == MODEL_CONFIG_KEY or "model" in name:
+        return MODEL_CONFIG_KEY
+    if {"ask", "yolo"}.intersection(values):
+        return MODE_CONFIG_KEY
+    return None
+
+
+def apply_session_config_options(state: SessionUIState, config_options: list[Any]) -> None:
+    """Apply advertised ACP session config options to local UI state."""
+    changed = False
+    option_ids = dict(state.config_option_ids)
+    option_values = dict(state.config_option_values)
+    for config_option in config_options:
+        root = getattr(config_option, "root", config_option)
+        if getattr(root, "type", None) != "select":
+            continue
+        semantic_key = _semantic_config_key(root)
+        if semantic_key is None:
+            continue
+        option_id = str(getattr(root, "id", "") or "")
+        if option_id and option_ids.get(semantic_key) != option_id:
+            option_ids[semantic_key] = option_id
+            changed = True
+        values = _iter_select_values(list(getattr(root, "options", []) or []))
+        if values and option_values.get(semantic_key) != values:
+            option_values[semantic_key] = values
+            changed = True
+        current_value = str(getattr(root, "current_value", "") or "")
+        if semantic_key == MODE_CONFIG_KEY and current_value and state.current_mode != current_value:
+            state.current_mode = current_value
+            changed = True
+        if semantic_key == MODEL_CONFIG_KEY and current_value and state.current_model != current_value:
+            state.current_model = current_value
+            changed = True
+    if changed:
+        state.config_option_ids = option_ids
+        state.config_option_values = option_values
+        state.notify_changed()
 
 
 class ACPClient(Client):
@@ -169,6 +236,9 @@ class ACPClient(Client):
             self._state.current_mode = update.current_mode_id
             self._state.notify_changed()
             print_mode_update(self._state.current_mode)
+            return
+        if isinstance(update, ConfigOptionUpdate):
+            apply_session_config_options(self._state, list(update.config_options or []))
             return
         if isinstance(update, AvailableCommandsUpdate):
             local_slashes = self._state.local_slash_commands
@@ -366,7 +436,39 @@ async def set_mode(
     state: SessionUIState,
     mode: str,
 ) -> None:
-    await conn.set_session_mode(mode_id=mode, session_id=session_id)
+    await set_session_config_option_value(conn, session_id, state, MODE_CONFIG_KEY, mode)
     state.current_mode = mode
     state.notify_changed()
     print_mode_update(state.current_mode)
+
+
+async def set_session_config_option_value(
+    conn: Any,
+    session_id: str,
+    state: SessionUIState,
+    config_key: str,
+    value: str,
+) -> None:
+    config_id = state.config_option_ids.get(config_key)
+    if not config_id:
+        raise RuntimeError(f"Agent does not expose a `{config_key}` session config option.")
+
+    setter = getattr(conn, "set_session_config_option", None)
+    response: Any
+    if callable(setter):
+        response = await setter(config_id=config_id, session_id=session_id, value=value)
+    else:
+        raw_conn = getattr(conn, "_conn", None)
+        if raw_conn is None or not hasattr(raw_conn, "send_request"):
+            raise RuntimeError("Connection does not support session/set_config_option.")
+        response = await raw_conn.send_request(
+            "session/set_config_option",
+            {"sessionId": session_id, "configId": config_id, "value": value},
+        )
+
+    if isinstance(response, dict):
+        options = response.get("configOptions") or response.get("config_options") or []
+    else:
+        options = getattr(response, "config_options", []) or []
+    if isinstance(options, list):
+        apply_session_config_options(state, options)
