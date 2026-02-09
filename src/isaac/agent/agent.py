@@ -7,6 +7,7 @@ import logging
 from dataclasses import replace
 
 from isaac.acp_compat import enable_session_config_options_api
+from isaac.acp_runtime import ACP_STDIO_BUFFER_LIMIT_BYTES
 from isaac.agent.acp_agent import ACPAgent
 from isaac.agent.tools import run_tool
 from isaac.log_utils import build_log_config, configure_logging, log_event
@@ -24,7 +25,7 @@ async def run_acp_agent():
     _setup_acp_logging()
     log_event(logger, "agent.start", transport="stdio")
 
-    await run_agent(ACPAgent())
+    await run_agent(ACPAgent(), stdio_buffer_limit_bytes=ACP_STDIO_BUFFER_LIMIT_BYTES)
 
 
 def _setup_acp_logging():
