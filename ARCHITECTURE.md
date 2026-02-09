@@ -48,13 +48,13 @@ flowchart TD
 
 - `src/isaac/agent/acp/initialization.py` init and auth.
 - `src/isaac/agent/acp/permissions.py` permission requests and run_command gating.
-- `src/isaac/agent/acp/sessions.py` session lifecycle and mode/model changes.
+- `src/isaac/agent/acp/sessions.py` session lifecycle and session config option changes (mode/model via `session/set_config_option`).
 - `src/isaac/agent/acp/prompts.py` prompt turn handling.
 - `src/isaac/agent/acp/tools.py` tool calls and dispatch.
 - `src/isaac/agent/acp/filesystem.py` fs endpoints.
 - `src/isaac/agent/acp/terminal.py` terminal endpoints.
 - `src/isaac/agent/acp/updates.py` session update persistence and replay.
-- `src/isaac/agent/acp/extensions.py` extMethods (model/list, model/set).
+- `src/isaac/agent/acp/extensions.py` extension request/notification hooks (no model-selection ext methods).
 
 ## Prompt Handling Flow
 
@@ -67,9 +67,10 @@ sequenceDiagram
 
   Client->>Agent: session/prompt
   Agent->>Prompt: handle_prompt()
-  Prompt-->>Agent: stream updates
+  Prompt-->>Agent: stream tool/plan/thought updates
   Prompt->>Tools: tool calls (if needed)
   Tools-->>Agent: tool updates
+  Prompt-->>Agent: final assistant text (single end-of-turn message)
   Agent-->>Client: session/update
   Agent-->>Client: prompt response
 ```

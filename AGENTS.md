@@ -7,9 +7,9 @@ isaac ships both an ACP agent and an ACP client. The agent (`isaac.agent`) imple
 - **protocol**: Agent Client Protocol https://agentclientprotocol.com/
 
 ## Protocol Compliance (must follow ACP)
-- Both the agent and client must strictly follow the ACP specification so they interoperate with any other ACP-compliant client/agent. Do not introduce behavior that assumes a proprietary peer. The codebase tracks the ACP Python SDK `0.7.x`, so use the snake_case schema fields and the `run_agent` / `connect_to_agent` helpers.
-- Keep initialization/version negotiation aligned with `PROTOCOL_VERSION`, honor advertised capabilities, and preserve ACP-defined session, prompt, tool call, file system, terminal, and session mode flows.
-- When adding features, favor ACP extension points (e.g., extMethods such as `model/list` and `model/set`) instead of one-off custom channels.
+- Both the agent and client must strictly follow the ACP specification so they interoperate with any other ACP-compliant client/agent. Do not introduce behavior that assumes a proprietary peer. The codebase tracks ACP Python SDK `0.8.0`, so use snake_case schema fields and the `run_agent` / `connect_to_agent` helpers.
+- Keep initialization/version negotiation aligned with `PROTOCOL_VERSION`, honor advertised capabilities, and preserve ACP-defined session, prompt, tool call, file system, terminal, and session config option flows.
+- Mode/model selection must use ACP Session Config Options (`config_options`, `config_option_update`, `session/set_config_option`) rather than custom ext methods.
 
 ## Components and Entrypoints
 - Agent: `uv run isaac` or `python -m isaac` starts the ACP agent server defined in `isaac.agent`.
@@ -32,6 +32,7 @@ To test isaac with other ACP clients after code changes without bumping the vers
 - Lint: `uv run ruff check .`
 - Types: `uv run mypy src tests`
 - Tests: `uv run pytest`
+- Package install check: `uv build --wheel` then `python -m pip install --user --no-deps --force-reinstall dist/isaac-*.whl`
 
 ## Tooling (pydantic-ai)
 - All tool functions must take `RunContext[...]` as the first argument; registration uses the public `Agent.tool` decorator (no private attributes).
@@ -42,7 +43,7 @@ To test isaac with other ACP clients after code changes without bumping the vers
 - `src/isaac/agent/` — ACP agent implementation (session lifecycle, prompt handling, tool calls, filesystem/terminal endpoints, slash commands, model registry). Key files:
   - `acp/`: ACP endpoint handlers split by domain (init, permissions, sessions, prompts, tools, filesystem, terminal, updates, extensions).
   - `acp_agent.py`: ACP-facing agent composed from ACP handler mixins.
-  - `brain/prompt_handler.py`: Prompt handling with plan/tool integration.
+  - `brain/prompt_handler.py`: Prompt handling with plan/tool integration; assistant text is emitted once at end-of-turn (tool/plan/thought updates may still stream).
   - `brain/prompt_runner.py`: Stream handling and tool call updates.
   - `brain/plan_parser.py`: Plan parsing utilities for converting model text to ACP plan updates.
   - `brain/plan_updates.py`: Plan update helpers (status updates, stable IDs).
@@ -59,6 +60,6 @@ To test isaac with other ACP clients after code changes without bumping the vers
 - `src/isaac/client/` — ACP client REPL example. Key files:
   - `repl.py`: Interactive loop and prompt submission; delegates slash commands to `client/slash.py`.
   - `slash.py`: Client-side slash command registry/handlers (local-only commands) and help rendering; forwards unknown/agent commands.
-  - `acp_client.py`: ACP client implementation; handles session updates (mode changes, available commands, tool updates, agent messages).
+  - `acp_client.py`: ACP client implementation; handles session updates (config option updates, available commands, tool updates, agent messages).
   - `session_state.py`: Shared REPL/UI state.
   - `status_box.py`, `display.py`, `thinking.py`: Rendering helpers for status, text, and thinking traces.
