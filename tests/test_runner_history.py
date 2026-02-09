@@ -11,7 +11,7 @@ from pydantic_ai.messages import FunctionToolCallEvent, ToolCallPart  # type: ig
 from pydantic_ai.messages import PartDeltaEvent, TextPartDelta  # type: ignore
 from pydantic_ai.run import AgentRunResultEvent  # type: ignore
 
-from isaac.agent.runner import _final_text_correction, stream_with_runner
+from isaac.agent.runner import stream_with_runner
 from isaac.agent.brain.prompt_runner import PromptEnv, PromptRunner
 from isaac.agent.brain.tool_events import tool_history_summary
 
@@ -152,16 +152,3 @@ async def test_stream_with_runner_suppresses_duplicate_final_output() -> None:
     )
     assert full == "hello"
     assert seen == ["hello"]
-
-
-def test_final_text_correction_prefix_suffix_and_fallback() -> None:
-    # Streamed prefix: append only the missing tail.
-    assert _final_text_correction("Bud", "Budapest") == "apest"
-    # Streamed suffix: rewrite the line with the full final text.
-    assert _final_text_correction("apest", "Budapest") == "\r\x1b[2KBudapest"
-    # Streamed middle substring: rewrite to final full text.
-    assert _final_text_correction("uda", "Budapest") == "\r\x1b[2KBudapest"
-    # Final already present in stream: do nothing.
-    assert _final_text_correction("BudapestBudapest", "Budapest") is None
-    # Generic single-line mismatch fallback: rewrite to final full text.
-    assert _final_text_correction("xyz", "Budapest") == "\r\x1b[2KBudapest"

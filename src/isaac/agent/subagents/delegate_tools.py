@@ -16,8 +16,7 @@ from pydantic import BaseModel
 from pydantic_ai import Agent as PydanticAgent  # type: ignore
 from pydantic_ai.run import AgentRunResultEvent  # type: ignore
 
-from acp.contrib.tool_calls import ToolCallTracker
-from acp.helpers import session_notification, text_block, tool_content, update_agent_thought
+from acp.helpers import session_notification, text_block, update_agent_thought
 from isaac.agent.ai_types import AgentRunner
 from isaac.agent import models as model_registry
 from isaac.agent.brain.prompt import SYSTEM_PROMPT
@@ -360,47 +359,15 @@ async def _run_delegate_once(
 ) -> _DelegateRunOutcome:
     """Run a delegate agent once and capture structured output if available.
 
-    We stream incremental text back to the ACP client as tool progress updates,
-    but only surface response text (never internal reasoning).
+    Delegate text output is returned only after completion; no text chunk
+    streaming. Thinking chunks may still stream as thought updates.
     """
 
     structured: BaseModel | None = None
     suppress_structured_output = False
     cancel_event = asyncio.Event()
-
-    tracker: ToolCallTracker | None = None
-    if tool_call_id and session_id and send_update:
-        tracker = ToolCallTracker(id_factory=lambda: tool_call_id)
-        # Seed tracker state so progress updates can reuse the existing ACP tool call id
-        # without emitting a duplicate ToolCallStart update.
-        tracker.start(
-            external_id=tool_call_id,
-            title=spec.name,
-            status="in_progress",
-            raw_input={"tool": spec.name},
-        )
-
-    buffer: list[str] = []
-    last_sent = 0.0
     thought_buffer: list[str] = []
     thought_last_sent = 0.0
-
-    async def _emit_progress(text: str) -> None:
-        if not tracker or not send_update or not session_id:
-            return
-        raw_output = {
-            "tool": spec.name,
-            "content": text,
-            "delegate_tool": spec.name,
-        }
-        progress = tracker.progress(
-            external_id=tool_call_id,
-            status="in_progress",
-            raw_output=raw_output,
-            content=[tool_content(text_block(text))],
-        )
-        with contextlib.suppress(Exception):
-            await send_update(session_notification(session_id, progress))
 
     async def _emit_thought(text: str) -> None:
         if not send_update or not session_id:
@@ -410,18 +377,6 @@ async def _run_delegate_once(
             return
         with contextlib.suppress(Exception):
             await send_update(session_notification(session_id, update_agent_thought(text_block(thought))))
-
-    async def _flush(force: bool = False) -> None:
-        nonlocal last_sent
-        if not buffer:
-            return
-        now = time.monotonic()
-        if not force and (now - last_sent) < 0.5 and sum(len(chunk) for chunk in buffer) < 200:
-            return
-        text = "".join(buffer)
-        buffer.clear()
-        last_sent = now
-        await _emit_progress(text)
 
     async def _flush_thought(force: bool = False) -> None:
         nonlocal thought_last_sent
@@ -436,12 +391,8 @@ async def _run_delegate_once(
         await _emit_thought(text)
 
     async def _on_text(chunk: str) -> None:
-        if not chunk:
-            return
-        if suppress_structured_output and spec.output_type is not None:
-            return
-        buffer.append(chunk)
-        await _flush()
+        _ = chunk
+        return None
 
     async def _on_thought(chunk: str) -> None:
         if not chunk:
@@ -484,7 +435,6 @@ async def _run_delegate_once(
             error=f"Delegate tool timed out after {spec.timeout_s}s.",
         )
 
-    await _flush(force=True)
     await _flush_thought(force=True)
 
     if response is None:

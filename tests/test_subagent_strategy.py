@@ -520,7 +520,7 @@ async def test_delegate_tool_carryover_acp_integration(monkeypatch, tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_delegate_tool_emits_progress_and_thought(monkeypatch):
+async def test_delegate_tool_emits_thought_without_text_progress(monkeypatch):
     updates: list[Any] = []
 
     async def _capture_update(note: Any) -> None:
@@ -564,9 +564,9 @@ async def test_delegate_tool_emits_progress_and_thought(monkeypatch):
     finally:
         reset_delegate_tool_context(ctx)
 
-    progress_updates = [u for u in updates if isinstance(u, ToolCallProgress)]
     thought_updates = [u for u in updates if isinstance(u, AgentThoughtChunk)]
-    assert progress_updates, "Expected delegate tool progress updates"
+    progress_updates = [u for u in updates if isinstance(u, ToolCallProgress)]
+    assert not progress_updates, "Delegate text progress updates should be suppressed"
     assert thought_updates, "Expected delegate tool thought updates"
     thought_text = "".join(update.content.text for update in thought_updates)
     assert "delegate thinking one" in thought_text
