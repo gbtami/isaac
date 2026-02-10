@@ -1,7 +1,8 @@
 """Model registry and builder for pydantic-ai agents.
 
-Reads model settings from `models.json` and environment variables via `.env`.
-Supports switching models/providers at runtime (used by the `/model` command).
+Loads model defaults from the offline models.dev catalog, then applies local/user
+overrides from `models.json`. Supports switching models/providers at runtime
+(used by the `/model` command).
 """
 
 from __future__ import annotations
@@ -11,7 +12,6 @@ import json
 import logging
 import os
 import re
-import urllib.request
 import configparser
 from pathlib import Path
 from typing import Any, Callable, Dict
@@ -68,51 +68,6 @@ DEFAULT_CONFIG = {
             "model": "function",
             "description": "In-process function model for deterministic testing",
         },
-        "openai:gpt-4o-mini": {
-            "provider": "openai",
-            "model": "gpt-4o-mini",
-            "description": "OpenAI GPT-4o mini",
-        },
-        "openai-codex:gpt-5.2-codex": {
-            "provider": "openai-codex",
-            "model": "gpt-5.2-codex",
-            "description": "OpenAI Codex (OAuth, ChatGPT login)",
-        },
-        "anthropic:claude-3-5-sonnet-20240620": {
-            "provider": "anthropic",
-            "model": "claude-3-5-sonnet-20240620",
-            "description": "Anthropic Claude 3.5 Sonnet",
-        },
-        "google:gemini-2.5-flash": {
-            "provider": "google",
-            "model": "gemini-2.5-flash",
-            "description": "Google Gemini 2.5 Flash",
-        },
-        "code-assist:gemini-2.5-flash": {
-            "provider": "code-assist",
-            "model": "gemini-2.5-flash",
-            "description": "Google Code Assist (OAuth via Google login)",
-        },
-        "openrouter:openai/gpt-oss-120b": {
-            "provider": "openrouter",
-            "model": "openai/gpt-oss-120b",
-            "description": "OpenRouter proxy for openai/gpt-oss-120b",
-        },
-        "cerebras:openai/gpt-oss-120b": {
-            "provider": "cerebras",
-            "model": "openai/gpt-oss-120b",
-            "description": "Cerebras proxy for openai/gpt-oss-120b",
-        },
-        "mistral:devstral-medium-latest": {
-            "provider": "mistral",
-            "model": "devstral-medium-latest",
-            "description": "Mistral DevStral Medium (latest)",
-        },
-        "ollama:ministral-3:3b": {
-            "provider": "ollama",
-            "model": "ministral-3:3b",
-            "description": "Ollama ministral-3:3b (local)",
-        },
     },
 }
 
@@ -120,26 +75,41 @@ CONFIG_DIR = Path(os.getenv("XDG_CONFIG_HOME") or (Path.home() / ".config")) / "
 CONFIG_DIR.mkdir(parents=True, exist_ok=True)
 ENV_FILE = CONFIG_DIR / ".env"
 
-MODELS_FILE = CONFIG_DIR / "models.json"
-MODELS_DEV_URL = "https://models.dev/api.json"
+# Local models.json in the repository
+LOCAL_MODELS_FILE = Path(__file__).parent.parent / "models.json"
+# User-specific models.json in the config directory
+USER_MODELS_FILE = CONFIG_DIR / "models.json"
+MODELS_DEV_SNAPSHOT_FILE = Path(__file__).parent / "data" / "models_dev_api.json"
+MODELS_DEV_CATALOG_FILE = Path(__file__).parent / "data" / "models_dev_catalog.json"
 
 
 def load_models_config() -> Dict[str, Any]:
-    if not MODELS_FILE.exists():
-        config = json.loads(json.dumps(DEFAULT_CONFIG))
-        _apply_context_limits(config)
-        MODELS_FILE.write_text(json.dumps(config, indent=2), encoding="utf-8")
-    else:
-        try:
-            config = json.loads(MODELS_FILE.read_text(encoding="utf-8"))
-        except Exception:
-            config = json.loads(json.dumps(DEFAULT_CONFIG))
-
-    # Backfill missing defaults
+    """Load models from defaults, offline catalog, then local/user overrides."""
+    config = json.loads(json.dumps(DEFAULT_CONFIG))
     config.setdefault("models", {})
     models = config["models"]
-    for key, value in DEFAULT_CONFIG["models"].items():
-        models.setdefault(key, value)
+
+    # Merge offline catalog generated from models.dev snapshot.
+    models.update(_load_catalog_models())
+
+    # Merge local models.json in the repository.
+    if LOCAL_MODELS_FILE.exists():
+        try:
+            local_config = json.loads(LOCAL_MODELS_FILE.read_text(encoding="utf-8"))
+            if isinstance(local_config, dict):
+                for key, value in (local_config.get("models", {}) or {}).items():
+                    models[key] = value
+        except Exception:
+            logger.warning("Failed to load local models.json, keeping defaults/catalog")
+
+    # Try to load from user-specific models.json in the config directory
+    if USER_MODELS_FILE.exists():
+        try:
+            user_config = json.loads(USER_MODELS_FILE.read_text(encoding="utf-8"))
+            for key, value in user_config.get("models", {}).items():
+                models[key] = value
+        except Exception:
+            logger.warning("Failed to load user models.json, ignoring")
 
     # Ensure function model stays safe for testing (no auto tool calls)
     fn_model = models.get(FUNCTION_MODEL_ID, {})
@@ -148,7 +118,47 @@ def load_models_config() -> Dict[str, Any]:
     fn_model.setdefault("description", DEFAULT_CONFIG["models"][FUNCTION_MODEL_ID]["description"])
     models[FUNCTION_MODEL_ID] = fn_model
 
+    _apply_context_limits(config)
+
     return config
+
+
+def update_models_from_models_dev() -> None:
+    """Backfill context limits for models declared in local models.json."""
+    if not LOCAL_MODELS_FILE.exists():
+        logger.info("No local models.json found; skipping context limit backfill")
+        return
+    try:
+        limits_index = _fetch_models_dev_limits()
+        config = json.loads(LOCAL_MODELS_FILE.read_text(encoding="utf-8"))
+        if not isinstance(config, dict):
+            logger.warning("Local models.json is invalid; skipping context limit backfill")
+            return
+        config.setdefault("models", {})
+        updated = False
+
+        for model_id, meta in config.get("models", {}).items():
+            if not isinstance(meta, dict):
+                continue
+            if meta.get("context_limit") is not None:
+                continue
+            provider = (meta.get("provider") or "").lower()
+            model_name = (meta.get("model") or "").lower()
+            if not provider or not model_name:
+                continue
+            limit = limits_index.get((provider, model_name))
+            if limit:
+                meta["context_limit"] = limit
+                updated = True
+
+        if updated:
+            LOCAL_MODELS_FILE.write_text(json.dumps(config, indent=2), encoding="utf-8")
+            logger.info("Updated local models.json with context limits from snapshot")
+        else:
+            logger.info("No updates needed for models.json")
+    except Exception as e:
+        logger.error(f"Failed to update models.json from snapshot: {e}")
+        raise
 
 
 def current_model_id() -> str:
@@ -177,7 +187,7 @@ def set_current_model(model_id: str) -> str:
 def _load_current_model() -> str:
     """Read the persisted current model selection from ini (or default)."""
 
-    settings_file = MODELS_FILE.parent / "isaac.ini"
+    settings_file = USER_MODELS_FILE.parent / "isaac.ini"
     parser = configparser.ConfigParser()
     if settings_file.exists():
         try:
@@ -193,7 +203,7 @@ def _load_current_model() -> str:
 def _save_current_model(model_id: str) -> None:
     """Persist the current model selection separately from models.json."""
 
-    settings_file = MODELS_FILE.parent / "isaac.ini"
+    settings_file = USER_MODELS_FILE.parent / "isaac.ini"
     parser = configparser.ConfigParser()
     parser["models"] = {"current_model": model_id}
     try:
@@ -212,10 +222,10 @@ def get_context_limit(model_id: str) -> int | None:
 
 
 def _apply_context_limits(config: Dict[str, Any]) -> None:
-    """Populate context_limit fields from models.dev when available."""
+    """Populate context_limit fields from offline models.dev snapshot when available."""
     try:
         limits_index = _fetch_models_dev_limits()
-    except Exception:  # pragma: no cover - network failure path
+    except Exception:
         limits_index = {}
 
     for model_id, meta in config.get("models", {}).items():
@@ -231,17 +241,67 @@ def _apply_context_limits(config: Dict[str, Any]) -> None:
 
 
 def _fetch_models_dev_limits() -> Dict[tuple[str, str], int]:
-    """Fetch models.dev index and build (provider, model) -> context_limit map."""
-    with urllib.request.urlopen(MODELS_DEV_URL, timeout=5) as resp:  # type: ignore[call-arg]
-        data = json.loads(resp.read().decode("utf-8"))
+    """Read models.dev snapshot and build (provider, model) -> context_limit map."""
+    if not MODELS_DEV_SNAPSHOT_FILE.exists():
+        logger.debug("models.dev snapshot missing: %s", MODELS_DEV_SNAPSHOT_FILE)
+        return {}
+    data = json.loads(MODELS_DEV_SNAPSHOT_FILE.read_text(encoding="utf-8"))
     index: Dict[tuple[str, str], int] = {}
-    for provider_key, provider_data in data.items():
+    for provider_key, provider_data in data.items() if isinstance(data, dict) else []:
+        if not isinstance(provider_data, dict):
+            continue
         models = provider_data.get("models", {}) or {}
+        if not isinstance(models, dict):
+            continue
         for model_key, model_data in models.items():
+            if not isinstance(model_data, dict):
+                continue
             limit = (model_data.get("limit") or {}).get("context")
             if isinstance(limit, (int, float)) and limit > 0:
                 index[(provider_key.lower(), model_key.lower())] = int(limit)
     return index
+
+
+def _load_catalog_models() -> Dict[str, Any]:
+    """Load model entries from offline catalog generated from models.dev."""
+    if not MODELS_DEV_CATALOG_FILE.exists():
+        logger.debug("models.dev catalog missing: %s", MODELS_DEV_CATALOG_FILE)
+        return {}
+    try:
+        catalog = json.loads(MODELS_DEV_CATALOG_FILE.read_text(encoding="utf-8"))
+    except Exception:
+        logger.warning("Failed to read models.dev catalog; ignoring")
+        return {}
+
+    providers = catalog.get("providers", {})
+    if not isinstance(providers, dict):
+        return {}
+
+    models: dict[str, Any] = {}
+    for provider, provider_entry in providers.items():
+        if not isinstance(provider_entry, dict):
+            continue
+        label = str(provider_entry.get("label") or provider)
+        raw_models = provider_entry.get("models", [])
+        if not isinstance(raw_models, list):
+            continue
+        for raw_model in raw_models:
+            if not isinstance(raw_model, dict):
+                continue
+            model_name = str(raw_model.get("id") or "").strip()
+            if not model_name:
+                continue
+            model_id = f"{provider}:{model_name}"
+            model_entry: dict[str, Any] = {
+                "provider": provider,
+                "model": model_name,
+                "description": f"{label} {str(raw_model.get('name') or model_name)}",
+            }
+            context_limit = raw_model.get("context_limit")
+            if isinstance(context_limit, int) and context_limit > 0:
+                model_entry["context_limit"] = context_limit
+            models[model_id] = model_entry
+    return models
 
 
 def _get_http_client(

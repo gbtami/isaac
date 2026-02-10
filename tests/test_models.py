@@ -22,8 +22,8 @@ def _raise_model_error(*_: object, **__: object) -> object:
 async def test_set_session_config_option_model_changes_runner(monkeypatch, tmp_path: Path):
     monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "xdg"))
     monkeypatch.setenv("HOME", str(tmp_path))
-    monkeypatch.setattr(model_registry, "MODELS_FILE", tmp_path / "xdg" / "isaac" / "models.json")
-    model_registry.MODELS_FILE.parent.mkdir(parents=True, exist_ok=True)
+    monkeypatch.setattr(model_registry, "LOCAL_MODELS_FILE", tmp_path / "xdg" / "isaac" / "models.json")
+    model_registry.LOCAL_MODELS_FILE.parent.mkdir(parents=True, exist_ok=True)
     conn = AsyncMock(spec=AgentSideConnection)
     agent = make_function_agent(conn)
     session = await agent.new_session(cwd="/", mcp_servers=[])

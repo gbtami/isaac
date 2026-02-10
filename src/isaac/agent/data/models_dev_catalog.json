@@ -1,0 +1,481 @@
+{
+  "source_url": "https://models.dev/api.json",
+  "generated_at": "2026-02-10T10:28:26.265194+00:00",
+  "top_per_provider": 8,
+  "providers": {
+    "openai": {
+      "label": "OpenAI",
+      "source_provider": "openai",
+      "models": [
+        {
+          "id": "gpt-5.2-pro",
+          "name": "GPT-5.2 Pro",
+          "context_limit": 400000,
+          "release_date": "2025-12-11",
+          "last_updated": "2025-12-11"
+        },
+        {
+          "id": "gpt-5.2",
+          "name": "GPT-5.2",
+          "context_limit": 400000,
+          "release_date": "2025-12-11",
+          "last_updated": "2025-12-11"
+        },
+        {
+          "id": "gpt-5.2-chat-latest",
+          "name": "GPT-5.2 Chat",
+          "context_limit": 128000,
+          "release_date": "2025-12-11",
+          "last_updated": "2025-12-11"
+        },
+        {
+          "id": "gpt-5.1",
+          "name": "GPT-5.1",
+          "context_limit": 400000,
+          "release_date": "2025-11-13",
+          "last_updated": "2025-11-13"
+        },
+        {
+          "id": "gpt-5.1-chat-latest",
+          "name": "GPT-5.1 Chat",
+          "context_limit": 128000,
+          "release_date": "2025-11-13",
+          "last_updated": "2025-11-13"
+        },
+        {
+          "id": "gpt-5-pro",
+          "name": "GPT-5 Pro",
+          "context_limit": 400000,
+          "release_date": "2025-10-06",
+          "last_updated": "2025-10-06"
+        },
+        {
+          "id": "gpt-5-nano",
+          "name": "GPT-5 Nano",
+          "context_limit": 400000,
+          "release_date": "2025-08-07",
+          "last_updated": "2025-08-07"
+        },
+        {
+          "id": "gpt-5-mini",
+          "name": "GPT-5 Mini",
+          "context_limit": 400000,
+          "release_date": "2025-08-07",
+          "last_updated": "2025-08-07"
+        }
+      ]
+    },
+    "openai-codex": {
+      "label": "OpenAI Codex (OAuth)",
+      "source_provider": "openai",
+      "models": [
+        {
+          "id": "gpt-5.3-codex",
+          "name": "GPT-5.3 Codex",
+          "context_limit": 400000,
+          "release_date": "2026-02-05",
+          "last_updated": "2026-02-05"
+        },
+        {
+          "id": "gpt-5.2-codex",
+          "name": "GPT-5.2 Codex",
+          "context_limit": 400000,
+          "release_date": "2025-12-11",
+          "last_updated": "2025-12-11"
+        },
+        {
+          "id": "gpt-5.1-codex-mini",
+          "name": "GPT-5.1 Codex mini",
+          "context_limit": 400000,
+          "release_date": "2025-11-13",
+          "last_updated": "2025-11-13"
+        },
+        {
+          "id": "gpt-5.1-codex-max",
+          "name": "GPT-5.1 Codex Max",
+          "context_limit": 400000,
+          "release_date": "2025-11-13",
+          "last_updated": "2025-11-13"
+        },
+        {
+          "id": "gpt-5.1-codex",
+          "name": "GPT-5.1 Codex",
+          "context_limit": 400000,
+          "release_date": "2025-11-13",
+          "last_updated": "2025-11-13"
+        },
+        {
+          "id": "gpt-5-codex",
+          "name": "GPT-5-Codex",
+          "context_limit": 400000,
+          "release_date": "2025-09-15",
+          "last_updated": "2025-09-15"
+        },
+        {
+          "id": "codex-mini-latest",
+          "name": "Codex Mini",
+          "context_limit": 200000,
+          "release_date": "2025-05-16",
+          "last_updated": "2025-05-16"
+        },
+        {
+          "id": "gpt-5.2-pro",
+          "name": "GPT-5.2 Pro",
+          "context_limit": 400000,
+          "release_date": "2025-12-11",
+          "last_updated": "2025-12-11"
+        }
+      ]
+    },
+    "anthropic": {
+      "label": "Anthropic",
+      "source_provider": "anthropic",
+      "models": [
+        {
+          "id": "claude-opus-4-6",
+          "name": "Claude Opus 4.6",
+          "context_limit": 200000,
+          "release_date": "2026-02-05",
+          "last_updated": "2026-02-05"
+        },
+        {
+          "id": "claude-opus-4-5",
+          "name": "Claude Opus 4.5 (latest)",
+          "context_limit": 200000,
+          "release_date": "2025-11-24",
+          "last_updated": "2025-11-24"
+        },
+        {
+          "id": "claude-opus-4-5-20251101",
+          "name": "Claude Opus 4.5",
+          "context_limit": 200000,
+          "release_date": "2025-11-01",
+          "last_updated": "2025-11-01"
+        },
+        {
+          "id": "claude-haiku-4-5-20251001",
+          "name": "Claude Haiku 4.5",
+          "context_limit": 200000,
+          "release_date": "2025-10-15",
+          "last_updated": "2025-10-15"
+        },
+        {
+          "id": "claude-haiku-4-5",
+          "name": "Claude Haiku 4.5 (latest)",
+          "context_limit": 200000,
+          "release_date": "2025-10-15",
+          "last_updated": "2025-10-15"
+        },
+        {
+          "id": "claude-sonnet-4-5-20250929",
+          "name": "Claude Sonnet 4.5",
+          "context_limit": 200000,
+          "release_date": "2025-09-29",
+          "last_updated": "2025-09-29"
+        },
+        {
+          "id": "claude-sonnet-4-5",
+          "name": "Claude Sonnet 4.5 (latest)",
+          "context_limit": 200000,
+          "release_date": "2025-09-29",
+          "last_updated": "2025-09-29"
+        },
+        {
+          "id": "claude-opus-4-1-20250805",
+          "name": "Claude Opus 4.1",
+          "context_limit": 200000,
+          "release_date": "2025-08-05",
+          "last_updated": "2025-08-05"
+        }
+      ]
+    },
+    "google": {
+      "label": "Google",
+      "source_provider": "google",
+      "models": [
+        {
+          "id": "gemini-3-flash-preview",
+          "name": "Gemini 3 Flash Preview",
+          "context_limit": 1048576,
+          "release_date": "2025-12-17",
+          "last_updated": "2025-12-17"
+        },
+        {
+          "id": "gemini-3-pro-preview",
+          "name": "Gemini 3 Pro Preview",
+          "context_limit": 1000000,
+          "release_date": "2025-11-18",
+          "last_updated": "2025-11-18"
+        },
+        {
+          "id": "gemini-flash-lite-latest",
+          "name": "Gemini Flash-Lite Latest",
+          "context_limit": 1048576,
+          "release_date": "2025-09-25",
+          "last_updated": "2025-09-25"
+        },
+        {
+          "id": "gemini-flash-latest",
+          "name": "Gemini Flash Latest",
+          "context_limit": 1048576,
+          "release_date": "2025-09-25",
+          "last_updated": "2025-09-25"
+        },
+        {
+          "id": "gemini-2.5-flash-preview-09-2025",
+          "name": "Gemini 2.5 Flash Preview 09-25",
+          "context_limit": 1048576,
+          "release_date": "2025-09-25",
+          "last_updated": "2025-09-25"
+        },
+        {
+          "id": "gemini-2.5-flash-lite-preview-09-2025",
+          "name": "Gemini 2.5 Flash Lite Preview 09-25",
+          "context_limit": 1048576,
+          "release_date": "2025-09-25",
+          "last_updated": "2025-09-25"
+        },
+        {
+          "id": "gemini-2.5-flash-lite",
+          "name": "Gemini 2.5 Flash Lite",
+          "context_limit": 1048576,
+          "release_date": "2025-06-17",
+          "last_updated": "2025-06-17"
+        },
+        {
+          "id": "gemini-2.5-pro-preview-06-05",
+          "name": "Gemini 2.5 Pro Preview 06-05",
+          "context_limit": 1048576,
+          "release_date": "2025-06-05",
+          "last_updated": "2025-06-05"
+        }
+      ]
+    },
+    "code-assist": {
+      "label": "Google Code Assist (OAuth)",
+      "source_provider": "google",
+      "models": [
+        {
+          "id": "gemini-3-flash-preview",
+          "name": "Gemini 3 Flash Preview",
+          "context_limit": 1048576,
+          "release_date": "2025-12-17",
+          "last_updated": "2025-12-17"
+        },
+        {
+          "id": "gemini-3-pro-preview",
+          "name": "Gemini 3 Pro Preview",
+          "context_limit": 1000000,
+          "release_date": "2025-11-18",
+          "last_updated": "2025-11-18"
+        },
+        {
+          "id": "gemini-flash-lite-latest",
+          "name": "Gemini Flash-Lite Latest",
+          "context_limit": 1048576,
+          "release_date": "2025-09-25",
+          "last_updated": "2025-09-25"
+        },
+        {
+          "id": "gemini-flash-latest",
+          "name": "Gemini Flash Latest",
+          "context_limit": 1048576,
+          "release_date": "2025-09-25",
+          "last_updated": "2025-09-25"
+        },
+        {
+          "id": "gemini-2.5-flash-preview-09-2025",
+          "name": "Gemini 2.5 Flash Preview 09-25",
+          "context_limit": 1048576,
+          "release_date": "2025-09-25",
+          "last_updated": "2025-09-25"
+        },
+        {
+          "id": "gemini-2.5-flash-lite-preview-09-2025",
+          "name": "Gemini 2.5 Flash Lite Preview 09-25",
+          "context_limit": 1048576,
+          "release_date": "2025-09-25",
+          "last_updated": "2025-09-25"
+        },
+        {
+          "id": "gemini-2.5-flash-lite",
+          "name": "Gemini 2.5 Flash Lite",
+          "context_limit": 1048576,
+          "release_date": "2025-06-17",
+          "last_updated": "2025-06-17"
+        },
+        {
+          "id": "gemini-2.5-pro-preview-06-05",
+          "name": "Gemini 2.5 Pro Preview 06-05",
+          "context_limit": 1048576,
+          "release_date": "2025-06-05",
+          "last_updated": "2025-06-05"
+        }
+      ]
+    },
+    "mistral": {
+      "label": "Mistral",
+      "source_provider": "mistral",
+      "models": [
+        {
+          "id": "magistral-medium-latest",
+          "name": "Magistral Medium",
+          "context_limit": 128000,
+          "release_date": "2025-03-17",
+          "last_updated": "2025-03-20"
+        },
+        {
+          "id": "magistral-small",
+          "name": "Magistral Small",
+          "context_limit": 128000,
+          "release_date": "2025-03-17",
+          "last_updated": "2025-03-17"
+        },
+        {
+          "id": "devstral-2512",
+          "name": "Devstral 2",
+          "context_limit": 262144,
+          "release_date": "2025-12-09",
+          "last_updated": "2025-12-09"
+        },
+        {
+          "id": "labs-devstral-small-2512",
+          "name": "Devstral Small 2",
+          "context_limit": 256000,
+          "release_date": "2025-12-09",
+          "last_updated": "2025-12-09"
+        },
+        {
+          "id": "mistral-large-latest",
+          "name": "Mistral Large",
+          "context_limit": 262144,
+          "release_date": "2024-11-01",
+          "last_updated": "2025-12-02"
+        },
+        {
+          "id": "mistral-large-2512",
+          "name": "Mistral Large 3",
+          "context_limit": 262144,
+          "release_date": "2024-11-01",
+          "last_updated": "2025-12-02"
+        },
+        {
+          "id": "devstral-medium-latest",
+          "name": "Devstral 2",
+          "context_limit": 262144,
+          "release_date": "2025-12-02",
+          "last_updated": "2025-12-02"
+        },
+        {
+          "id": "mistral-medium-2508",
+          "name": "Mistral Medium 3.1",
+          "context_limit": 262144,
+          "release_date": "2025-08-12",
+          "last_updated": "2025-08-12"
+        }
+      ]
+    },
+    "openrouter": {
+      "label": "OpenRouter",
+      "source_provider": "openrouter",
+      "models": [
+        {
+          "id": "openrouter/pony-alpha",
+          "name": "Pony Alpha",
+          "context_limit": 200000,
+          "release_date": "2026-02-06",
+          "last_updated": "2026-02-06"
+        },
+        {
+          "id": "z-ai/glm-4.7-flash",
+          "name": "GLM-4.7",
+          "context_limit": 200000,
+          "release_date": "2026-01-19",
+          "last_updated": "2026-01-19"
+        },
+        {
+          "id": "openai/gpt-5.2-codex",
+          "name": "GPT-5.2-Codex",
+          "context_limit": 400000,
+          "release_date": "2026-01-14",
+          "last_updated": "2026-01-14"
+        },
+        {
+          "id": "openai/gpt-5.2-pro",
+          "name": "GPT-5.2 Pro",
+          "context_limit": 400000,
+          "release_date": "2025-12-11",
+          "last_updated": "2025-12-11"
+        },
+        {
+          "id": "openai/gpt-5.2-chat",
+          "name": "GPT-5.2 Chat",
+          "context_limit": 128000,
+          "release_date": "2025-12-11",
+          "last_updated": "2025-12-11"
+        },
+        {
+          "id": "openai/gpt-5.1-codex-mini",
+          "name": "GPT-5.1-Codex-Mini",
+          "context_limit": 400000,
+          "release_date": "2025-11-13",
+          "last_updated": "2025-11-13"
+        },
+        {
+          "id": "openai/gpt-5.1-codex-max",
+          "name": "GPT-5.1-Codex-Max",
+          "context_limit": 400000,
+          "release_date": "2025-11-13",
+          "last_updated": "2025-11-13"
+        },
+        {
+          "id": "openai/gpt-5.1-codex",
+          "name": "GPT-5.1-Codex",
+          "context_limit": 400000,
+          "release_date": "2025-11-13",
+          "last_updated": "2025-11-13"
+        }
+      ]
+    },
+    "cerebras": {
+      "label": "Cerebras",
+      "source_provider": "cerebras",
+      "models": [
+        {
+          "id": "gpt-oss-120b",
+          "name": "GPT OSS 120B",
+          "context_limit": 131072,
+          "release_date": "2025-08-05",
+          "last_updated": "2025-08-05"
+        },
+        {
+          "id": "zai-glm-4.7",
+          "name": "Z.AI GLM-4.7",
+          "context_limit": 131072,
+          "release_date": "2026-01-10",
+          "last_updated": "2026-01-10"
+        },
+        {
+          "id": "qwen-3-235b-a22b-instruct-2507",
+          "name": "Qwen 3 235B Instruct",
+          "context_limit": 131000,
+          "release_date": "2025-07-22",
+          "last_updated": "2025-07-22"
+        }
+      ]
+    },
+    "ollama": {
+      "label": "Ollama",
+      "source_provider": null,
+      "models": [
+        {
+          "id": "ministral-3:3b",
+          "name": "ministral-3:3b",
+          "context_limit": null,
+          "release_date": null,
+          "last_updated": null
+        }
+      ]
+    }
+  }
+}

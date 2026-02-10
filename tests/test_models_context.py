@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import io
 import json
 from pathlib import Path
 
@@ -10,28 +9,48 @@ from isaac.agent import models as model_registry
 
 
 @pytest.mark.asyncio
-async def test_context_limit_applied_on_first_write(monkeypatch, tmp_path: Path):
-    # Redirect config paths
+async def test_context_limit_applied_from_offline_snapshot(monkeypatch, tmp_path: Path):
     monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "xdg"))
     monkeypatch.setenv("HOME", str(tmp_path))
-    monkeypatch.setattr(model_registry, "MODELS_FILE", tmp_path / "models.json")
 
-    sample = {
-        "openai": {
-            "models": {
-                "gpt-4o-mini": {"limit": {"context": 128000}},
+    local_models_file = tmp_path / "models.json"
+    local_models_file.write_text(
+        json.dumps(
+            {
+                "models": {
+                    "function:function": {
+                        "provider": "function",
+                        "model": "function",
+                        "description": "In-process function model for deterministic testing",
+                    },
+                    "openai:gpt-4o-mini": {
+                        "provider": "openai",
+                        "model": "gpt-4o-mini",
+                        "description": "OpenAI GPT-4o mini",
+                    },
+                }
             }
-        }
-    }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(model_registry, "LOCAL_MODELS_FILE", local_models_file)
+    monkeypatch.setattr(model_registry, "USER_MODELS_FILE", tmp_path / "xdg" / "isaac" / "models.json")
 
-    def fake_urlopen(url, timeout=5):
-        return io.BytesIO(json.dumps(sample).encode("utf-8"))
-
-    monkeypatch.setattr(model_registry.urllib.request, "urlopen", fake_urlopen)  # type: ignore[attr-defined]
+    snapshot_file = tmp_path / "models_dev_api.json"
+    snapshot_file.write_text(
+        json.dumps(
+            {
+                "openai": {
+                    "models": {
+                        "gpt-4o-mini": {"limit": {"context": 128000}},
+                    }
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(model_registry, "MODELS_DEV_SNAPSHOT_FILE", snapshot_file)
 
     config = model_registry.load_models_config()
     entry = config["models"]["openai:gpt-4o-mini"]
     assert entry.get("context_limit") == 128000
-    # Ensure file was written with the new field
-    on_disk = json.loads(model_registry.MODELS_FILE.read_text())
-    assert on_disk["models"]["openai:gpt-4o-mini"]["context_limit"] == 128000

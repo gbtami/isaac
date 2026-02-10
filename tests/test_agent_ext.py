@@ -35,6 +35,7 @@ def _make_agent_chunk(session_id: str, text: str) -> SessionNotification:
 async def test_initialize_does_not_advertise_legacy_model_extensions(monkeypatch, tmp_path: Path):
     monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "xdg"))
     monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setattr(model_registry, "USER_MODELS_FILE", tmp_path / "xdg" / "isaac" / "models.user.json")
     conn = AsyncMock(spec=AgentSideConnection)
     agent = ACPAgent(conn)
 
@@ -50,9 +51,10 @@ async def test_initialize_does_not_advertise_legacy_model_extensions(monkeypatch
 async def test_session_config_options_include_mode_and_model(monkeypatch, tmp_path: Path):
     monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "xdg"))
     monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setattr(model_registry, "USER_MODELS_FILE", tmp_path / "xdg" / "isaac" / "models.user.json")
     monkeypatch.setattr(
         model_registry,
-        "MODELS_FILE",
+        "LOCAL_MODELS_FILE",
         tmp_path / "xdg" / "isaac" / "models.json",
     )
     fn_model_id = model_registry.FUNCTION_MODEL_ID
@@ -72,8 +74,8 @@ async def test_session_config_options_include_mode_and_model(monkeypatch, tmp_pa
         },
     }
     monkeypatch.setattr(model_registry, "DEFAULT_CONFIG", minimal_config)
-    model_registry.MODELS_FILE.parent.mkdir(parents=True, exist_ok=True)
-    model_registry.MODELS_FILE.write_text(json.dumps(minimal_config), encoding="utf-8")
+    model_registry.LOCAL_MODELS_FILE.parent.mkdir(parents=True, exist_ok=True)
+    model_registry.LOCAL_MODELS_FILE.write_text(json.dumps(minimal_config), encoding="utf-8")
     conn = AsyncMock(spec=AgentSideConnection)
     agent = ACPAgent(conn)
     session = await agent.new_session(cwd=str(tmp_path), mcp_servers=[])
@@ -96,6 +98,7 @@ async def test_session_config_options_include_mode_and_model(monkeypatch, tmp_pa
 async def test_set_session_config_option_updates_mode(monkeypatch, tmp_path: Path):
     monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "xdg"))
     monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setattr(model_registry, "USER_MODELS_FILE", tmp_path / "xdg" / "isaac" / "models.user.json")
     conn = AsyncMock(spec=AgentSideConnection)
     agent = ACPAgent(conn)
     session = await agent.new_session(cwd=str(tmp_path), mcp_servers=[])

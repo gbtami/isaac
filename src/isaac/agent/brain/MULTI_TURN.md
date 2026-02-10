@@ -64,7 +64,7 @@ Token-Aware Compaction
 
 Compaction is triggered by token usage rather than raw message count.
 
-- The model context limit is read from `models.json` (or models.dev) using
+- The model context limit is read from `models.json` (with offline models.dev snapshot backfill) using
   `models.get_context_limit()`.
 - A compaction threshold is computed as `context_limit * 0.7`.
 - Isaac estimates history tokens and also uses provider `RunUsage` totals when

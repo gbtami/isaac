@@ -47,6 +47,17 @@ def _allowed_config_values(state: SessionUIState, key: str) -> list[str]:
     return sorted(state.config_option_values.get(key, set()))
 
 
+def _group_models_by_provider(model_ids: list[str]) -> dict[str, list[str]]:
+    grouped: dict[str, list[str]] = {}
+    for model_id in model_ids:
+        provider, sep, _rest = model_id.partition(":")
+        group_key = provider if sep else "other"
+        grouped.setdefault(group_key, []).append(model_id)
+    for provider in grouped:
+        grouped[provider] = sorted(grouped[provider])
+    return dict(sorted(grouped.items()))
+
+
 async def _pick_config_value(
     state: SessionUIState,
     *,
@@ -93,23 +104,68 @@ async def _handle_model(
     _permission_reset: Callable[[], None],
     argument: str,
 ) -> bool:
+    allowed = _allowed_config_values(state, MODEL_CONFIG_KEY)
+    providers = _group_models_by_provider(allowed)
     if argument:
         selection = argument.split()[0]
+        if allowed and selection not in allowed:
+            # Allow passing provider-only shorthand, then prompt model within provider.
+            provider_models = providers.get(selection)
+            if provider_models:
+                selector = state.select_option
+                if selector is None:
+                    print(f"[available models for {selection}: {', '.join(provider_models)}]")
+                    return True
+                picked = await selector(
+                    "model",
+                    provider_models,
+                    state.current_model if state.current_model in provider_models else provider_models[0],
+                )
+                if not picked:
+                    return True
+                selection = picked
+            else:
+                print(f"[unknown model: {selection}]")
+                return True
     else:
-        picked = await _pick_config_value(
-            state,
-            key=MODEL_CONFIG_KEY,
-            label="model",
-            current_value=state.current_model,
-        )
-        if not picked:
-            return True
-        selection = picked
+        selector = state.select_option
+        if selector is None:
+            picked = await _pick_config_value(
+                state,
+                key=MODEL_CONFIG_KEY,
+                label="model",
+                current_value=state.current_model,
+            )
+            if not picked:
+                return True
+            selection = picked
+        else:
+            current_provider = (state.current_model or "").partition(":")[0] or None
+            provider_ids = sorted(providers.keys())
+            chosen_provider = (
+                provider_ids[0]
+                if len(provider_ids) == 1
+                else await selector("provider", provider_ids, current_provider)
+            )
+            if not chosen_provider:
+                return True
+            provider_models = providers.get(chosen_provider)
+            if not provider_models:
+                print(f"[no models available for provider: {chosen_provider}]")
+                return True
+            picked = await selector(
+                "model",
+                provider_models,
+                state.current_model if state.current_model in provider_models else provider_models[0],
+            )
+            if not picked:
+                return True
+            selection = picked
 
-    allowed = _allowed_config_values(state, MODEL_CONFIG_KEY)
     if allowed and selection not in allowed:
         print(f"[unknown model: {selection}]")
         return True
+
     try:
         await set_session_config_option_value(conn, session_id, state, MODEL_CONFIG_KEY, selection)
         state.current_model = selection
