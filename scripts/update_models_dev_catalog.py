@@ -46,12 +46,28 @@ class ProviderMapping:
 PROVIDER_MAPPINGS: tuple[ProviderMapping, ...] = (
     ProviderMapping("openai", "openai", "OpenAI", excluded_substring="codex"),
     ProviderMapping("openai-codex", "openai", "OpenAI Codex (OAuth)", preferred_substring="codex"),
+    ProviderMapping("azure", "azure", "Azure OpenAI"),
+    ProviderMapping("alibaba", "alibaba", "Alibaba"),
+    ProviderMapping("bedrock", "amazon-bedrock", "Amazon Bedrock"),
     ProviderMapping("anthropic", "anthropic", "Anthropic"),
+    ProviderMapping("cohere", "cohere", "Cohere"),
+    ProviderMapping("deepseek", "deepseek", "DeepSeek"),
+    ProviderMapping("fireworks", "fireworks-ai", "Fireworks AI"),
+    ProviderMapping("github", "github-models", "GitHub Models"),
     ProviderMapping("google", "google", "Google", preferred_substring="gemini"),
+    ProviderMapping("google-vertex", "google-vertex", "Google Vertex"),
     ProviderMapping("code-assist", "google", "Google Code Assist (OAuth)", preferred_substring="gemini"),
+    ProviderMapping("groq", "groq", "Groq"),
+    ProviderMapping("huggingface", "huggingface", "Hugging Face"),
     ProviderMapping("mistral", "mistral", "Mistral"),
+    ProviderMapping("moonshotai", "moonshotai", "Moonshot AI"),
+    ProviderMapping("nebius", "nebius", "Nebius"),
     ProviderMapping("openrouter", "openrouter", "OpenRouter"),
+    ProviderMapping("ovhcloud", "ovhcloud", "OVHcloud"),
+    ProviderMapping("together", "togetherai", "Together"),
     ProviderMapping("cerebras", "cerebras", "Cerebras"),
+    ProviderMapping("vercel", "vercel", "Vercel AI Gateway"),
+    ProviderMapping("xai", "xai", "xAI"),
 )
 
 

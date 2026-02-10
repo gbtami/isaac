@@ -11,16 +11,20 @@ import inspect
 import json
 import logging
 import os
-import re
 import configparser
+import re
 from pathlib import Path
 from typing import Any, Callable, Dict
 
 import httpx
 from pydantic_ai.models import Model  # type: ignore
 from pydantic_ai.models.anthropic import AnthropicModel, AnthropicModelSettings  # type: ignore
+from pydantic_ai.models.bedrock import BedrockConverseModel  # type: ignore
 from pydantic_ai.models.cerebras import CerebrasModel  # type: ignore
+from pydantic_ai.models.cohere import CohereModel  # type: ignore
 from pydantic_ai.models.google import GoogleModel, GoogleModelSettings  # type: ignore
+from pydantic_ai.models.groq import GroqModel  # type: ignore
+from pydantic_ai.models.huggingface import HuggingFaceModel  # type: ignore
 from pydantic_ai.models.mistral import MistralModel  # type: ignore
 from pydantic_ai.models.openai import (  # type: ignore
     OpenAIChatModel,
@@ -30,15 +34,32 @@ from pydantic_ai.models.openai import (  # type: ignore
 )
 from pydantic_ai.models.openrouter import OpenRouterModel, OpenRouterModelSettings  # type: ignore
 from pydantic_ai.models.test import TestModel  # type: ignore
+from pydantic_ai.models.xai import XaiModel  # type: ignore
 from pydantic_ai.settings import ModelSettings  # type: ignore
 
+from pydantic_ai.providers.alibaba import AlibabaProvider  # type: ignore
 from pydantic_ai.providers.anthropic import AnthropicProvider  # type: ignore
+from pydantic_ai.providers.azure import AzureProvider  # type: ignore
+from pydantic_ai.providers.bedrock import BedrockProvider  # type: ignore
 from pydantic_ai.providers.cerebras import CerebrasProvider  # type: ignore
+from pydantic_ai.providers.cohere import CohereProvider  # type: ignore
+from pydantic_ai.providers.deepseek import DeepSeekProvider  # type: ignore
+from pydantic_ai.providers.fireworks import FireworksProvider  # type: ignore
+from pydantic_ai.providers.github import GitHubProvider  # type: ignore
 from pydantic_ai.providers.google import GoogleProvider  # type: ignore
+from pydantic_ai.providers.google_vertex import GoogleVertexProvider  # type: ignore
+from pydantic_ai.providers.groq import GroqProvider  # type: ignore
+from pydantic_ai.providers.huggingface import HuggingFaceProvider  # type: ignore
 from pydantic_ai.providers.mistral import MistralProvider  # type: ignore
+from pydantic_ai.providers.moonshotai import MoonshotAIProvider  # type: ignore
+from pydantic_ai.providers.nebius import NebiusProvider  # type: ignore
 from pydantic_ai.providers.ollama import OllamaProvider  # type: ignore
 from pydantic_ai.providers.openai import OpenAIProvider  # type: ignore
 from pydantic_ai.providers.openrouter import OpenRouterProvider  # type: ignore
+from pydantic_ai.providers.ovhcloud import OVHcloudProvider  # type: ignore
+from pydantic_ai.providers.together import TogetherProvider  # type: ignore
+from pydantic_ai.providers.vercel import VercelProvider  # type: ignore
+from pydantic_ai.providers.xai import XaiProvider  # type: ignore
 
 from isaac.agent.oauth.code_assist import CodeAssistModel
 from isaac.agent.oauth.openai_codex import (
@@ -342,20 +363,49 @@ def _build_provider_model(model_id: str, model_entry: Dict[str, Any]) -> tuple[M
     provider = (model_entry.get("provider") or "").lower()
     model_spec = model_entry.get("model") or "test"
     api_key = model_entry.get("api_key")
+    _ = model_id
 
     def _openai_model_supports_reasoning_effort(name: str) -> bool:
         # OpenAI "reasoning models" are currently named like `o1-*`, `o3-*`, `o4-*`, etc.
         return bool(re.match(r"^o\d", (name or "").strip().lower()))
 
+    def _resolve_api_key(provider_name: str, *env_names: str) -> str:
+        if isinstance(api_key, str) and api_key:
+            return api_key
+        for env_name in env_names:
+            value = os.getenv(env_name)
+            if value:
+                return value
+        required_names = " or ".join(env_names)
+        raise RuntimeError(f"{required_names} is required for {provider_name} models")
+
     if provider == "openai":
-        key = api_key or os.getenv("OPENAI_API_KEY")
-        if not key:
-            raise RuntimeError("OPENAI_API_KEY is required for openai models")
+        key = _resolve_api_key("openai", "OPENAI_API_KEY")
         provider_obj = _provider_with_http_client(OpenAIProvider, "openai", api_key=key)
         settings: OpenAIChatModelSettings | None = None
         if _openai_model_supports_reasoning_effort(str(model_spec)):
             settings = OpenAIChatModelSettings(openai_reasoning_effort="medium")
         return OpenAIChatModel(model_spec, provider=provider_obj), settings
+
+    if provider == "azure":
+        endpoint = model_entry.get("azure_endpoint") or os.getenv("AZURE_OPENAI_ENDPOINT")
+        api_version = model_entry.get("api_version") or os.getenv("OPENAI_API_VERSION")
+        if not endpoint:
+            raise RuntimeError("AZURE_OPENAI_ENDPOINT is required for azure models")
+        azure_key = api_key or os.getenv("AZURE_OPENAI_API_KEY")
+        provider_obj = _provider_with_http_client(
+            AzureProvider,
+            "azure",
+            azure_endpoint=endpoint,
+            api_version=api_version,
+            api_key=azure_key,
+        )
+        return OpenAIChatModel(str(model_spec), provider=provider_obj), None
+
+    if provider == "alibaba":
+        key = _resolve_api_key("alibaba", "ALIBABA_API_KEY", "DASHSCOPE_API_KEY")
+        provider_obj = _provider_with_http_client(AlibabaProvider, "alibaba", api_key=key)
+        return OpenAIChatModel(str(model_spec), provider=provider_obj), None
 
     if provider == "openai-codex":
         if not has_openai_tokens():
@@ -378,45 +428,103 @@ def _build_provider_model(model_id: str, model_entry: Dict[str, Any]) -> tuple[M
         return OpenAIResponsesModel(model_spec, provider=provider_obj), oauth_settings
 
     if provider == "anthropic":
-        key = api_key or os.getenv("ANTHROPIC_API_KEY")
-        if not key:
-            raise RuntimeError("ANTHROPIC_API_KEY is required for anthropic models")
+        key = _resolve_api_key("anthropic", "ANTHROPIC_API_KEY")
         provider_obj = _provider_with_http_client(AnthropicProvider, "anthropic", api_key=key)
         settings = AnthropicModelSettings(anthropic_thinking={"type": "enabled", "budget_tokens": 512})
         return AnthropicModel(model_spec, provider=provider_obj), settings
 
+    if provider == "bedrock":
+        provider_obj = _provider_with_http_client(BedrockProvider, "bedrock", api_key=api_key)
+        return BedrockConverseModel(str(model_spec), provider=provider_obj), None
+
+    if provider == "cohere":
+        key = _resolve_api_key("cohere", "CO_API_KEY")
+        provider_obj = _provider_with_http_client(CohereProvider, "cohere", api_key=key)
+        return CohereModel(str(model_spec), provider=provider_obj), None
+
+    if provider == "deepseek":
+        key = _resolve_api_key("deepseek", "DEEPSEEK_API_KEY")
+        provider_obj = _provider_with_http_client(DeepSeekProvider, "deepseek", api_key=key)
+        return OpenAIChatModel(str(model_spec), provider=provider_obj), None
+
+    if provider == "fireworks":
+        key = _resolve_api_key("fireworks", "FIREWORKS_API_KEY")
+        provider_obj = _provider_with_http_client(FireworksProvider, "fireworks", api_key=key)
+        return OpenAIChatModel(str(model_spec), provider=provider_obj), None
+
+    if provider == "github":
+        key = _resolve_api_key("github", "GITHUB_API_KEY")
+        provider_obj = _provider_with_http_client(GitHubProvider, "github", api_key=key)
+        return OpenAIChatModel(str(model_spec), provider=provider_obj), None
+
     if provider == "mistral":
-        key = api_key or os.getenv("MISTRAL_API_KEY")
-        if not key:
-            raise RuntimeError("MISTRAL_API_KEY is required for mistral models")
+        key = _resolve_api_key("mistral", "MISTRAL_API_KEY")
         provider_obj = _provider_with_http_client(MistralProvider, "mistral", api_key=key)
         return MistralModel(model_spec, provider=provider_obj), None
 
     if provider == "cerebras":
-        key = api_key or os.getenv("CEREBRAS_API_KEY")
-        if not key:
-            raise RuntimeError("CEREBRAS_API_KEY is required for cerebras models")
+        key = _resolve_api_key("cerebras", "CEREBRAS_API_KEY")
         provider_obj = _provider_with_http_client(CerebrasProvider, "cerebras", api_key=key)
         return CerebrasModel(model_spec, provider=provider_obj), None
 
     if provider == "google":
-        key = api_key or os.getenv("GOOGLE_API_KEY")
-        if not key:
-            raise RuntimeError("GOOGLE_API_KEY is required for google models")
+        key = _resolve_api_key("google", "GOOGLE_API_KEY", "GEMINI_API_KEY")
         provider_obj = _provider_with_http_client(GoogleProvider, "google", api_key=key)
         settings = GoogleModelSettings(google_thinking_config={"include_thoughts": True})
         return GoogleModel(model_spec, provider=provider_obj), settings
+
+    if provider == "google-vertex":
+        provider_obj = _provider_with_http_client(GoogleVertexProvider, "google-vertex")
+        settings = GoogleModelSettings(google_thinking_config={"include_thoughts": True})
+        return GoogleModel(str(model_spec), provider=provider_obj), settings
+
+    if provider == "groq":
+        key = _resolve_api_key("groq", "GROQ_API_KEY")
+        provider_obj = _provider_with_http_client(GroqProvider, "groq", api_key=key)
+        return GroqModel(str(model_spec), provider=provider_obj), None
+
+    if provider == "huggingface":
+        key = _resolve_api_key("huggingface", "HF_TOKEN")
+        provider_obj = _provider_with_http_client(HuggingFaceProvider, "huggingface", api_key=key)
+        return HuggingFaceModel(str(model_spec), provider=provider_obj), None
+
+    if provider == "moonshotai":
+        key = _resolve_api_key("moonshotai", "MOONSHOTAI_API_KEY")
+        provider_obj = _provider_with_http_client(MoonshotAIProvider, "moonshotai", api_key=key)
+        return OpenAIChatModel(str(model_spec), provider=provider_obj), None
+
+    if provider == "nebius":
+        key = _resolve_api_key("nebius", "NEBIUS_API_KEY")
+        provider_obj = _provider_with_http_client(NebiusProvider, "nebius", api_key=key)
+        return OpenAIChatModel(str(model_spec), provider=provider_obj), None
 
     if provider == "code-assist":
         return CodeAssistModel(str(model_spec)), None
 
     if provider == "openrouter":
-        key = api_key or os.getenv("OPENROUTER_API_KEY")
-        if not key:
-            raise RuntimeError("OPENROUTER_API_KEY is required for openrouter models")
+        key = _resolve_api_key("openrouter", "OPENROUTER_API_KEY")
         provider_obj = _provider_with_http_client(OpenRouterProvider, "openrouter", api_key=key)
         settings = OpenRouterModelSettings(openrouter_reasoning={"effort": "medium"})
         return OpenRouterModel(model_spec, provider=provider_obj), settings
+
+    if provider == "ovhcloud":
+        key = _resolve_api_key("ovhcloud", "OVHCLOUD_API_KEY")
+        provider_obj = _provider_with_http_client(OVHcloudProvider, "ovhcloud", api_key=key)
+        return OpenAIChatModel(str(model_spec), provider=provider_obj), None
+
+    if provider == "together":
+        key = _resolve_api_key("together", "TOGETHER_API_KEY")
+        provider_obj = _provider_with_http_client(TogetherProvider, "together", api_key=key)
+        return OpenAIChatModel(str(model_spec), provider=provider_obj), None
+
+    if provider == "vercel":
+        provider_obj = _provider_with_http_client(VercelProvider, "vercel", api_key=api_key)
+        return OpenAIChatModel(str(model_spec), provider=provider_obj), None
+
+    if provider == "xai":
+        key = _resolve_api_key("xai", "XAI_API_KEY")
+        provider_obj = _provider_with_http_client(XaiProvider, "xai", api_key=key)
+        return XaiModel(str(model_spec), provider=provider_obj), None
 
     if provider == "ollama":
         # Force JSON mode so local models emit parseable tool payloads.

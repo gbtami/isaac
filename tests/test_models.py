@@ -135,3 +135,49 @@ def test_openrouter_reasoning_enabled_by_default(monkeypatch: pytest.MonkeyPatch
     )
     assert isinstance(settings, dict)
     assert settings.get("openrouter_reasoning") == {"effort": "medium"}
+
+
+def test_google_uses_gemini_api_key_fallback(monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.delenv("GOOGLE_API_KEY", raising=False)
+    monkeypatch.setenv("GEMINI_API_KEY", "test")
+    _model, settings = model_registry._build_provider_model(  # type: ignore[attr-defined]
+        "google:gemini-2.5-pro",
+        {"provider": "google", "model": "gemini-2.5-pro"},
+    )
+    assert isinstance(settings, dict)
+    assert settings.get("google_thinking_config") == {"include_thoughts": True}
+
+
+def test_azure_requires_endpoint(monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.delenv("AZURE_OPENAI_ENDPOINT", raising=False)
+    with pytest.raises(RuntimeError, match="AZURE_OPENAI_ENDPOINT"):
+        model_registry._build_provider_model(  # type: ignore[attr-defined]
+            "azure:gpt-4.1",
+            {"provider": "azure", "model": "gpt-4.1"},
+        )
+
+
+@pytest.mark.parametrize(
+    ("provider", "required_env"),
+    [
+        ("alibaba", "ALIBABA_API_KEY"),
+        ("cohere", "CO_API_KEY"),
+        ("deepseek", "DEEPSEEK_API_KEY"),
+        ("fireworks", "FIREWORKS_API_KEY"),
+        ("github", "GITHUB_API_KEY"),
+        ("groq", "GROQ_API_KEY"),
+        ("huggingface", "HF_TOKEN"),
+        ("moonshotai", "MOONSHOTAI_API_KEY"),
+        ("nebius", "NEBIUS_API_KEY"),
+        ("ovhcloud", "OVHCLOUD_API_KEY"),
+        ("together", "TOGETHER_API_KEY"),
+        ("xai", "XAI_API_KEY"),
+    ],
+)
+def test_new_provider_branches_require_expected_env(monkeypatch: pytest.MonkeyPatch, provider: str, required_env: str):
+    monkeypatch.delenv(required_env, raising=False)
+    with pytest.raises(RuntimeError, match=required_env):
+        model_registry._build_provider_model(  # type: ignore[attr-defined]
+            f"{provider}:test-model",
+            {"provider": provider, "model": "test-model"},
+        )

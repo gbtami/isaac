@@ -54,3 +54,30 @@ async def test_context_limit_applied_from_offline_snapshot(monkeypatch, tmp_path
     config = model_registry.load_models_config()
     entry = config["models"]["openai:gpt-4o-mini"]
     assert entry.get("context_limit") == 128000
+
+
+def test_offline_catalog_contains_newly_supported_providers():
+    catalog = json.loads(model_registry.MODELS_DEV_CATALOG_FILE.read_text(encoding="utf-8"))
+    providers = catalog.get("providers", {})
+    for provider in (
+        "alibaba",
+        "azure",
+        "bedrock",
+        "cohere",
+        "deepseek",
+        "fireworks",
+        "github",
+        "google-vertex",
+        "groq",
+        "huggingface",
+        "moonshotai",
+        "nebius",
+        "ovhcloud",
+        "together",
+        "vercel",
+        "xai",
+    ):
+        assert provider in providers
+        models = providers[provider].get("models", [])
+        assert isinstance(models, list)
+        assert models
