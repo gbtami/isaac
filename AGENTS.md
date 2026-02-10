@@ -18,7 +18,7 @@ isaac ships both an ACP agent and an ACP client. The agent (`isaac.agent`) imple
 ## Project Setup
 This project uses `uv` for environment and project management.
 - Install dependencies: `uv pip install -e .`
-- Refresh offline models.dev snapshot + generated model catalog: `uv run python scripts/update_models_dev_catalog.py --top-per-provider 8`
+- Refresh offline models.dev snapshot + generated model catalog: `uv run python scripts/update_models_dev_catalog.py --top-per-provider 25`
 
 ## Cross-client Testing (install to user site)
 To test isaac with other ACP clients after code changes without bumping the version install isaac to your user site and run it from there:

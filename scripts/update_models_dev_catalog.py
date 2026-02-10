@@ -233,13 +233,13 @@ def main() -> int:
     parser.add_argument(
         "--top-per-provider",
         type=int,
-        default=8,
-        help="Maximum number of models to keep per supported provider (default: 8).",
+        default=25,
+        help="Maximum number of models to keep per supported provider (default: 25).",
     )
     args = parser.parse_args()
 
-    if args.top_per_provider < 1 or args.top_per_provider > 20:
-        raise SystemExit("--top-per-provider must be between 1 and 20.")
+    if args.top_per_provider < 1 or args.top_per_provider > 25:
+        raise SystemExit("--top-per-provider must be between 1 and 25.")
 
     raw = _download_models_dev()
     catalog = _build_catalog(raw, args.top_per_provider)
