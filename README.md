@@ -1,5 +1,7 @@
 # 🍏 Isaac ACP🍏 (`isaac-acp`)
 
+[![PyPI version](https://img.shields.io/pypi/v/isaac-acp)](https://pypi.org/project/isaac-acp/)
+
 Isaac is an ACP-compliant coding agent and reference CLI client.
 
 - Agent implementation: `isaac.agent`
