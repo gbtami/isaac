@@ -1,6 +1,8 @@
 # 🍏 Isaac ACP🍏 (`isaac-acp`)
 
 [![PyPI version](https://img.shields.io/pypi/v/isaac-acp)](https://pypi.org/project/isaac-acp/)
+[![Lint](https://github.com/gbtami/isaac/actions/workflows/lint.yml/badge.svg)](https://github.com/gbtami/isaac/actions/workflows/lint.yml)
+[![Tests](https://github.com/gbtami/isaac/actions/workflows/test.yml/badge.svg)](https://github.com/gbtami/isaac/actions/workflows/test.yml)
 
 Isaac is an ACP-compliant coding agent and reference CLI client.
 
