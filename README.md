@@ -1,4 +1,4 @@
-# Isaac ACP (`isaac-acp`)
+# 🍏 Isaac ACP🍏 (`isaac-acp`)
 
 Isaac is an ACP-compliant coding agent and reference CLI client.
 
@@ -6,6 +6,7 @@ Isaac is an ACP-compliant coding agent and reference CLI client.
 - Client REPL implementation: `isaac.client`
 - Protocol: [Agent Client Protocol (ACP)](https://agentclientprotocol.com/protocol/)
 
+> Since Newton discovered gravity, everything's been going downhill.
 ## Installation
 
 ```bash
