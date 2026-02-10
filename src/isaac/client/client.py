@@ -64,7 +64,7 @@ async def run_client(program: str, args: Iterable[str], mcp_servers: list[Any]) 
             fs=FileSystemCapability(read_text_file=False, write_text_file=False),
             terminal=True,
         ),
-        client_info=Implementation(name="example-client", title="Example Client", version="0.1.0"),
+        client_info=Implementation(name="example-client", title="Example Client", version="0.1.1"),
     )
     if init_resp.protocol_version != PROTOCOL_VERSION:
         print(

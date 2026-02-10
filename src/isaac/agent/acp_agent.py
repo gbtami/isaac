@@ -49,7 +49,7 @@ class ACPAgent(
         *,
         agent_name: str = "isaac",
         agent_title: str = "Isaac ACP Agent",
-        agent_version: str = "0.1.0",
+        agent_version: str = "0.1.1",
     ) -> None:
         self._conn: AgentSideConnection | None = conn
         self._sessions: set[str] = set()

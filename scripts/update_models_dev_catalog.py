@@ -17,7 +17,7 @@ from pathlib import Path
 from typing import Any
 
 MODELS_DEV_URL = "https://models.dev/api.json"
-USER_AGENT = "isaac-acp/0.1 (+https://github.com/gbtami/isaac)"
+USER_AGENT = "isaac-acp/0.1.1 (+https://github.com/gbtami/isaac)"
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 SNAPSHOT_FILE = REPO_ROOT / "src" / "isaac" / "agent" / "data" / "models_dev_api.json"
