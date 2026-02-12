@@ -1,4 +1,4 @@
-# 🍏 Isaac ACP🍏 (`isaac-acp`)
+# 🍏 Isaac ACP 🍏 (`isaac-acp`)
 
 [![PyPI version](https://img.shields.io/pypi/v/isaac-acp)](https://pypi.org/project/isaac-acp/)
 [![Lint](https://github.com/gbtami/isaac/actions/workflows/lint.yml/badge.svg)](https://github.com/gbtami/isaac/actions/workflows/lint.yml)
