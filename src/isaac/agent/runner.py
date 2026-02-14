@@ -10,6 +10,7 @@ import logging
 from typing import Any, Callable, Protocol, Sequence
 
 import httpx
+from pydantic_ai import DeferredToolRequests, DeferredToolResults, ToolApproved, ToolDenied  # type: ignore
 from pydantic_ai import exceptions as ai_exc  # type: ignore
 from pydantic_ai import messages as ai_messages  # type: ignore
 
@@ -32,7 +33,11 @@ class StreamRunner(Protocol):
     """Protocol for pydantic-ai runners that stream events."""
 
     def run_stream_events(
-        self, prompt_text: str, *, message_history: Sequence[ai_messages.ModelMessage] | None = None
+        self,
+        prompt_text: str | None,
+        *,
+        message_history: Sequence[ai_messages.ModelMessage] | None = None,
+        deferred_tool_results: DeferredToolResults | None = None,
     ) -> Any: ...
 
 
@@ -47,6 +52,9 @@ async def stream_with_runner(
     on_event: Callable[[Any], asyncio.Future | bool | None] | None = None,
     store_messages: Callable[[Any], None] | None = None,
     log_context: str | None = None,
+    request_tool_approval: Callable[[str, str, dict[str, Any]], asyncio.Future | bool] | None = None,
+    usage_limits: Any | None = None,
+    metadata: dict[str, Any] | None = None,
 ) -> tuple[str | None, Any | None]:
     """Stream responses using the runner's streaming API.
 
@@ -64,23 +72,6 @@ async def stream_with_runner(
 
     output_parts: list[str] = []
     usage = None
-
-    def _sanitize_history(raw_history: Sequence[ChatMessage] | None) -> list[ChatMessage] | None:
-        """Drop invalid/empty history messages to avoid provider 400s."""
-
-        cleaned: list[ChatMessage] = []
-        if raw_history is None:
-            return None
-        for msg in raw_history:
-            role = msg.get("role")
-            content = msg.get("content")
-            if not role or content is None:
-                continue
-            content_str = str(content).strip()
-            if content_str == "":
-                continue
-            cleaned.append({"role": str(role), "content": content_str})
-        return cleaned if cleaned else None
 
     def _convert_to_model_messages(
         raw_history: Sequence[ChatMessage] | None,
@@ -104,201 +95,227 @@ async def stream_with_runner(
                 messages.append(ai_messages.ModelRequest(parts=[ai_messages.UserPromptPart(content=text)]))
         return messages or None
 
-    def _model_messages_to_chat_history(
-        raw_history: Sequence[ai_messages.ModelMessage],
-    ) -> list[ChatMessage]:
-        """Convert pydantic-ai model messages into role/content chat history.
+    async def _resolve_deferred_tool_results(requests: DeferredToolRequests) -> DeferredToolResults:
+        approvals: dict[str, ToolApproved | ToolDenied] = {}
+        for approval in requests.approvals:
+            tool_name = str(getattr(approval, "tool_name", "") or "")
+            tool_call_id = str(getattr(approval, "tool_call_id", "") or "")
+            raw_args = getattr(approval, "args", None)
+            args = dict(raw_args) if isinstance(raw_args, dict) else {}
+            allowed = False
+            if request_tool_approval is None:
+                allowed = False
+            elif asyncio.iscoroutinefunction(request_tool_approval):
+                allowed = bool(await request_tool_approval(tool_call_id, tool_name, args))
+            else:
+                maybe_allowed = request_tool_approval(tool_call_id, tool_name, args)
+                if inspect.isawaitable(maybe_allowed):
+                    allowed = bool(await maybe_allowed)
+                else:
+                    allowed = bool(maybe_allowed)
+            approvals[tool_call_id] = ToolApproved() if allowed else ToolDenied("permission denied")
+        return DeferredToolResults(approvals=approvals, metadata=requests.metadata or {})
 
-        This preserves user/assistant text while avoiding tool-call metadata
-        that some providers reject when the history is truncated.
-        """
-
-        chat_history: list[ChatMessage] = []
-        for message in raw_history:
-            if isinstance(message, dict):
-                role = message.get("role")
-                content = message.get("content")
-                if role and content is not None:
-                    chat_history.append({"role": str(role), "content": str(content)})
-                continue
-            if isinstance(message, ai_messages.ModelRequest):
-                for part in getattr(message, "parts", ()) or ():
-                    if isinstance(part, ai_messages.SystemPromptPart):
-                        chat_history.append({"role": "system", "content": str(part.content)})
-                    elif isinstance(part, ai_messages.UserPromptPart):
-                        chat_history.append({"role": "user", "content": str(part.content)})
-            elif isinstance(message, ai_messages.ModelResponse):
-                for part in getattr(message, "parts", ()) or ():
-                    if isinstance(part, ai_messages.TextPart):
-                        chat_history.append({"role": "assistant", "content": str(part.content)})
-        return chat_history
+    def _run_stream_events(
+        prompt: str | None,
+        *,
+        message_history: list[ai_messages.ModelMessage] | None,
+        deferred_results: DeferredToolResults | None,
+    ) -> Any:
+        kwargs: dict[str, Any] = {}
+        if message_history is not None:
+            kwargs["message_history"] = message_history
+        if deferred_results is not None:
+            kwargs["deferred_tool_results"] = deferred_results
+        if usage_limits is not None:
+            kwargs["usage_limits"] = usage_limits
+        if metadata is not None:
+            kwargs["metadata"] = metadata
+        try:
+            return runner.run_stream_events(prompt, **kwargs)
+        except TypeError:
+            kwargs.pop("metadata", None)
+            kwargs.pop("usage_limits", None)
+            kwargs.pop("deferred_tool_results", None)
+            return runner.run_stream_events(prompt, **kwargs)
 
     event_iter = None
+    safe_history: list[ai_messages.ModelMessage] | None = None
+    deferred_tool_results: DeferredToolResults | None = None
+    next_prompt: str | None = prompt_text
+    history_list = list(history) if history is not None else None
+    if history_list is not None:
+        history_preview = None
+        try:
+            history_preview = json.dumps(history_list)[:HISTORY_LOG_MAX]
+        except Exception:
+            history_preview = str(history_list)[:HISTORY_LOG_MAX]
+        log_event(
+            logger,
+            "llm.history.raw",
+            level=logging.DEBUG,
+            history_preview=history_preview,
+            history_len=len(history_list),
+        )
+        model_types = (ai_messages.ModelRequest, ai_messages.ModelResponse)
+        if history_list and any(isinstance(msg, model_types) for msg in history_list):
+            safe_history = list(history_list)
+        else:
+            safe_history = _convert_to_model_messages(history_list)
+        sanitized_preview = None
+        try:
+            sanitized_preview = json.dumps(safe_history)[:HISTORY_LOG_MAX]
+        except Exception:
+            sanitized_preview = str(safe_history)[:HISTORY_LOG_MAX]
+        log_event(
+            logger,
+            "llm.history.sanitized",
+            level=logging.DEBUG,
+            history_preview=sanitized_preview,
+            history_len=len(safe_history) if isinstance(safe_history, list) else None,
+        )
     try:
         thought_delta_buffer: list[str] = []
-        history_list = list(history) if history is not None else None
-        if history_list is not None:
-            history_preview = None
-            try:
-                history_preview = json.dumps(history_list)[:HISTORY_LOG_MAX]
-            except Exception:
-                history_preview = str(history_list)[:HISTORY_LOG_MAX]
-            log_event(
-                logger,
-                "llm.history.raw",
-                level=logging.DEBUG,
-                history_preview=history_preview,
-                history_len=len(history_list),
+        while True:
+            event_iter = None
+            event_iter = _run_stream_events(
+                next_prompt,
+                message_history=safe_history,
+                deferred_results=deferred_tool_results,
             )
-            safe_history: list[ai_messages.ModelMessage] | None
-            if history_list:
-                model_types = (ai_messages.ModelRequest, ai_messages.ModelResponse)
-                if any(isinstance(msg, model_types) for msg in history_list):
-                    chat_history = _model_messages_to_chat_history(history_list)
-                    sanitized = _sanitize_history(chat_history)
-                    safe_history = _convert_to_model_messages(sanitized)
-                else:
-                    sanitized = _sanitize_history(history_list)
-                    safe_history = _convert_to_model_messages(sanitized)
-            else:
-                sanitized = _sanitize_history(None)
-                safe_history = _convert_to_model_messages(sanitized)
-            sanitized_preview = None
-            try:
-                sanitized_preview = json.dumps(sanitized)[:HISTORY_LOG_MAX]
-            except Exception:
-                sanitized_preview = str(sanitized)[:HISTORY_LOG_MAX]
-            log_event(
-                logger,
-                "llm.history.sanitized",
-                level=logging.DEBUG,
-                history_preview=sanitized_preview,
-                history_len=len(sanitized) if isinstance(sanitized, list) else None,
-            )
-            event_iter = runner.run_stream_events(prompt_text, message_history=safe_history)
-        if event_iter is None:
-            event_iter = runner.run_stream_events(prompt_text)
-        if asyncio.iscoroutine(event_iter):
-            event_iter = await event_iter
-        async for event in event_iter:
-            if cancel_event.is_set():
-                closer = getattr(event_iter, "aclose", None)
-                if callable(closer):
-                    with contextlib.suppress(Exception):
-                        await closer()
-                return None, usage
+            next_prompt = None
+            deferred_tool_results = None
+            if asyncio.iscoroutine(event_iter):
+                event_iter = await event_iter
 
-            handled = False
-            if on_event is not None:
-                if asyncio.iscoroutinefunction(on_event):
-                    handled = bool(await on_event(event))
-                else:
-                    maybe = on_event(event)
-                    if inspect.isawaitable(maybe):
-                        handled = bool(await maybe)
+            continue_after_approval = False
+            async for event in event_iter:
+                if cancel_event.is_set():
+                    closer = getattr(event_iter, "aclose", None)
+                    if callable(closer):
+                        with contextlib.suppress(Exception):
+                            await closer()
+                    return None, usage
+
+                handled = False
+                if on_event is not None:
+                    if asyncio.iscoroutinefunction(on_event):
+                        handled = bool(await on_event(event))
                     else:
-                        handled = bool(maybe)
+                        maybe = on_event(event)
+                        if inspect.isawaitable(maybe):
+                            handled = bool(await maybe)
+                        else:
+                            handled = bool(maybe)
 
-            if handled:
-                continue
+                if handled:
+                    continue
 
-            if isinstance(event, str):
-                output_parts.append(event)
-                if log_chunks_enabled():
-                    log_event(
-                        logger,
-                        "llm.stream.text",
-                        level=logging.DEBUG,
-                        chunk_preview=event[:200].replace("\n", "\\n"),
-                    )
-                    log_event(logger, "llm.stream.text.raw", level=logging.DEBUG, chunk=event)
-                await on_text(event)
-                continue
-            if isinstance(event, PartDeltaEvent):
-                if isinstance(event.delta, ThinkingPartDelta):
-                    delta = getattr(event.delta, "content_delta", None)
-                    if delta:
-                        # stream_logger.info("LLM thinking delta=%s", str(delta)[:200].replace("\n", "\\n"))
-                        # llm_logger.info("RECV thinking delta\n%s", delta)
-                        thought_delta_buffer.append(str(delta))
-                elif isinstance(event.delta, TextPartDelta):
-                    delta = getattr(event.delta, "content_delta", "")
-                    if delta:
-                        output_parts.append(delta)
-                        # stream_logger.info("LLM delta=%s", delta[:200].replace("\n", "\\n"))
-                        # llm_logger.info("RECV delta\n%s", delta)
-                        await on_text(delta)
-            elif isinstance(event, PartEndEvent):
-                kind = getattr(event.part, "part_kind", "")
-                if kind and kind not in {"text", "thinking"}:
+                if isinstance(event, str):
+                    output_parts.append(event)
                     if log_chunks_enabled():
                         log_event(
                             logger,
-                            "llm.stream.part_end.unknown",
+                            "llm.stream.text",
                             level=logging.DEBUG,
-                            kind=kind,
-                            content=getattr(event.part, "content", None),
+                            chunk_preview=event[:200].replace("\n", "\\n"),
                         )
-                part = getattr(event.part, "content", "")
-                if kind == "thinking" and on_thought is not None:
-                    final_thought = str(part) if part else "".join(thought_delta_buffer)
-                    thought_delta_buffer.clear()
-                    if final_thought:
+                        log_event(logger, "llm.stream.text.raw", level=logging.DEBUG, chunk=event)
+                    await on_text(event)
+                    continue
+                if isinstance(event, PartDeltaEvent):
+                    if isinstance(event.delta, ThinkingPartDelta):
+                        delta = getattr(event.delta, "content_delta", None)
+                        if delta:
+                            thought_delta_buffer.append(str(delta))
+                    elif isinstance(event.delta, TextPartDelta):
+                        delta = getattr(event.delta, "content_delta", "")
+                        if delta:
+                            output_parts.append(delta)
+                            await on_text(delta)
+                elif isinstance(event, PartEndEvent):
+                    kind = getattr(event.part, "part_kind", "")
+                    if kind and kind not in {"text", "thinking"}:
                         if log_chunks_enabled():
                             log_event(
                                 logger,
-                                "llm.stream.thinking",
+                                "llm.stream.part_end.unknown",
                                 level=logging.DEBUG,
-                                thought_preview=final_thought[:200].replace("\n", "\\n"),
+                                kind=kind,
+                                content=getattr(event.part, "content", None),
                             )
+                    part = getattr(event.part, "content", "")
+                    if kind == "thinking" and on_thought is not None:
+                        final_thought = str(part) if part else "".join(thought_delta_buffer)
+                        thought_delta_buffer.clear()
+                        if final_thought:
+                            if log_chunks_enabled():
+                                log_event(
+                                    logger,
+                                    "llm.stream.thinking",
+                                    level=logging.DEBUG,
+                                    thought_preview=final_thought[:200].replace("\n", "\\n"),
+                                )
+                                log_event(
+                                    logger,
+                                    "llm.stream.thinking.raw",
+                                    level=logging.DEBUG,
+                                    thought=final_thought,
+                                )
+                            await on_thought(final_thought)
+                    elif part and not output_parts:
+                        output_parts.append(part)
+                        if log_chunks_enabled():
                             log_event(
                                 logger,
-                                "llm.stream.thinking.raw",
+                                "llm.stream.part_end",
                                 level=logging.DEBUG,
-                                thought=final_thought,
+                                part_preview=str(part)[:200].replace("\n", "\\n"),
                             )
-                        await on_thought(final_thought)
-                elif part and not output_parts:
-                    output_parts.append(part)
-                    if log_chunks_enabled():
-                        log_event(
-                            logger,
-                            "llm.stream.part_end",
-                            level=logging.DEBUG,
-                            part_preview=str(part)[:200].replace("\n", "\\n"),
-                        )
-                        log_event(logger, "llm.stream.part_end.raw", level=logging.DEBUG, part=part)
-                    await on_text(part)
-            elif isinstance(event, AgentRunResultEvent):
-                result = event.result
-                full = result.output
-                usage = getattr(result, "usage", None)
-                log_event(
-                    logger,
-                    "llm.stream.final",
-                    output_preview=str(full)[:200].replace("\n", "\\n"),
-                )
-                log_event(logger, "llm.stream.final.raw", level=logging.DEBUG, output=full)
-                try:
-                    msgs = result.new_messages()
+                            log_event(logger, "llm.stream.part_end.raw", level=logging.DEBUG, part=part)
+                        await on_text(part)
+                elif isinstance(event, AgentRunResultEvent):
+                    result = event.result
+                    full = result.output
+                    usage = getattr(result, "usage", None)
                     log_event(
                         logger,
-                        "llm.model_messages",
-                        level=logging.DEBUG,
-                        messages_preview=str(msgs)[:HISTORY_LOG_MAX],
+                        "llm.stream.final",
+                        output_preview=str(full)[:200].replace("\n", "\\n"),
                     )
-                    if store_messages is not None:
-                        with contextlib.suppress(Exception):
-                            store_messages(msgs)
-                except Exception:
-                    pass
-                try:
-                    full_text = "" if full is None else str(full)
-                    if not output_parts:
-                        await on_text(full_text)
-                except Exception:
-                    pass
-                return str(full), usage
+                    log_event(logger, "llm.stream.final.raw", level=logging.DEBUG, output=full)
+                    try:
+                        msgs = list(result.new_messages())
+                        log_event(
+                            logger,
+                            "llm.model_messages",
+                            level=logging.DEBUG,
+                            messages_preview=str(msgs)[:HISTORY_LOG_MAX],
+                        )
+                        if store_messages is not None:
+                            with contextlib.suppress(Exception):
+                                store_messages(msgs)
+                    except Exception:
+                        msgs = []
+                    if isinstance(full, DeferredToolRequests):
+                        deferred_tool_results = await _resolve_deferred_tool_results(full)
+                        if safe_history:
+                            safe_history = [*safe_history, *msgs]
+                        elif msgs:
+                            safe_history = msgs
+                        continue_after_approval = True
+                        break
+                    try:
+                        full_text = "" if full is None else str(full)
+                        if not output_parts:
+                            await on_text(full_text)
+                    except Exception:
+                        pass
+                    return str(full), usage
+
+            if continue_after_approval:
+                continue
+            break
     except (ai_exc.ModelRetry, ai_exc.UnexpectedModelBehavior) as exc:
         msg = str(exc)
         log_event(logger, "llm.stream.validation_failure", level=logging.WARNING, error=msg)

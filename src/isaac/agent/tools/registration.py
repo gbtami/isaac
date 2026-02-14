@@ -58,9 +58,23 @@ def _register_toolset(
     }
     for name, timeout in DELEGATE_TOOL_TIMEOUTS.items():
         tool_map[name] = (registrar.delegate_tool(name), timeout)
+    mutating_tools = {"run_command", "edit_file", "apply_patch"}
     for name in tools:
         func, timeout = tool_map[name]
-        agent.tool(name=name, timeout=timeout)(func)  # type: ignore[misc]
+        requires_approval = name == "run_command"
+        is_delegate = name in DELEGATE_TOOL_TIMEOUTS
+        metadata = {
+            "tool_group": "delegate" if is_delegate else "core",
+            "mutates_state": name in mutating_tools,
+        }
+        agent.tool(
+            name=name,
+            timeout=timeout,
+            strict=True,
+            sequential=(name in mutating_tools) or is_delegate,
+            requires_approval=requires_approval,
+            metadata=metadata,
+        )(func)  # type: ignore[misc]
 
 
 class _ToolRegistrar:

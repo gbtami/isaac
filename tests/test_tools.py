@@ -17,9 +17,10 @@ from isaac.agent.tools.file_summary import file_summary
 from isaac.agent.tools.list_files import list_files
 from isaac.agent.tools.read_file import read_file
 from isaac.agent.tools import TOOL_HANDLERS, run_tool
-from isaac.agent.tools.run_command import get_run_command_permission, run_command
+from isaac.agent.tools.run_command import run_command
 from tests.utils import make_function_agent
 from pydantic_ai import Agent as PydanticAgent  # type: ignore
+from pydantic_ai import DeferredToolRequests  # type: ignore
 from pydantic_ai.models.test import TestModel  # type: ignore
 from isaac.agent import ACPAgent
 import httpx
@@ -165,8 +166,6 @@ async def test_model_tool_call_requests_permission(monkeypatch: pytest.MonkeyPat
     async def fake_run_command(
         ctx: Any = None, command: str = "", cwd: str | None = None, timeout: float | None = None
     ):
-        if get_run_command_permission(getattr(ctx, "tool_call_id", None)) is False:
-            return {"content": None, "error": "permission denied", "returncode": -1}
         calls.append({"command": command, "cwd": cwd, "timeout": timeout})
         return {"content": "ok", "error": None, "returncode": 0}
 
@@ -174,7 +173,7 @@ async def test_model_tool_call_requests_permission(monkeypatch: pytest.MonkeyPat
     monkeypatch.setitem(TOOL_HANDLERS, "run_command", fake_run_command)
 
     model = TestModel(call_tools=["run_command"], custom_output_text="done")
-    ai_runner = PydanticAgent(model)
+    ai_runner = PydanticAgent(model, output_type=[str, DeferredToolRequests])
     register_tools(ai_runner)
     from isaac.agent.brain import session_ops
 
@@ -208,8 +207,6 @@ async def test_model_run_command_denied_blocks_execution(monkeypatch: pytest.Mon
     async def fake_run_command(
         ctx: Any = None, command: str = "", cwd: str | None = None, timeout: float | None = None
     ):
-        if get_run_command_permission(getattr(ctx, "tool_call_id", None)) is False:
-            return {"content": None, "error": "permission denied", "returncode": -1}
         calls.append({"command": command, "cwd": cwd, "timeout": timeout})
         return {"content": "ok", "error": None, "returncode": 0}
 
@@ -217,7 +214,7 @@ async def test_model_run_command_denied_blocks_execution(monkeypatch: pytest.Mon
     monkeypatch.setitem(TOOL_HANDLERS, "run_command", fake_run_command)
 
     model = TestModel(call_tools=["run_command"], custom_output_text="done")
-    ai_runner = PydanticAgent(model)
+    ai_runner = PydanticAgent(model, output_type=[str, DeferredToolRequests])
     register_tools(ai_runner)
     from isaac.agent.brain import session_ops
 

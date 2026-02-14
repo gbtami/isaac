@@ -17,7 +17,7 @@ def test_plan_parser_handles_steps_list_line():
 
 
 @pytest.mark.asyncio
-async def test_run_command_permission_includes_string_args():
+async def test_run_command_tool_start_includes_string_args():
     noop = AsyncMock()
     send_tool_start = AsyncMock()
     request_perm = AsyncMock(return_value=True)
@@ -44,8 +44,7 @@ async def test_run_command_permission_includes_string_args():
     event = FunctionToolCallEvent(part=ToolCallPart(tool_name="run_command", args="echo hi"))
     await handler(event)
 
-    request_perm.assert_awaited_once()
-    assert request_perm.await_args.kwargs["command"] == "echo hi"
+    request_perm.assert_not_awaited()
 
     send_tool_start.assert_awaited_once()
     call = send_tool_start.await_args

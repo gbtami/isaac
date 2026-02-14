@@ -13,13 +13,6 @@ from isaac.agent.brain.events import ToolCallFinish, ToolCallStart
 from isaac.agent.brain.tool_events import should_record_tool_history, tool_history_summary, tool_kind
 from isaac.agent.brain.tool_args import coerce_tool_args
 from isaac.log_utils import log_event
-from isaac.agent.tools.run_command import (
-    RunCommandContext,
-    pop_run_command_permission,
-    reset_run_command_context,
-    set_run_command_context,
-    set_run_command_permission,
-)
 
 logger = logging.getLogger(__name__)
 
@@ -66,11 +59,13 @@ class PromptRunner:
     def _build_runner_event_handler(
         self,
         session_id: str,
-        run_command_ctx_tokens: Dict[str, Any],
+        run_command_ctx_tokens: Dict[str, Any] | None = None,
         plan_progress: dict[str, Any] | None = None,
         record_history: Callable[[ChatMessage], None] | None = None,
     ) -> Callable[[Any], Awaitable[bool]]:
         tool_call_inputs: Dict[str, Dict[str, Any]] = {}
+        started_tool_calls: set[str] = set()
+        _ = run_command_ctx_tokens
 
         async def _handle_runner_event(event: Any) -> bool:
             if isinstance(event, FunctionToolCallEvent):
@@ -91,49 +86,16 @@ class PromptRunner:
                     kind=tool_kind(tool_name),
                     raw_input={"tool": tool_name, **args},
                 )
-                await self.env.send_tool_start(session_id, start)
+                if event.tool_call_id not in started_tool_calls:
+                    await self.env.send_tool_start(session_id, start)
+                    started_tool_calls.add(event.tool_call_id)
                 tool_call_inputs[event.tool_call_id] = args
-                if tool_name == "run_command":
-                    allowed = True
-                    mode = self.env.session_modes.get(session_id, "ask")
-                    if mode == "ask":
-                        allowed = await self.env.request_run_permission(
-                            session_id=session_id,
-                            tool_call_id=event.tool_call_id,
-                            command=str(args.get("command") or ""),
-                            cwd=args.get("cwd"),
-                        )
-                    set_run_command_permission(event.tool_call_id, allowed)
-
-                    async def _permission(_: str, __: str | None = None) -> bool:
-                        return allowed
-
-                    token = set_run_command_context(RunCommandContext(request_permission=_permission))
-                    run_command_ctx_tokens[event.tool_call_id] = token
-                    if not allowed:
-                        denied = ToolCallFinish(
-                            tool_call_id=event.tool_call_id,
-                            tool_name=tool_name,
-                            status="failed",
-                            raw_output={
-                                "tool": tool_name,
-                                "content": None,
-                                "error": "permission denied",
-                            },
-                        )
-                        await self.env.send_tool_finish(session_id, denied)
-                        return True
                 return True
 
             if isinstance(event, FunctionToolResultEvent):
-                token = run_command_ctx_tokens.pop(event.tool_call_id, None)
-                if token is not None:
-                    reset_run_command_context(token)
                 call_input = tool_call_inputs.pop(event.tool_call_id, {})
                 result_part = event.result
                 tool_name = getattr(result_part, "tool_name", None) or ""
-                if tool_name == "run_command":
-                    pop_run_command_permission(event.tool_call_id)
                 content = getattr(result_part, "content", None)
                 raw_output: dict[str, Any] = {}
                 if isinstance(content, dict):
@@ -147,6 +109,14 @@ class PromptRunner:
                     status = "failed"
                 else:
                     raw_output.setdefault("error", None)
+                    if (
+                        tool_name == "run_command"
+                        and str(raw_output.get("content") or "").strip() == "permission denied"
+                    ):
+                        raw_output["error"] = "permission denied"
+                        raw_output["content"] = ""
+                        raw_output.setdefault("returncode", -1)
+                        status = "failed"
                 new_text = raw_output.get("new_text")
                 old_text = raw_output.get("old_text")
                 finish = ToolCallFinish(

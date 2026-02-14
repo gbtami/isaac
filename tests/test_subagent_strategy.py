@@ -17,6 +17,7 @@ from pydantic_ai.messages import (  # type: ignore
 )
 from pydantic_ai.messages import ModelRequest, ModelResponse, TextPart, ToolReturnPart  # type: ignore
 from pydantic_ai import Agent as PydanticAgent  # type: ignore
+from pydantic_ai import DeferredToolRequests  # type: ignore
 from pydantic_ai.models.test import TestModel  # type: ignore
 
 from typing import Any
@@ -346,8 +347,14 @@ async def test_delegate_tool_carryover_summary(monkeypatch):
     assert second["error"] is None
     assert first["delegate_session_id"] == session_id
     assert second["delegate_session_id"] == session_id
-    assert isinstance(first["content"], dict)
-    assert isinstance(second["content"], dict)
+    first_content = first["content"]
+    if isinstance(first_content, str):
+        first_content = json.loads(first_content)
+    second_content = second["content"]
+    if isinstance(second_content, str):
+        second_content = json.loads(second_content)
+    assert isinstance(first_content, dict)
+    assert isinstance(second_content, dict)
 
     assert len(prompts) == 2
     assert prompts[0] == "first task"
@@ -441,7 +448,7 @@ async def test_delegate_tool_carryover_acp_integration(monkeypatch, tmp_path):
             toolsets=(),
             system_prompt=spec.system_prompt or "test",
             instructions=spec.instructions,
-            output_type=spec.output_type,
+            output_type=[spec.output_type or str, DeferredToolRequests],
         )
         register_tools(agent, tool_names=delegate_mod._expand_tool_names(spec))
         return agent
@@ -464,7 +471,8 @@ async def test_delegate_tool_carryover_acp_integration(monkeypatch, tmp_path):
             },
             call_tools=["coding"],
             custom_output_text="done",
-        )
+        ),
+        output_type=[str, DeferredToolRequests],
     )
     register_tools(runner_first)
     agent._prompt_handler.set_session_runner(session.session_id, runner_first)  # type: ignore[attr-defined]
@@ -509,7 +517,8 @@ async def test_delegate_tool_carryover_acp_integration(monkeypatch, tmp_path):
             },
             call_tools=["coding"],
             custom_output_text="done",
-        )
+        ),
+        output_type=[str, DeferredToolRequests],
     )
     register_tools(runner_second)
     agent._prompt_handler.set_session_runner(session.session_id, runner_second)  # type: ignore[attr-defined]
@@ -532,6 +541,7 @@ async def test_delegate_tool_emits_thought_without_text_progress(monkeypatch):
             session_id="s-delegate",
             request_run_permission=AsyncMock(return_value=True),
             send_update=send_update,
+            mode_getter=lambda: "ask",
         )
     )
     try:

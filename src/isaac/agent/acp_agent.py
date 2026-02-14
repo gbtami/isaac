@@ -21,6 +21,7 @@ from isaac.agent.acp.tools import ToolCallsMixin
 from isaac.agent.acp.updates import SessionUpdateMixin
 from isaac.agent.agent_terminal import TerminalState
 from isaac.agent.brain.prompt_handler import PromptHandler
+from isaac.agent.brain.session_ops import RunnerFactory
 from isaac.agent.constants import TOOL_OUTPUT_LIMIT
 from isaac.agent.session_store import SessionStore
 from isaac.log_utils import log_event
@@ -50,6 +51,7 @@ class ACPAgent(
         agent_name: str = "isaac",
         agent_title: str = "Isaac ACP Agent",
         agent_version: str = "0.1.1",
+        runner_factory: RunnerFactory | None = None,
     ) -> None:
         self._conn: AgentSideConnection | None = conn
         self._sessions: set[str] = set()
@@ -74,6 +76,7 @@ class ACPAgent(
         self._terminal_output_limit = TOOL_OUTPUT_LIMIT
         self._session_store = SessionStore(Path.home() / ".isaac" / "sessions")
         self._session_last_chunk: Dict[str, str | None] = {}
+        self._runner_factory = runner_factory
         self._prompt_handler: PromptHandler = self._build_prompt_handler()
         self._session_system_prompts: Dict[str, str | None] = {}
 

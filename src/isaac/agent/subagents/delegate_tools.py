@@ -5,29 +5,37 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import contextvars
+import json
 import logging
 import time
 import uuid
 from dataclasses import dataclass
-from typing import Any, Awaitable, Callable, cast
+from typing import Any, Awaitable, Callable
 
 from dotenv import load_dotenv
 from pydantic import BaseModel
 from pydantic_ai import Agent as PydanticAgent  # type: ignore
+from pydantic_ai import DeferredToolRequests  # type: ignore
+from pydantic_ai.exceptions import ModelRetry  # type: ignore
 from pydantic_ai.run import AgentRunResultEvent  # type: ignore
+from pydantic_ai.usage import UsageLimits  # type: ignore
 
 from acp.helpers import session_notification, text_block, update_agent_thought
 from isaac.agent.ai_types import AgentRunner
 from isaac.agent import models as model_registry
+from isaac.agent.brain.history_processors import sanitize_message_history
+from isaac.agent.brain.instrumentation import base_run_metadata, pydantic_ai_instrument_enabled
 from isaac.agent.brain.prompt import SYSTEM_PROMPT
+from isaac.agent.brain.tool_policies import build_prepare_tools_for_mode
 from isaac.agent.models import ENV_FILE, load_models_config, _build_provider_model
 from isaac.agent.runner import stream_with_runner
-from isaac.agent.tools.run_command import RunCommandContext, reset_run_command_context, set_run_command_context
 from isaac.log_utils import log_context as log_ctx, log_event
 
 DELEGATE_TOOL_TIMEOUT_S = 60.0
 DELEGATE_TOOL_DEFAULT_DEPTH = 2
 DELEGATE_TOOL_SUMMARY_MAX_CHARS = 1200
+DELEGATE_REQUEST_LIMIT = 50
+DELEGATE_TOOL_CALLS_LIMIT = 120
 
 _delegate_depth = contextvars.ContextVar("delegate_tool_depth", default=0)
 _delegate_context = contextvars.ContextVar("delegate_tool_context", default=None)
@@ -49,6 +57,7 @@ class DelegateToolContext:
     session_id: str
     request_run_permission: Callable[[str, str, str, str | None], Awaitable[bool]]
     send_update: Callable[[Any], Awaitable[None]]
+    mode_getter: Callable[[], str]
 
 
 def set_delegate_tool_context(ctx: DelegateToolContext) -> contextvars.Token[DelegateToolContext | None]:
@@ -95,7 +104,6 @@ class DelegateToolSpec:
     summary_extractor: Callable[[BaseModel | str], str | None] | None = None
     min_summary_chars: int = 0
     continuation_prompt: str | None = None
-    allow_unstructured_fallback: bool = True
 
 
 DELEGATE_TOOL_HANDLERS: dict[str, _DelegateHandler] = {}
@@ -196,17 +204,12 @@ def _expand_tool_names(spec: DelegateToolSpec) -> tuple[str, ...]:
     return tuple(tool_names)
 
 
-_OUTPUT_TYPE_UNSET = object()
-
-
 def _build_delegate_agent(
-    spec: DelegateToolSpec, *, output_type_override: type[BaseModel] | None | object = _OUTPUT_TYPE_UNSET
+    spec: DelegateToolSpec,
+    *,
+    mode_getter: Callable[[], str] | None = None,
 ) -> AgentRunner:
-    """Create a delegate agent with optional output-type override.
-
-    The override is used for fallback retries when structured output validation
-    fails. In that case we re-run without output_type to preserve usability.
-    """
+    """Create a delegate agent for the current session model."""
 
     load_dotenv(ENV_FILE, override=False)
     load_dotenv()
@@ -218,17 +221,18 @@ def _build_delegate_agent(
     model_entry = models_cfg.get(model_id, {})
 
     model_obj, model_settings = _build_provider_model(model_id, model_entry)
-    if output_type_override is _OUTPUT_TYPE_UNSET:
-        output_type = spec.output_type
-    else:
-        output_type = cast(type[BaseModel] | None, output_type_override)
+    output_type = spec.output_type
     agent: AgentRunner = PydanticAgent(
         model_obj,
+        output_type=[output_type or str, DeferredToolRequests],
         toolsets=(),
         system_prompt=spec.system_prompt or SYSTEM_PROMPT,
         instructions=spec.instructions,
         model_settings=model_settings,
-        output_type=output_type,
+        prepare_tools=build_prepare_tools_for_mode(mode_getter or (lambda: "ask")),
+        history_processors=(sanitize_message_history,),
+        instrument=pydantic_ai_instrument_enabled(),
+        metadata=base_run_metadata(component=f"isaac.delegate.{spec.name}", model_id=model_id),
     )
 
     from isaac.agent.tools import TOOL_HANDLERS, register_tools
@@ -238,17 +242,26 @@ def _build_delegate_agent(
     if unknown:
         raise ValueError(f"Unknown delegate tool(s): {', '.join(sorted(unknown))}")
     register_tools(agent, tool_names=tool_names)
+
+    if output_type is not None and spec.summary_extractor is not None and spec.min_summary_chars > 0:
+
+        @agent.output_validator
+        async def _validate_structured_length(output: BaseModel) -> BaseModel:
+            summary = spec.summary_extractor(output) or ""
+            if len(summary.strip()) < spec.min_summary_chars:
+                raise ModelRetry(spec.continuation_prompt or "Provide a fuller structured summary.")
+            return output
+
     return agent
 
 
 @dataclass
 class _DelegateRunOutcome:
-    """Container for delegate run results and validation status."""
+    """Container for delegate run results."""
 
     content: BaseModel | str | None
     raw_text: str | None
     error: str | None
-    validation_failed: bool = False
 
 
 def _summary_from_output(spec: DelegateToolSpec, output: BaseModel | str | object) -> str | None:
@@ -260,12 +273,20 @@ def _summary_from_output(spec: DelegateToolSpec, output: BaseModel | str | objec
     if spec.summary_extractor is not None:
         try:
             if isinstance(output, (BaseModel, str)):
-                return spec.summary_extractor(output)
-            return None
+                summary = spec.summary_extractor(output)
+                if summary:
+                    return summary
         except Exception:
-            return None
+            pass
     if isinstance(output, str):
-        return output
+        stripped = output.strip()
+        if stripped.startswith("{"):
+            with contextlib.suppress(Exception):
+                parsed = json.loads(stripped)
+                summary = parsed.get("summary") if isinstance(parsed, dict) else None
+                if isinstance(summary, str) and summary.strip():
+                    return summary
+        return stripped or None
     return None
 
 
@@ -283,75 +304,12 @@ def _should_request_continuation(spec: DelegateToolSpec, summary: str | None) ->
     return len(summary.strip()) < spec.min_summary_chars
 
 
-def _extract_json_candidate(text: str) -> str | None:
-    """Best-effort extraction of a JSON object from a text blob."""
-
-    start = text.find("{")
-    end = text.rfind("}")
-    if start == -1 or end == -1 or start >= end:
-        return None
-    return text[start : end + 1]
-
-
-def _parse_structured_output(spec: DelegateToolSpec, text: str) -> BaseModel | None:
-    """Try to parse a structured output payload using the spec's output_type."""
-
-    output_type = spec.output_type
-    if output_type is None:
-        return None
-    if not hasattr(output_type, "model_validate_json"):
-        return None
-    candidate = text.strip()
-    try:
-        return output_type.model_validate_json(candidate)
-    except Exception:
-        pass
-    extracted = _extract_json_candidate(candidate)
-    if extracted:
-        try:
-            return output_type.model_validate_json(extracted)
-        except Exception:
-            return None
-    return None
-
-
-def _build_permission_context(
-    spec: DelegateToolSpec,
-    delegate_run_id: str,
-) -> tuple[contextvars.Token[RunCommandContext | None] | None, Callable[[], None]]:
-    """Install a run_command permission bridge for delegate tool runs.
-
-    Delegate tools can call run_command, but permissions must be routed through
-    the parent ACP session so the user sees a single permission workflow.
-    """
-
-    ctx = get_delegate_tool_context()
-    if ctx is None:
-        return None, lambda: None
-    if "run_command" not in _expand_tool_names(spec):
-        return None, lambda: None
-
-    counter = 0
-
-    async def _request(command: str, cwd: str | None = None) -> bool:
-        nonlocal counter
-        counter += 1
-        tool_call_id = f"delegate:{spec.name}:{delegate_run_id}:{counter}"
-        return await ctx.request_run_permission(ctx.session_id, tool_call_id, command, cwd)
-
-    token = set_run_command_context(RunCommandContext(request_permission=_request))
-
-    def _reset() -> None:
-        reset_run_command_context(token)
-
-    return token, _reset
-
-
 async def _run_delegate_once(
     spec: DelegateToolSpec,
     agent: AgentRunner,
     prompt: str,
     *,
+    delegate_run_id: str,
     log_context: str | None,
     tool_call_id: str | None,
     session_id: str | None,
@@ -408,6 +366,26 @@ async def _run_delegate_once(
                 structured = output
         return False
 
+    delegate_ctx = get_delegate_tool_context()
+
+    async def _request_tool_approval(call_id: str, tool_name: str, args: dict[str, Any]) -> bool:
+        if tool_name != "run_command":
+            return True
+        if delegate_ctx is None:
+            return True
+        mode = delegate_ctx.mode_getter()
+        if mode != "ask":
+            return True
+        command = str(args.get("command") or "")
+        cwd = args.get("cwd")
+        routed_call_id = f"delegate:{spec.name}:{delegate_run_id}:{call_id}"
+        return await delegate_ctx.request_run_permission(
+            delegate_ctx.session_id,
+            routed_call_id,
+            command,
+            cwd if isinstance(cwd, str) or cwd is None else str(cwd),
+        )
+
     async def _run_stream() -> tuple[str | None, Any | None]:
         return await stream_with_runner(
             agent,
@@ -417,6 +395,20 @@ async def _run_delegate_once(
             cancel_event,
             on_event=_capture,
             log_context=log_context,
+            request_tool_approval=_request_tool_approval,
+            usage_limits=UsageLimits(
+                request_limit=DELEGATE_REQUEST_LIMIT,
+                tool_calls_limit=DELEGATE_TOOL_CALLS_LIMIT,
+            ),
+            metadata=base_run_metadata(
+                component=f"isaac.delegate.run.{spec.name}",
+                model_id=model_registry.current_model_id(),
+                extra={
+                    "session_id": session_id or "",
+                    "delegate_run_id": delegate_run_id,
+                    "tool_call_id": tool_call_id or "",
+                },
+            ),
         )
 
     try:
@@ -443,12 +435,7 @@ async def _run_delegate_once(
         msg = response.removeprefix("Provider error:").strip()
         return _DelegateRunOutcome(content=None, raw_text=response, error=msg)
     if response.lower().startswith("model output failed validation"):
-        return _DelegateRunOutcome(
-            content=None,
-            raw_text=response,
-            error=response,
-            validation_failed=True,
-        )
+        return _DelegateRunOutcome(content=None, raw_text=response, error=response)
 
     output = structured or response
     return _DelegateRunOutcome(content=output, raw_text=response, error=None)
@@ -509,38 +496,22 @@ async def run_delegate_tool(
     delegate_ctx = get_delegate_tool_context()
     send_update = delegate_ctx.send_update if delegate_ctx else None
     parent_session_id = delegate_ctx.session_id if delegate_ctx else None
-
-    def _reset_permission() -> None:
-        return None
-
-    reset_permission = _reset_permission
+    mode_getter = delegate_ctx.mode_getter if delegate_ctx else (lambda: "ask")
     try:
-        agent = _build_delegate_agent(spec)
+        agent = _build_delegate_agent(spec, mode_getter=mode_getter)
         active_agent = agent
         prompt = _build_delegate_prompt(task, context, carryover_summary)
-        _, reset_permission = _build_permission_context(spec, delegate_run_id)
 
         outcome = await _run_delegate_once(
             spec,
             active_agent,
             prompt,
+            delegate_run_id=delegate_run_id,
             log_context=spec.log_context,
             tool_call_id=tool_call_id,
             session_id=parent_session_id,
             send_update=send_update,
         )
-        if outcome.validation_failed and spec.allow_unstructured_fallback:
-            fallback_agent = _build_delegate_agent(spec, output_type_override=None)
-            active_agent = fallback_agent
-            outcome = await _run_delegate_once(
-                spec,
-                active_agent,
-                prompt,
-                log_context=spec.log_context,
-                tool_call_id=tool_call_id,
-                session_id=parent_session_id,
-                send_update=send_update,
-            )
 
         if outcome.error:
             with log_ctx(
@@ -558,10 +529,6 @@ async def run_delegate_tool(
             }
 
         output = outcome.content
-        if isinstance(output, str):
-            parsed = _parse_structured_output(spec, output)
-            if parsed is not None:
-                output = parsed
 
         summary = _summary_from_output(spec, output)
         output_payload = output
@@ -570,7 +537,7 @@ async def run_delegate_tool(
                 output_payload = output.model_dump()  # type: ignore[call-arg]
             except Exception:
                 output_payload = output
-        if _should_request_continuation(spec, summary):
+        if spec.output_type is None and _should_request_continuation(spec, summary):
             context_parts = []
             if context:
                 context_parts.append(context.strip())
@@ -584,6 +551,7 @@ async def run_delegate_tool(
                 spec,
                 active_agent,
                 followup_prompt,
+                delegate_run_id=delegate_run_id,
                 log_context=spec.log_context,
                 tool_call_id=tool_call_id,
                 session_id=parent_session_id,
@@ -598,10 +566,6 @@ async def run_delegate_tool(
                     "delegate_run_id": delegate_run_id,
                 }
             output = outcome.content
-            if isinstance(output, str):
-                parsed = _parse_structured_output(spec, output)
-                if parsed is not None:
-                    output = parsed
             summary = _summary_from_output(spec, output)
             output_payload = output
             if hasattr(output, "model_dump") and spec.name != "planner":
@@ -646,5 +610,4 @@ async def run_delegate_tool(
             "delegate_run_id": delegate_run_id,
         }
     finally:
-        reset_permission()
         _delegate_depth.reset(token)

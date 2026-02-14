@@ -8,16 +8,16 @@ from acp import RequestPermissionResponse
 from acp.schema import AllowedOutcome
 import httpx
 from isaac.agent import ACPAgent
-from isaac.agent.brain import session_ops
 from isaac.agent.tools import register_tools
 from pydantic_ai import Agent as PydanticAgent  # type: ignore
+from pydantic_ai import DeferredToolRequests  # type: ignore
 from pydantic_ai.models.test import TestModel  # type: ignore
 
 
 def make_function_agent(conn: AgentSideConnection) -> ACPAgent:
     """Helper to build ACPAgent with a deterministic in-process model."""
 
-    runner = PydanticAgent(TestModel(call_tools=[]))
+    runner = PydanticAgent(TestModel(call_tools=[]), output_type=[str, DeferredToolRequests])
     register_tools(runner)
     if not inspect.iscoroutinefunction(getattr(conn, "session_update", None)):
         conn.session_update = AsyncMock()
@@ -32,10 +32,7 @@ def make_function_agent(conn: AgentSideConnection) -> ACPAgent:
             pass
         else:
             conn.request_permission = _default_perm  # type: ignore[attr-defined]
-    # Patch model builders to use deterministic test agents.
-    session_ops.create_subagent_for_model = lambda *_args, **_kwargs: runner  # type: ignore[assignment]
-
-    return ACPAgent(conn)
+    return ACPAgent(conn, runner_factory=lambda *_args, **_kwargs: runner)
 
 
 def make_error_agent(conn: AgentSideConnection) -> ACPAgent:
@@ -47,9 +44,7 @@ def make_error_agent(conn: AgentSideConnection) -> ACPAgent:
         ):
             raise RuntimeError("rate limited")
 
-    session_ops.create_subagent_for_model = lambda *_args, **_kwargs: ErrorRunner()  # type: ignore[assignment]
-
-    return ACPAgent(conn)
+    return ACPAgent(conn, runner_factory=lambda *_args, **_kwargs: ErrorRunner())
 
 
 def make_timeout_agent(conn: AgentSideConnection) -> ACPAgent:
@@ -62,6 +57,4 @@ def make_timeout_agent(conn: AgentSideConnection) -> ACPAgent:
             request = httpx.Request("GET", "https://example.com")
             raise httpx.ReadTimeout("Request timed out.", request=request)
 
-    session_ops.create_subagent_for_model = lambda *_args, **_kwargs: TimeoutRunner()  # type: ignore[assignment]
-
-    return ACPAgent(conn)
+    return ACPAgent(conn, runner_factory=lambda *_args, **_kwargs: TimeoutRunner())

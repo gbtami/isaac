@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Callable
 
 from isaac.agent.ai_types import AgentRunner, ToolRegister
 from isaac.agent.brain.prompt_runner import PromptEnv
@@ -12,6 +12,8 @@ from isaac.agent.brain.agent_factory import create_subagent_for_model
 from isaac.agent.brain.model_errors import ModelBuildError
 from isaac.agent.brain.prompt_result import PromptResult
 from isaac.agent.brain.session_state import SessionState
+
+RunnerFactory = Callable[..., AgentRunner]
 
 
 async def set_session_model(
@@ -23,12 +25,18 @@ async def set_session_model(
     register_tools: ToolRegister,
     toolsets: list[Any],
     system_prompt: str | None = None,
+    runner_factory: RunnerFactory | None = None,
 ) -> None:
     """Swap the session model and reset its state."""
 
     try:
-        executor: AgentRunner = create_subagent_for_model(
-            model_id, register_tools, toolsets=toolsets, system_prompt=system_prompt
+        factory = runner_factory or create_subagent_for_model
+        executor = factory(
+            model_id,
+            register_tools,
+            toolsets=toolsets,
+            system_prompt=system_prompt,
+            session_mode_getter=lambda: env.session_modes.get(session_id, "ask"),
         )
         state.runner = executor
         state.model_id = model_id
@@ -55,15 +63,18 @@ async def build_runner(
     register_tools: ToolRegister,
     toolsets: list[Any] | None = None,
     system_prompt: str | None = None,
+    runner_factory: RunnerFactory | None = None,
 ) -> None:
     """Build the default runner for a session."""
 
     try:
-        executor: AgentRunner = create_subagent_for_model(
+        factory = runner_factory or create_subagent_for_model
+        executor = factory(
             model_registry.current_model_id(),
             register_tools,
             toolsets=toolsets,
             system_prompt=system_prompt,
+            session_mode_getter=lambda: env.session_modes.get(session_id, "ask"),
         )
         state.model_id = model_registry.current_model_id()
         state.runner = executor

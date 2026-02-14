@@ -39,6 +39,7 @@ class PromptMixin:
         return PromptHandler(
             env=env,
             register_tools=register_tools,
+            runner_factory=getattr(self, "_runner_factory", None),
         )
 
     async def prompt(

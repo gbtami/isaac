@@ -10,6 +10,7 @@ from acp import RequestPermissionResponse, text_block
 from acp.agent.connection import AgentSideConnection
 from acp.schema import AllowedOutcome, ToolCallProgress, ToolCallStart
 from pydantic_ai import Agent as PydanticAgent  # type: ignore
+from pydantic_ai import DeferredToolRequests  # type: ignore
 from pydantic_ai.models.test import TestModel  # type: ignore
 
 from isaac.agent.tools import register_tools
@@ -49,7 +50,8 @@ async def test_tool_list_files_sends_progress(tmp_path: Path):
             fixed_args={"list_files": {"directory": str(tmp_path), "recursive": True}},
             call_tools=["list_files"],
             custom_output_text="done",
-        )
+        ),
+        output_type=[str, DeferredToolRequests],
     )
     register_tools(runner)
     agent._prompt_handler.set_session_runner(session.session_id, runner)  # type: ignore[attr-defined]
@@ -91,7 +93,8 @@ async def test_tool_read_file_returns_content(tmp_path: Path):
             },
             call_tools=["read_file"],
             custom_output_text="done",
-        )
+        ),
+        output_type=[str, DeferredToolRequests],
     )
     register_tools(runner)
     agent._prompt_handler.set_session_runner(session.session_id, runner)  # type: ignore[attr-defined]
@@ -124,7 +127,8 @@ async def test_tool_run_command_executes(tmp_path: Path):
             fixed_args={"run_command": {"command": "echo hello", "cwd": None}},
             call_tools=["run_command"],
             custom_output_text="done",
-        )
+        ),
+        output_type=[str, DeferredToolRequests],
     )
     register_tools(runner)
     agent._prompt_handler.set_session_runner(session.session_id, runner)  # type: ignore[attr-defined]
@@ -225,7 +229,8 @@ async def test_tool_code_search(tmp_path: Path):
             fixed_args={"code_search": {"pattern": "hello", "directory": str(tmp_path)}},
             call_tools=["code_search"],
             custom_output_text="done",
-        )
+        ),
+        output_type=[str, DeferredToolRequests],
     )
     register_tools(runner)
     agent._prompt_handler.set_session_runner(session.session_id, runner)  # type: ignore[attr-defined]
