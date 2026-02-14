@@ -5,16 +5,17 @@ from unittest.mock import AsyncMock, Mock
 
 import pytest
 
-from acp import text_block
+from acp import RequestError, text_block
 
-from isaac.client.slash import _handle_mode, _handle_model, _handle_status
+from isaac.client.acp_client import ACPClient
+from isaac.client.slash import _handle_mode, _handle_model, _handle_status, handle_slash_command
 from isaac.client.session_state import SessionUIState
 
 
 @pytest.mark.asyncio
 async def test_model_command_uses_picker_when_argument_missing() -> None:
     conn = AsyncMock()
-    conn.set_session_config_option = AsyncMock(return_value=SimpleNamespace(config_options=[]))
+    conn.set_config_option = AsyncMock(return_value=SimpleNamespace(config_options=[]))
     state = SessionUIState(
         current_mode="ask",
         current_model="openai:gpt-5",
@@ -36,7 +37,7 @@ async def test_model_command_uses_picker_when_argument_missing() -> None:
 
     assert handled is True
     assert seen_labels == ["provider", "model"]
-    conn.set_session_config_option.assert_awaited_once_with(
+    conn.set_config_option.assert_awaited_once_with(
         config_id="model",
         session_id="session-1",
         value="openai:gpt-5-mini",
@@ -47,7 +48,7 @@ async def test_model_command_uses_picker_when_argument_missing() -> None:
 @pytest.mark.asyncio
 async def test_model_command_accepts_provider_shorthand() -> None:
     conn = AsyncMock()
-    conn.set_session_config_option = AsyncMock(return_value=SimpleNamespace(config_options=[]))
+    conn.set_config_option = AsyncMock(return_value=SimpleNamespace(config_options=[]))
     state = SessionUIState(
         current_mode="ask",
         current_model="openai:gpt-5",
@@ -67,7 +68,7 @@ async def test_model_command_accepts_provider_shorthand() -> None:
 
     assert handled is True
     assert seen_labels == ["model"]
-    conn.set_session_config_option.assert_awaited_once_with(
+    conn.set_config_option.assert_awaited_once_with(
         config_id="model",
         session_id="session-1",
         value="openai:gpt-5-mini",
@@ -77,7 +78,7 @@ async def test_model_command_accepts_provider_shorthand() -> None:
 @pytest.mark.asyncio
 async def test_mode_command_uses_picker_when_argument_missing() -> None:
     conn = AsyncMock()
-    conn.set_session_config_option = AsyncMock(return_value=SimpleNamespace(config_options=[]))
+    conn.set_config_option = AsyncMock(return_value=SimpleNamespace(config_options=[]))
     state = SessionUIState(
         current_mode="ask",
         current_model="openai:gpt-5",
@@ -95,7 +96,7 @@ async def test_mode_command_uses_picker_when_argument_missing() -> None:
     handled = await _handle_mode(conn, "session-2", state, reset, "")
 
     assert handled is True
-    conn.set_session_config_option.assert_awaited_once_with(
+    conn.set_config_option.assert_awaited_once_with(
         config_id="mode",
         session_id="session-2",
         value="yolo",
@@ -152,3 +153,27 @@ async def test_status_restores_suppression_when_refresh_fails(capsys: pytest.Cap
     assert state.suppress_usage_output is False
     out = capsys.readouterr().out
     assert "Usage: cached usage" in out
+
+
+@pytest.mark.asyncio
+async def test_unknown_slash_command_falls_through_to_agent() -> None:
+    conn = AsyncMock()
+    state = SessionUIState(
+        current_mode="ask",
+        current_model="openai:gpt-5",
+        mcp_servers=[],
+        available_agent_commands={},
+    )
+
+    handled = await handle_slash_command("/custom-cmd arg", conn, "session-5", state, lambda: None)
+
+    assert handled is False
+
+
+@pytest.mark.asyncio
+async def test_client_ext_method_unknown_raises_method_not_found() -> None:
+    state = SessionUIState(current_mode="ask", current_model="openai:gpt-5", mcp_servers=[])
+    client = ACPClient(state)
+
+    with pytest.raises(RequestError):
+        await client.ext_method("nope", {})

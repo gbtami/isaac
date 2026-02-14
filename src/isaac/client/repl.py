@@ -10,7 +10,7 @@ import sys
 from pathlib import Path
 from typing import Any
 
-from acp import ClientSideConnection, text_block
+from acp import text_block
 from acp.schema import EmbeddedResourceContentBlock, ResourceContentBlock, TextResourceContents
 from prompt_toolkit import PromptSession  # type: ignore
 from prompt_toolkit.formatted_text import ANSI  # type: ignore
@@ -41,7 +41,7 @@ PROMPT_STYLE = Style.from_dict(
 )
 
 
-async def interactive_loop(conn: ClientSideConnection, session_id: str, state: SessionUIState) -> None:
+async def interactive_loop(conn: Any, session_id: str, state: SessionUIState) -> None:
     """Interactive REPL that drives session/prompt per ACP prompt turn rules."""
     kb = KeyBindings()
     CANCEL_TOKEN = "__CANCEL__"

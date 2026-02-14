@@ -168,7 +168,8 @@ class ACPClient(Client):
 
     async def ext_method(self, method: str, params: dict[str, Any]) -> dict[str, Any]:
         """Handle extension methods from the agent (unused in example client)."""
-        return {}
+        _ = params
+        raise RequestError.method_not_found(f"_{method}")
 
     async def ext_notification(self, method: str, params: dict[str, Any]) -> None:
         """Handle extension notifications from the agent (noop for example client)."""
@@ -456,7 +457,7 @@ async def set_session_config_option_value(
     if not config_id:
         raise RuntimeError(f"Agent does not expose a `{config_key}` session config option.")
 
-    setter = getattr(conn, "set_session_config_option", None)
+    setter = getattr(conn, "set_config_option", None)
     if not callable(setter):
         raise RuntimeError("Connection does not support session/set_config_option.")
     response = await setter(config_id=config_id, session_id=session_id, value=value)

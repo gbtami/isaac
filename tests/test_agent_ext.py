@@ -5,7 +5,7 @@ from pathlib import Path
 from unittest.mock import AsyncMock
 
 import pytest
-from acp import PROTOCOL_VERSION, text_block
+from acp import PROTOCOL_VERSION, RequestError, text_block
 from acp.agent.connection import AgentSideConnection
 from acp.helpers import session_notification, update_agent_message
 from acp.schema import AgentMessageChunk, SessionNotification, UserMessageChunk
@@ -85,7 +85,7 @@ async def test_session_config_options_include_mode_and_model(monkeypatch, tmp_pa
     assert _config_current_value(session.config_options, "model") == fn_model_id
 
     target_id = "function:user-function"
-    resp = await agent.set_session_config_option(
+    resp = await agent.set_config_option(
         config_id="model",
         session_id=session.session_id,
         value=target_id,
@@ -95,7 +95,7 @@ async def test_session_config_options_include_mode_and_model(monkeypatch, tmp_pa
 
 
 @pytest.mark.asyncio
-async def test_set_session_config_option_updates_mode(monkeypatch, tmp_path: Path):
+async def test_set_config_option_updates_mode(monkeypatch, tmp_path: Path):
     monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "xdg"))
     monkeypatch.setenv("HOME", str(tmp_path))
     monkeypatch.setattr(model_registry, "USER_MODELS_FILE", tmp_path / "xdg" / "isaac" / "models.user.json")
@@ -103,7 +103,7 @@ async def test_set_session_config_option_updates_mode(monkeypatch, tmp_path: Pat
     agent = ACPAgent(conn)
     session = await agent.new_session(cwd=str(tmp_path), mcp_servers=[])
 
-    resp = await agent.set_session_config_option(config_id="mode", session_id=session.session_id, value="yolo")
+    resp = await agent.set_config_option(config_id="mode", session_id=session.session_id, value="yolo")
     assert _config_current_value(resp.config_options, "mode") == "yolo"
     assert agent._session_modes[session.session_id] == "yolo"
 
@@ -239,3 +239,14 @@ async def test_history_preserved_across_prompts(monkeypatch, tmp_path: Path):
 
     messages = executor.stream_messages or []
     assert any("remember this line" in m.get("content", "") for m in messages)
+
+
+@pytest.mark.asyncio
+async def test_ext_method_unknown_raises_method_not_found(monkeypatch, tmp_path: Path):
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "xdg"))
+    monkeypatch.setenv("HOME", str(tmp_path))
+    conn = AsyncMock(spec=AgentSideConnection)
+    agent = ACPAgent(conn)
+
+    with pytest.raises(RequestError):
+        await agent.ext_method("nope", {})

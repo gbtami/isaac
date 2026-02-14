@@ -5,9 +5,9 @@ from __future__ import annotations
 import asyncio
 import logging
 from dataclasses import dataclass
-from typing import Awaitable, Callable
+from typing import Any, Awaitable, Callable
 
-from acp import ClientSideConnection, text_block
+from acp import text_block
 
 from isaac.client.acp_client import MODE_CONFIG_KEY, MODEL_CONFIG_KEY, set_mode, set_session_config_option_value
 from isaac.client.session_state import SessionUIState
@@ -18,7 +18,7 @@ from isaac.log_utils import log_event
 logger = logging.getLogger(__name__)
 
 SlashHandler = Callable[
-    [ClientSideConnection, str, SessionUIState, Callable[[], None], str],
+    [Any, str, SessionUIState, Callable[[], None], str],
     Awaitable[bool] | bool,
 ]
 
@@ -78,7 +78,7 @@ async def _pick_config_value(
 
 @register_slash_command("/help", description="Show available slash commands.", hint="/help")
 def _handle_help(
-    _conn: ClientSideConnection,
+    _conn: Any,
     _session_id: str,
     _state: SessionUIState,
     _permission_reset: Callable[[], None],
@@ -98,7 +98,7 @@ def _handle_help(
 
 @register_slash_command("/model", description="Set or pick model id.", hint="/model [id]")
 async def _handle_model(
-    conn: ClientSideConnection,
+    conn: Any,
     session_id: str,
     state: SessionUIState,
     _permission_reset: Callable[[], None],
@@ -179,7 +179,7 @@ async def _handle_model(
 
 @register_slash_command("/thinking", description="Toggle display of model thinking traces.", hint="/thinking on|off")
 def _handle_thinking(
-    _conn: ClientSideConnection,
+    _conn: Any,
     _session_id: str,
     state: SessionUIState,
     _permission_reset: Callable[[], None],
@@ -196,7 +196,7 @@ def _handle_thinking(
 
 @register_slash_command("/status", description="Show current session status.", hint="/status")
 async def _handle_status(
-    _conn: ClientSideConnection,
+    _conn: Any,
     _session_id: str,
     state: SessionUIState,
     _permission_reset: Callable[[], None],
@@ -217,7 +217,7 @@ async def _handle_status(
 @register_slash_command("/exit", description="Exit the client.", hint="/exit")
 @register_slash_command("/quit", description="Exit the client.", hint="/quit")
 def _handle_exit(
-    _conn: ClientSideConnection,
+    _conn: Any,
     _session_id: str,
     _state: SessionUIState,
     _permission_reset: Callable[[], None],
@@ -229,7 +229,7 @@ def _handle_exit(
 
 @register_slash_command("/mode", description="Set or pick agent mode.", hint="/mode [id]")
 async def _handle_mode(
-    conn: ClientSideConnection,
+    conn: Any,
     session_id: str,
     state: SessionUIState,
     permission_reset: Callable[[], None],
@@ -259,7 +259,7 @@ async def _handle_mode(
 
 async def handle_slash_command(
     line: str,
-    conn: ClientSideConnection,
+    conn: Any,
     session_id: str,
     state: SessionUIState,
     permission_reset: Callable[[], None],
@@ -275,10 +275,7 @@ async def handle_slash_command(
 
     entry = SLASH_HANDLERS.get(command)
     if entry is None:
-        if command in state.available_agent_commands:
-            return False
-        print(f"[unknown command: {command} (try /help)]")
-        return True
+        return False
 
     try:
         result = entry.handler(conn, session_id, state, permission_reset, argument)

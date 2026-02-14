@@ -5,6 +5,8 @@ from __future__ import annotations
 import logging
 from typing import Any
 
+from acp import RequestError
+
 from isaac.log_utils import log_context, log_event
 
 logger = logging.getLogger(__name__)
@@ -15,7 +17,7 @@ class ExtensionsMixin:
         """Handle extension methods."""
         with log_context(session_id=payload.get("session_id"), ext_method=name):
             log_event(logger, "acp.ext.request", params_keys=sorted(payload.keys()))
-        return {"error": f"Unknown ext method: {name}"}
+        raise RequestError.method_not_found(f"_{name}")
 
     async def ext_notification(self, method: str, params: dict[str, Any]) -> None:
         """Handle extension notifications (noop placeholder to satisfy ACP interface)."""

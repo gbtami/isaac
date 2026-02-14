@@ -228,7 +228,7 @@ class SessionLifecycleMixin:
         )
         return SetSessionModelResponse()
 
-    async def set_session_config_option(
+    async def set_config_option(
         self,
         config_id: str,
         session_id: str,

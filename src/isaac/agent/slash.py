@@ -108,7 +108,7 @@ async def _handle_model(agent: Any, session_id: str, _: str, argument: str) -> S
         return session_notification(session_id, update_agent_message(text_block(message)))
 
     try:
-        await agent.set_session_config_option(
+        await agent.set_config_option(
             config_id=getattr(agent, "MODEL_CONFIG_ID", "model"),
             value=argument,
             session_id=session_id,
