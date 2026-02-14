@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock
 
 import pytest
@@ -13,7 +14,7 @@ from isaac.client.session_state import SessionUIState
 @pytest.mark.asyncio
 async def test_model_command_uses_picker_when_argument_missing() -> None:
     conn = AsyncMock()
-    conn.set_session_config_option = AsyncMock(return_value={"config_options": []})
+    conn.set_session_config_option = AsyncMock(return_value=SimpleNamespace(config_options=[]))
     state = SessionUIState(
         current_mode="ask",
         current_model="openai:gpt-5",
@@ -46,7 +47,7 @@ async def test_model_command_uses_picker_when_argument_missing() -> None:
 @pytest.mark.asyncio
 async def test_model_command_accepts_provider_shorthand() -> None:
     conn = AsyncMock()
-    conn.set_session_config_option = AsyncMock(return_value={"config_options": []})
+    conn.set_session_config_option = AsyncMock(return_value=SimpleNamespace(config_options=[]))
     state = SessionUIState(
         current_mode="ask",
         current_model="openai:gpt-5",
@@ -76,7 +77,7 @@ async def test_model_command_accepts_provider_shorthand() -> None:
 @pytest.mark.asyncio
 async def test_mode_command_uses_picker_when_argument_missing() -> None:
     conn = AsyncMock()
-    conn.set_session_config_option = AsyncMock(return_value={"config_options": []})
+    conn.set_session_config_option = AsyncMock(return_value=SimpleNamespace(config_options=[]))
     state = SessionUIState(
         current_mode="ask",
         current_model="openai:gpt-5",

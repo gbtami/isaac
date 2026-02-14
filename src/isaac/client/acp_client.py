@@ -457,21 +457,9 @@ async def set_session_config_option_value(
         raise RuntimeError(f"Agent does not expose a `{config_key}` session config option.")
 
     setter = getattr(conn, "set_session_config_option", None)
-    response: Any
-    if callable(setter):
-        response = await setter(config_id=config_id, session_id=session_id, value=value)
-    else:
-        raw_conn = getattr(conn, "_conn", None)
-        if raw_conn is None or not hasattr(raw_conn, "send_request"):
-            raise RuntimeError("Connection does not support session/set_config_option.")
-        response = await raw_conn.send_request(
-            "session/set_config_option",
-            {"sessionId": session_id, "configId": config_id, "value": value},
-        )
-
-    if isinstance(response, dict):
-        options = response.get("configOptions") or response.get("config_options") or []
-    else:
-        options = getattr(response, "config_options", []) or []
+    if not callable(setter):
+        raise RuntimeError("Connection does not support session/set_config_option.")
+    response = await setter(config_id=config_id, session_id=session_id, value=value)
+    options = getattr(response, "config_options", []) or []
     if isinstance(options, list):
         apply_session_config_options(state, options)

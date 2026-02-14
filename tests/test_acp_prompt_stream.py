@@ -83,8 +83,9 @@ async def test_acp_prompt_update_sequence(monkeypatch, tmp_path) -> None:
     finish_idx = _index_of(updates, lambda u: isinstance(u, ToolCallProgress) and u.status == "completed")
     plan_in_idx = _index_of(
         updates,
-        lambda u: isinstance(u, AgentPlanUpdate)
-        and any(getattr(entry, "status", "") == "in_progress" for entry in u.entries),
+        lambda u: (
+            isinstance(u, AgentPlanUpdate) and any(getattr(entry, "status", "") == "in_progress" for entry in u.entries)
+        ),
     )
     msg_idx = _index_of(
         updates,
@@ -92,8 +93,9 @@ async def test_acp_prompt_update_sequence(monkeypatch, tmp_path) -> None:
     )
     plan_done_idx = _index_of(
         updates,
-        lambda u: isinstance(u, AgentPlanUpdate)
-        and all(getattr(entry, "status", "") == "completed" for entry in u.entries),
+        lambda u: (
+            isinstance(u, AgentPlanUpdate) and all(getattr(entry, "status", "") == "completed" for entry in u.entries)
+        ),
     )
 
     assert start_idx != -1

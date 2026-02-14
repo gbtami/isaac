@@ -17,7 +17,6 @@ from acp import PROTOCOL_VERSION
 from acp.core import connect_to_agent
 from acp.schema import ClientCapabilities, FileSystemCapability, Implementation
 
-from isaac.acp_compat import enable_session_config_options_api
 from isaac.acp_runtime import ACP_STDIO_BUFFER_LIMIT_BYTES
 from isaac.client.mcp_config import load_mcp_config
 from isaac.client.acp_client import ACPClient, apply_session_config_options
@@ -29,7 +28,6 @@ logger = logging.getLogger(__name__)
 
 
 async def run_client(program: str, args: Iterable[str], mcp_servers: list[Any]) -> int:
-    enable_session_config_options_api()
     _setup_client_logging()
     log_event(logger, "client.start", program=program)
 

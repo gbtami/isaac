@@ -7,7 +7,7 @@ isaac ships both an ACP agent and an ACP client. The agent (`isaac.agent`) imple
 - **protocol**: Agent Client Protocol https://agentclientprotocol.com/
 
 ## Protocol Compliance (must follow ACP)
-- Both the agent and client must strictly follow the ACP specification so they interoperate with any other ACP-compliant client/agent. Do not introduce behavior that assumes a proprietary peer. The codebase tracks ACP Python SDK `0.8.0`, so use snake_case schema fields and the `run_agent` / `connect_to_agent` helpers.
+- Both the agent and client must strictly follow the ACP specification so they interoperate with any other ACP-compliant client/agent. Do not introduce behavior that assumes a proprietary peer. The codebase tracks ACP Python SDK `0.8.1`, so use snake_case schema fields and the `run_agent` / `connect_to_agent` helpers.
 - Keep initialization/version negotiation aligned with `PROTOCOL_VERSION`, honor advertised capabilities, and preserve ACP-defined session, prompt, tool call, file system, terminal, and session config option flows.
 - Mode/model selection must use ACP Session Config Options (`config_options`, `config_option_update`, `session/set_config_option`) rather than custom ext methods.
 

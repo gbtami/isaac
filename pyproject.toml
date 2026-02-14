@@ -22,8 +22,8 @@ classifiers = [
     "Typing :: Typed",
 ]
 dependencies = [
-    "agent-client-protocol==0.8.0",
-    "pydantic-ai==1.58.0",
+    "agent-client-protocol==0.8.1",
+    "pydantic-ai==1.59.0",
     "aiocache==0.12.3",
     "prompt-toolkit==3.0.52",
     "python-dotenv==1.2.1",

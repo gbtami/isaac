@@ -6,7 +6,6 @@ import asyncio
 import logging
 from dataclasses import replace
 
-from isaac.acp_compat import enable_session_config_options_api
 from isaac.acp_runtime import ACP_STDIO_BUFFER_LIMIT_BYTES
 from isaac.agent.acp_agent import ACPAgent
 from isaac.agent.tools import run_tool
@@ -21,7 +20,6 @@ async def run_acp_agent():
     """Run the ACP server."""
     from acp.core import run_agent  # Imported lazily to avoid hard dependency at import time
 
-    enable_session_config_options_api()
     _setup_acp_logging()
     log_event(logger, "agent.start", transport="stdio")
 
