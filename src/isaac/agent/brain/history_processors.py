@@ -15,13 +15,21 @@ def _clean_content_text(text: Any) -> str | None:
 
 
 async def sanitize_message_history(
-    _ctx: Any,
-    messages: Sequence[ai_messages.ModelMessage],
+    ctx_or_messages: Any,
+    messages: Sequence[ai_messages.ModelMessage] | None = None,
 ) -> list[ai_messages.ModelMessage]:
     """Drop empty text/system/user parts to reduce provider-side 400 errors."""
 
+    if messages is None:
+        raw_messages = ctx_or_messages
+    else:
+        raw_messages = messages
+
+    if raw_messages is None:
+        return []
+
     cleaned_messages: list[ai_messages.ModelMessage] = []
-    for message in messages:
+    for message in raw_messages:
         if isinstance(message, ai_messages.ModelRequest):
             cleaned_parts: list[Any] = []
             for part in message.parts:
