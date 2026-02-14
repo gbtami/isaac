@@ -440,13 +440,13 @@ async def set_mode(
     state: SessionUIState,
     mode: str,
 ) -> None:
-    await set_session_config_option_value(conn, session_id, state, MODE_CONFIG_KEY, mode)
+    await set_config_option_value(conn, session_id, state, MODE_CONFIG_KEY, mode)
     state.current_mode = mode
     state.notify_changed()
     print_mode_update(state.current_mode)
 
 
-async def set_session_config_option_value(
+async def set_config_option_value(
     conn: Any,
     session_id: str,
     state: SessionUIState,

@@ -9,7 +9,7 @@ from typing import Any, Awaitable, Callable
 
 from acp import text_block
 
-from isaac.client.acp_client import MODE_CONFIG_KEY, MODEL_CONFIG_KEY, set_mode, set_session_config_option_value
+from isaac.client.acp_client import MODE_CONFIG_KEY, MODEL_CONFIG_KEY, set_config_option_value, set_mode
 from isaac.client.session_state import SessionUIState
 from isaac.client.status_box import build_status_banner
 from isaac.client.thinking import toggle_thinking
@@ -167,7 +167,7 @@ async def _handle_model(
         return True
 
     try:
-        await set_session_config_option_value(conn, session_id, state, MODEL_CONFIG_KEY, selection)
+        await set_config_option_value(conn, session_id, state, MODEL_CONFIG_KEY, selection)
         state.current_model = selection
         state.notify_changed()
         print(f"[model set to {selection}]")
