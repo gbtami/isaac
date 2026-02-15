@@ -164,6 +164,32 @@ def test_openai_reasoning_effort_not_set_for_non_reasoning_models(monkeypatch: p
     assert settings is None
 
 
+def test_current_model_falls_back_when_persisted_model_is_missing(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
+    user_models_file = tmp_path / "xdg" / "isaac" / "models.json"
+    settings_file = user_models_file.parent / "isaac.ini"
+    user_models_file.parent.mkdir(parents=True, exist_ok=True)
+    user_models_file.write_text(json.dumps({"models": {}}), encoding="utf-8")
+    settings_file.write_text("[models]\ncurrent_model = openrouter:test-openrouter\n", encoding="utf-8")
+    monkeypatch.setattr(model_registry, "USER_MODELS_FILE", user_models_file)
+
+    current = model_registry.current_model_id()
+
+    assert current == model_registry.DEFAULT_MODEL_ID
+    assert "current_model = function:function" in settings_file.read_text(encoding="utf-8")
+
+
+def test_set_current_model_raises_when_persistence_fails(monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setattr(
+        model_registry,
+        "list_models",
+        lambda: {model_registry.DEFAULT_MODEL_ID: {"provider": "function", "model": "function"}},
+    )
+    monkeypatch.setattr(model_registry, "_save_current_model", lambda _model_id: False)
+
+    with pytest.raises(RuntimeError, match="persist"):
+        model_registry.set_current_model(model_registry.DEFAULT_MODEL_ID)
+
+
 def test_anthropic_thinking_enabled_by_default(monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setenv("ANTHROPIC_API_KEY", "test")
     _model, settings = model_registry._build_provider_model(  # type: ignore[attr-defined]

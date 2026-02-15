@@ -208,7 +208,8 @@ def set_current_model(model_id: str) -> str:
     models_cfg = list_models()
     if model_id not in models_cfg:
         raise ValueError(f"Unknown model id: {model_id}")
-    _save_current_model(model_id)
+    if not _save_current_model(model_id):
+        raise RuntimeError("Failed to persist current model selection")
     return model_id
 
 
@@ -217,18 +218,26 @@ def _load_current_model() -> str:
 
     settings_file = USER_MODELS_FILE.parent / "isaac.ini"
     parser = configparser.ConfigParser()
+    models_cfg = list_models()
+    fallback_model_id = _fallback_current_model_id(models_cfg)
     if settings_file.exists():
         try:
             parser.read(settings_file)
             current = parser.get("models", "current_model", fallback=None)
             if current:
-                return current
+                if current in models_cfg:
+                    return current
+                logger.warning(
+                    "Persisted current model '%s' is unavailable; falling back to '%s'", current, fallback_model_id
+                )
+                _save_current_model(fallback_model_id)
+                return fallback_model_id
         except Exception:  # pragma: no cover - best effort load
             pass
-    return DEFAULT_MODEL_ID
+    return fallback_model_id
 
 
-def _save_current_model(model_id: str) -> None:
+def _save_current_model(model_id: str) -> bool:
     """Persist the current model selection separately from models.json."""
 
     settings_file = USER_MODELS_FILE.parent / "isaac.ini"
@@ -237,8 +246,25 @@ def _save_current_model(model_id: str) -> None:
     try:
         with settings_file.open("w", encoding="utf-8") as f:
             parser.write(f)
+        return True
     except Exception:  # pragma: no cover - best effort persistence
-        pass
+        logger.warning("Failed to persist current model '%s' in %s", model_id, settings_file)
+        return False
+
+
+def _fallback_current_model_id(models_cfg: Dict[str, Any] | None = None) -> str:
+    """Return a safe fallback model id that always exists in current config."""
+
+    cfg = models_cfg or list_models()
+    if DEFAULT_MODEL_ID in cfg:
+        return DEFAULT_MODEL_ID
+    user_models = sorted(mid for mid in cfg if mid not in HIDDEN_MODELS)
+    if user_models:
+        return user_models[0]
+    model_ids = sorted(cfg.keys())
+    if model_ids:
+        return model_ids[0]
+    return DEFAULT_MODEL_ID
 
 
 def get_context_limit(model_id: str) -> int | None:

@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-import contextlib
 import logging
 import uuid
 from pathlib import Path
@@ -212,11 +211,29 @@ class SessionLifecycleMixin:
                 system_prompt=self._session_system_prompts.get(session_id),
             )
             self._session_model_ids[session_id] = model_id
-            with contextlib.suppress(Exception):
+            try:
                 model_registry.set_current_model(model_id)
+            except Exception as exc:
+                log_event(
+                    logger,
+                    "acp.session.model.persist_failed",
+                    level=logging.WARNING,
+                    session_id=session_id,
+                    model_id=model_id,
+                    error=str(exc),
+                )
         except ModelBuildError:
-            with contextlib.suppress(Exception):
+            try:
                 model_registry.set_current_model(previous_model_id)
+            except Exception as exc:
+                log_event(
+                    logger,
+                    "acp.session.model.persist_rollback_failed",
+                    level=logging.WARNING,
+                    session_id=session_id,
+                    model_id=previous_model_id,
+                    error=str(exc),
+                )
             raise
         await self._send_update(self._config_options_update(session_id))
         self._persist_session_meta(
