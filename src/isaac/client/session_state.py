@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Awaitable, Callable
 
@@ -24,6 +25,8 @@ class SessionUIState:
     cancel_requested: bool = False
     usage_summary: str | None = None
     suppress_usage_output: bool = False
+    suppress_usage_line_until: float = 0.0
+    usage_refresh_waiter: asyncio.Event | None = None
     available_agent_commands: dict[str, str] = field(default_factory=dict)
     local_slash_commands: set[str] = field(default_factory=set)
     config_option_ids: dict[str, str] = field(default_factory=dict)

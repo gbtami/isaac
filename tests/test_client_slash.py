@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock
 
@@ -123,6 +124,8 @@ async def test_status_refreshes_usage_silently(capsys: pytest.CaptureFixture[str
         assert len(prompt) == 1
         assert getattr(prompt[0], "text", "") == getattr(text_block("/usage"), "text", "")
         state.usage_summary = "Usage: refreshed usage"
+        if state.usage_refresh_waiter is not None:
+            state.usage_refresh_waiter.set()
 
     conn.prompt = AsyncMock(side_effect=_fake_prompt)
 
@@ -132,6 +135,38 @@ async def test_status_refreshes_usage_silently(capsys: pytest.CaptureFixture[str
     assert state.suppress_usage_output is False
     out = capsys.readouterr().out
     assert "Usage: refreshed usage" in out
+
+
+@pytest.mark.asyncio
+async def test_status_waits_for_delayed_usage_update(capsys: pytest.CaptureFixture[str]) -> None:
+    conn = AsyncMock()
+    state = SessionUIState(
+        current_mode="ask",
+        current_model="openai:gpt-5",
+        mcp_servers=[],
+        session_id="session-delay",
+        cwd="/tmp/project",
+        usage_summary="Usage: n/a",
+    )
+
+    async def _fake_prompt(*, prompt, session_id):
+        assert session_id == "session-delay"
+
+        async def _later_update() -> None:
+            await asyncio.sleep(0.05)
+            state.usage_summary = "Usage: delayed refresh"
+            if state.usage_refresh_waiter is not None:
+                state.usage_refresh_waiter.set()
+
+        asyncio.create_task(_later_update())
+
+    conn.prompt = AsyncMock(side_effect=_fake_prompt)
+
+    handled = await _handle_status(conn, "session-delay", state, lambda: None, "")
+
+    assert handled is True
+    out = capsys.readouterr().out
+    assert "Usage: delayed refresh" in out
 
 
 @pytest.mark.asyncio
@@ -198,3 +233,18 @@ async def test_client_ext_method_unknown_raises_method_not_found() -> None:
 
     with pytest.raises(RequestError):
         await client.ext_method("nope", {})
+
+
+def test_usage_line_hidden_during_status_refresh_window() -> None:
+    state = SessionUIState(current_mode="ask", current_model="openai:gpt-5", mcp_servers=[])
+    state.suppress_usage_output = False
+    state.suppress_usage_line_until = 9999999999.0
+    state.usage_refresh_waiter = asyncio.Event()
+    client = ACPClient(state)
+
+    handled, show = client._maybe_update_usage_summary("Usage: input=10, output=2, total=12")
+
+    assert handled is True
+    assert show is False
+    assert state.usage_summary == "Usage: input=10, output=2, total=12"
+    assert state.usage_refresh_waiter.is_set()

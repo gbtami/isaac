@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time
 from dataclasses import dataclass
 from typing import Any, Awaitable, Callable
 
@@ -203,13 +204,23 @@ async def _handle_status(
     _argument: str,
 ) -> bool:
     previous_suppress = state.suppress_usage_output
+    previous_deadline = state.suppress_usage_line_until
+    previous_waiter = state.usage_refresh_waiter
+    state.usage_refresh_waiter = asyncio.Event()
     state.suppress_usage_output = True
+    state.suppress_usage_line_until = time.monotonic() + 1.0
     try:
         await _conn.prompt(prompt=[text_block("/usage")], session_id=_session_id)
+        try:
+            await asyncio.wait_for(state.usage_refresh_waiter.wait(), timeout=0.5)
+        except asyncio.TimeoutError:
+            pass
     except Exception as exc:
         log_event(logger, "client.status.refresh_usage.error", level=logging.DEBUG, error=str(exc))
     finally:
+        state.usage_refresh_waiter = previous_waiter
         state.suppress_usage_output = previous_suppress
+        state.suppress_usage_line_until = max(previous_deadline, state.suppress_usage_line_until)
     print(build_status_banner(state), end="")
     return True
 

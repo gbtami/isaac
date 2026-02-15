@@ -6,6 +6,7 @@ from typing import Any
 
 import json
 import logging
+import time
 from acp import (
     Client,
     CreateTerminalRequest,
@@ -373,14 +374,21 @@ class ACPClient(Client):
     def _maybe_update_usage_summary(self, text: str) -> tuple[bool, bool]:
         """Capture usage lines so the UI can display token/usage summaries."""
         suppress = bool(self._state.suppress_usage_output)
+        transient_suppress = time.monotonic() <= float(self._state.suppress_usage_line_until or 0.0)
         if text.startswith("Usage:"):
             self._state.usage_summary = text
             self._state.notify_changed()
-            return True, not suppress
+            if self._state.usage_refresh_waiter is not None and not self._state.usage_refresh_waiter.is_set():
+                self._state.usage_refresh_waiter.set()
+            self._state.suppress_usage_line_until = 0.0
+            return True, not (suppress or transient_suppress)
         if text.startswith("Usage not available") or text.startswith("Usage data unavailable"):
             self._state.usage_summary = text
             self._state.notify_changed()
-            return True, not suppress
+            if self._state.usage_refresh_waiter is not None and not self._state.usage_refresh_waiter.is_set():
+                self._state.usage_refresh_waiter.set()
+            self._state.suppress_usage_line_until = 0.0
+            return True, not (suppress or transient_suppress)
         return False, False
 
 
