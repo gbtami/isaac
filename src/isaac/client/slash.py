@@ -286,7 +286,12 @@ async def handle_slash_command(
 
     entry = SLASH_HANDLERS.get(command)
     if entry is None:
-        return False
+        if command in state.available_agent_commands:
+            # Forward agent-advertised slash commands to the server.
+            return False
+        print(f"[unknown slash command: {command}]")
+        _handle_help(conn, session_id, state, permission_reset, "")
+        return True
 
     try:
         result = entry.handler(conn, session_id, state, permission_reset, argument)

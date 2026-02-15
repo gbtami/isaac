@@ -212,13 +212,31 @@ async def test_status_hides_duplicate_model_in_usage_line(capsys: pytest.Capture
 
 
 @pytest.mark.asyncio
-async def test_unknown_slash_command_falls_through_to_agent() -> None:
+async def test_unknown_slash_command_prints_help(capsys: pytest.CaptureFixture[str]) -> None:
     conn = AsyncMock()
     state = SessionUIState(
         current_mode="ask",
         current_model="openai:gpt-5",
         mcp_servers=[],
         available_agent_commands={},
+    )
+
+    handled = await handle_slash_command("/custom-cmd arg", conn, "session-5", state, lambda: None)
+
+    assert handled is True
+    out = capsys.readouterr().out
+    assert "[unknown slash command: /custom-cmd]" in out
+    assert "Available slash commands:" in out
+
+
+@pytest.mark.asyncio
+async def test_agent_advertised_slash_command_falls_through_to_agent() -> None:
+    conn = AsyncMock()
+    state = SessionUIState(
+        current_mode="ask",
+        current_model="openai:gpt-5",
+        mcp_servers=[],
+        available_agent_commands={"/custom-cmd": "agent extension command"},
     )
 
     handled = await handle_slash_command("/custom-cmd arg", conn, "session-5", state, lambda: None)
