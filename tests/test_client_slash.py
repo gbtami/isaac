@@ -156,6 +156,27 @@ async def test_status_restores_suppression_when_refresh_fails(capsys: pytest.Cap
 
 
 @pytest.mark.asyncio
+async def test_status_hides_duplicate_model_in_usage_line(capsys: pytest.CaptureFixture[str]) -> None:
+    conn = AsyncMock()
+    conn.prompt = AsyncMock(return_value=None)
+    state = SessionUIState(
+        current_mode="ask",
+        current_model="openai:gpt-5",
+        mcp_servers=[],
+        session_id="session-dup-model",
+        cwd="/tmp/project",
+        usage_summary="Usage: input=100, output=20, context remaining ~95% of 2000 tokens",
+    )
+
+    handled = await _handle_status(conn, "session-dup-model", state, lambda: None, "")
+
+    assert handled is True
+    out = capsys.readouterr().out
+    assert "Usage: input=100, output=20, context remaining ~95% of 2000 tokens" in out
+    assert "(model=" not in out
+
+
+@pytest.mark.asyncio
 async def test_unknown_slash_command_falls_through_to_agent() -> None:
     conn = AsyncMock()
     state = SessionUIState(

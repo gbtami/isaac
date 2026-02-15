@@ -51,7 +51,9 @@ def format_usage_summary(usage: Any, context_limit: int | None, model_id: str) -
     if context_limit is not None and input_tokens is not None:
         remaining = max(0, context_limit - input_tokens)
         pct_left = max(0.0, remaining / context_limit * 100.0)
-        remaining_txt = f"context remaining ~{pct_left:.0f}% of {context_limit} tokens (model={model_id or 'unknown'})"
+        # The active model is already surfaced in status UI/session metadata, so
+        # keep usage summaries focused on token numbers and context headroom.
+        remaining_txt = f"context remaining ~{pct_left:.0f}% of {context_limit} tokens"
 
     if not parts and not remaining_txt:
         return "Usage data unavailable for the last run."
