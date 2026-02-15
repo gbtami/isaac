@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
 from typing import Any, Sequence
 
 from pydantic_ai import messages as ai_messages  # type: ignore
@@ -36,16 +37,16 @@ async def sanitize_message_history(
                 if isinstance(part, ai_messages.SystemPromptPart):
                     cleaned = _clean_content_text(part.content)
                     if cleaned:
-                        cleaned_parts.append(ai_messages.SystemPromptPart(content=cleaned))
+                        cleaned_parts.append(replace(part, content=cleaned))
                     continue
                 if isinstance(part, ai_messages.UserPromptPart):
                     cleaned = _clean_content_text(part.content)
                     if cleaned:
-                        cleaned_parts.append(ai_messages.UserPromptPart(content=cleaned))
+                        cleaned_parts.append(replace(part, content=cleaned))
                     continue
                 cleaned_parts.append(part)
             if cleaned_parts:
-                cleaned_messages.append(ai_messages.ModelRequest(parts=cleaned_parts))
+                cleaned_messages.append(replace(message, parts=cleaned_parts))
             continue
         if isinstance(message, ai_messages.ModelResponse):
             cleaned_parts = []
@@ -53,11 +54,11 @@ async def sanitize_message_history(
                 if isinstance(part, ai_messages.TextPart):
                     cleaned = _clean_content_text(part.content)
                     if cleaned:
-                        cleaned_parts.append(ai_messages.TextPart(content=cleaned))
+                        cleaned_parts.append(replace(part, content=cleaned))
                     continue
                 cleaned_parts.append(part)
             if cleaned_parts:
-                cleaned_messages.append(ai_messages.ModelResponse(parts=cleaned_parts))
+                cleaned_messages.append(replace(message, parts=cleaned_parts))
             continue
         cleaned_messages.append(message)
     return cleaned_messages
