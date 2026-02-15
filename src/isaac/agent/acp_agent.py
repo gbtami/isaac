@@ -50,7 +50,7 @@ class ACPAgent(
         *,
         agent_name: str = "isaac",
         agent_title: str = "Isaac ACP Agent",
-        agent_version: str = "0.1.1",
+        agent_version: str = "0.2.0",
         runner_factory: RunnerFactory | None = None,
     ) -> None:
         self._conn: AgentSideConnection | None = conn

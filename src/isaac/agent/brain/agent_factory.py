@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from typing import Any, Callable
 
-from dotenv import load_dotenv
 from pydantic_ai import Agent as PydanticAgent  # type: ignore
 from pydantic_ai import DeferredToolRequests  # type: ignore
 
@@ -15,7 +14,7 @@ from isaac.agent.brain.prompt import SUBAGENT_INSTRUCTIONS, SYSTEM_PROMPT
 from isaac.agent.brain.tool_policies import build_prepare_tools_for_mode
 from isaac.agent.oauth.code_assist.prompt import antigravity_instructions
 from isaac.agent.oauth.openai_codex.prompt import codex_instructions
-from isaac.agent.models import ENV_FILE, load_models_config, _build_provider_model
+from isaac.agent.models import load_models_config, load_runtime_env, _build_provider_model
 
 
 def create_subagent_for_model(
@@ -24,11 +23,11 @@ def create_subagent_for_model(
     toolsets: list[Any] | None = None,
     system_prompt: str | None = None,
     session_mode_getter: Callable[[], str] | None = None,
+    session_cwd: str | None = None,
 ) -> AgentRunner:
     """Build a single-runner agent for subagent mode."""
 
-    load_dotenv(ENV_FILE, override=False)
-    load_dotenv()
+    load_runtime_env(session_cwd)
     config = load_models_config()
     models_cfg = config.get("models", {})
     if model_id not in models_cfg:

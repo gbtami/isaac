@@ -36,6 +36,7 @@ def _make_env() -> tuple[PromptEnv, AsyncMock]:
     notify = AsyncMock()
     env = PromptEnv(
         session_modes={},
+        session_cwds={},
         session_last_chunk={},
         send_message_chunk=noop,
         send_thought_chunk=noop,

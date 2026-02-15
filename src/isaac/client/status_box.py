@@ -51,6 +51,7 @@ def _format_usage_summary(usage_summary: str | None) -> str:
 def build_status_toolbar(state: SessionUIState) -> list[tuple[str, str]]:
     mode = state.current_mode or "unknown"
     model = state.current_model or "unknown"
+    version = state.agent_version or "unknown"
     mcp = _format_mcp_summary(state.mcp_servers)
 
     usage_text = state.usage_summary
@@ -69,6 +70,9 @@ def build_status_toolbar(state: SessionUIState) -> list[tuple[str, str]]:
         gap,
         ("class:toolbar.label", "Model: "),
         ("class:toolbar.value", model),
+        gap,
+        ("class:toolbar.label", "Version: "),
+        ("class:toolbar.value", version),
         gap,
         ("class:toolbar.label", "MCP: "),
         ("class:toolbar.value", mcp),
@@ -99,11 +103,12 @@ def build_status_banner(state: SessionUIState) -> str:
     session_id = state.session_id or "<unknown>"
     mode = state.current_mode or "unknown"
     model_line = _format_model_intro(state.current_model)
+    version = state.agent_version or "unknown"
     mcp = ", ".join(state.mcp_servers) if state.mcp_servers else "none"
     usage = _format_usage_summary(state.usage_summary)
 
     lines = [
-        "🍏 Isaac CLI Status 🍏",
+        f"🍏 Isaac v{version} 🍏",
         "Send /help for help information.",
         "",
         f"Session: {session_id}",

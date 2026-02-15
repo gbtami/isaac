@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+import os
 from pathlib import Path
 from unittest.mock import AsyncMock
 
@@ -16,6 +18,22 @@ from isaac.agent.slash import handle_slash_command
 
 def _raise_model_error(*_: object, **__: object) -> object:
     raise RuntimeError("boom")
+
+
+def test_load_runtime_env_prefers_session_cwd(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    shared_env = tmp_path / "xdg" / "isaac" / ".env"
+    shared_env.parent.mkdir(parents=True, exist_ok=True)
+    shared_env.write_text("OPENROUTER_API_KEY=shared-key\n", encoding="utf-8")
+    project_dir = tmp_path / "project"
+    project_dir.mkdir(parents=True, exist_ok=True)
+    (project_dir / ".env").write_text("OPENROUTER_API_KEY=session-key\n", encoding="utf-8")
+
+    monkeypatch.setattr(model_registry, "ENV_FILE", shared_env)
+    monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
+
+    model_registry.load_runtime_env(project_dir)
+
+    assert os.getenv("OPENROUTER_API_KEY") == "session-key"
 
 
 @pytest.mark.asyncio
@@ -42,6 +60,48 @@ async def test_set_config_option_model_changes_runner(monkeypatch, tmp_path: Pat
     assert agent_chunks
     assert any(getattr(c.content, "text", "") and "Error" not in getattr(c.content, "text", "") for c in agent_chunks)
     assert response.stop_reason == "end_turn"
+
+
+@pytest.mark.asyncio
+async def test_set_config_option_model_uses_session_cwd_env(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "xdg"))
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
+
+    local_models = tmp_path / "xdg" / "isaac" / "models.json"
+    monkeypatch.setattr(model_registry, "LOCAL_MODELS_FILE", local_models)
+    local_models.parent.mkdir(parents=True, exist_ok=True)
+    local_models.write_text(
+        json.dumps(
+            {
+                "models": {
+                    "openrouter:test-openrouter": {
+                        "provider": "openrouter",
+                        "model": "openai/gpt-5",
+                        "description": "test openrouter model",
+                    }
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    project_dir = tmp_path / "project"
+    project_dir.mkdir(parents=True, exist_ok=True)
+    (project_dir / ".env").write_text("OPENROUTER_API_KEY=session-key\n", encoding="utf-8")
+
+    conn = AsyncMock(spec=AgentSideConnection)
+    conn.session_update = AsyncMock()
+    agent = ACPAgent(conn)
+    session = await agent.new_session(cwd=str(project_dir), mcp_servers=[])
+
+    await agent.set_config_option(
+        config_id="model",
+        session_id=session.session_id,
+        value="openrouter:test-openrouter",
+    )
+
+    assert agent._session_model_ids[session.session_id] == "openrouter:test-openrouter"
 
 
 @pytest.mark.asyncio

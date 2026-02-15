@@ -37,6 +37,7 @@ async def set_session_model(
             toolsets=toolsets,
             system_prompt=system_prompt,
             session_mode_getter=lambda: env.session_modes.get(session_id, "ask"),
+            session_cwd=str(env.session_cwds.get(session_id, "")) or None,
         )
         state.runner = executor
         state.model_id = model_id
@@ -75,6 +76,7 @@ async def build_runner(
             toolsets=toolsets,
             system_prompt=system_prompt,
             session_mode_getter=lambda: env.session_modes.get(session_id, "ask"),
+            session_cwd=str(env.session_cwds.get(session_id, "")) or None,
         )
         state.model_id = model_registry.current_model_id()
         state.runner = executor

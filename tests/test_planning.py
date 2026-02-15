@@ -23,6 +23,7 @@ async def test_run_command_tool_start_includes_string_args():
     request_perm = AsyncMock(return_value=True)
     env = PromptEnv(
         session_modes={"s": "ask"},
+        session_cwds={},
         session_last_chunk={},
         send_message_chunk=noop,
         send_thought_chunk=noop,

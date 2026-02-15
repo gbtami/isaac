@@ -214,6 +214,7 @@ async def test_subagent_history_compaction(monkeypatch):
     noop = AsyncMock()
     env = PromptEnv(
         session_modes={},
+        session_cwds={},
         session_last_chunk={},
         send_message_chunk=noop,
         send_thought_chunk=noop,
@@ -542,6 +543,7 @@ async def test_delegate_tool_emits_thought_without_text_progress(monkeypatch):
             request_run_permission=AsyncMock(return_value=True),
             send_update=send_update,
             mode_getter=lambda: "ask",
+            cwd_getter=lambda: None,
         )
     )
     try:

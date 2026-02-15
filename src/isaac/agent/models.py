@@ -17,6 +17,7 @@ from pathlib import Path
 from typing import Any, Callable, Dict
 
 import httpx
+from dotenv import load_dotenv
 from pydantic_ai.models import Model  # type: ignore
 from pydantic_ai.models.anthropic import AnthropicModel, AnthropicModelSettings  # type: ignore
 from pydantic_ai.models.bedrock import BedrockConverseModel  # type: ignore
@@ -102,6 +103,25 @@ LOCAL_MODELS_FILE = Path(__file__).parent.parent / "models.json"
 USER_MODELS_FILE = CONFIG_DIR / "models.json"
 MODELS_DEV_SNAPSHOT_FILE = Path(__file__).parent / "data" / "models_dev_api.json"
 MODELS_DEV_CATALOG_FILE = Path(__file__).parent / "data" / "models_dev_catalog.json"
+
+
+def load_runtime_env(session_cwd: Path | str | None = None) -> None:
+    """Load shared and session-local environment files.
+
+    Shared config is loaded from ``~/.config/isaac/.env`` first, then a session
+    ``.env`` (when provided) overrides those values.
+    """
+
+    load_dotenv(ENV_FILE, override=False)
+    if session_cwd is None:
+        load_dotenv(override=True)
+        return
+    try:
+        cwd = Path(session_cwd).expanduser()
+    except TypeError:
+        load_dotenv(override=True)
+        return
+    load_dotenv(cwd / ".env", override=True)
 
 
 def load_models_config() -> Dict[str, Any]:

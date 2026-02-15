@@ -27,6 +27,23 @@ from isaac.log_utils import build_log_config, configure_logging, log_event
 logger = logging.getLogger(__name__)
 
 
+def _extract_agent_version(init_resp: Any) -> str | None:
+    """Read agent version from initialize response across SDK model variations."""
+
+    info = getattr(init_resp, "agent_info", None)
+    if info is None:
+        info = getattr(init_resp, "agentInfo", None)
+    if info is None:
+        return None
+    version = getattr(info, "version", None)
+    if version is None and isinstance(info, dict):
+        version = info.get("version")
+    if version is None:
+        return None
+    text = str(version).strip()
+    return text or None
+
+
 async def run_client(program: str, args: Iterable[str], mcp_servers: list[Any]) -> int:
     _setup_client_logging()
     log_event(logger, "client.start", program=program)
@@ -62,7 +79,7 @@ async def run_client(program: str, args: Iterable[str], mcp_servers: list[Any]) 
             fs=FileSystemCapability(read_text_file=False, write_text_file=False),
             terminal=True,
         ),
-        client_info=Implementation(name="example-client", title="Example Client", version="0.1.1"),
+        client_info=Implementation(name="example-client", title="Example Client", version="0.2.0"),
     )
     if init_resp.protocol_version != PROTOCOL_VERSION:
         print(
@@ -76,6 +93,8 @@ async def run_client(program: str, args: Iterable[str], mcp_servers: list[Any]) 
             with contextlib.suppress(ProcessLookupError):
                 await proc.wait()
         return 1
+    state.agent_version = _extract_agent_version(init_resp)
+    state.notify_changed()
     state.mcp_servers = [
         (srv.get("name") if isinstance(srv, dict) else getattr(srv, "name", "<server>")) or "<server>"
         for srv in mcp_servers

@@ -12,7 +12,6 @@ import uuid
 from dataclasses import dataclass
 from typing import Any, Awaitable, Callable
 
-from dotenv import load_dotenv
 from pydantic import BaseModel
 from pydantic_ai import Agent as PydanticAgent  # type: ignore
 from pydantic_ai import DeferredToolRequests  # type: ignore
@@ -27,7 +26,7 @@ from isaac.agent.brain.history_processors import sanitize_message_history
 from isaac.agent.brain.instrumentation import base_run_metadata, pydantic_ai_instrument_enabled
 from isaac.agent.brain.prompt import SYSTEM_PROMPT
 from isaac.agent.brain.tool_policies import build_prepare_tools_for_mode
-from isaac.agent.models import ENV_FILE, load_models_config, _build_provider_model
+from isaac.agent.models import load_models_config, load_runtime_env, _build_provider_model
 from isaac.agent.runner import stream_with_runner
 from isaac.log_utils import log_context as log_ctx, log_event
 
@@ -58,6 +57,7 @@ class DelegateToolContext:
     request_run_permission: Callable[[str, str, str, str | None], Awaitable[bool]]
     send_update: Callable[[Any], Awaitable[None]]
     mode_getter: Callable[[], str]
+    cwd_getter: Callable[[], str | None]
 
 
 def set_delegate_tool_context(ctx: DelegateToolContext) -> contextvars.Token[DelegateToolContext | None]:
@@ -208,11 +208,11 @@ def _build_delegate_agent(
     spec: DelegateToolSpec,
     *,
     mode_getter: Callable[[], str] | None = None,
+    session_cwd: str | None = None,
 ) -> AgentRunner:
     """Create a delegate agent for the current session model."""
 
-    load_dotenv(ENV_FILE, override=False)
-    load_dotenv()
+    load_runtime_env(session_cwd)
     config = load_models_config()
     model_id = model_registry.current_model_id()
     models_cfg = config.get("models", {})
@@ -497,8 +497,9 @@ async def run_delegate_tool(
     send_update = delegate_ctx.send_update if delegate_ctx else None
     parent_session_id = delegate_ctx.session_id if delegate_ctx else None
     mode_getter = delegate_ctx.mode_getter if delegate_ctx else (lambda: "ask")
+    session_cwd = delegate_ctx.cwd_getter() if delegate_ctx else None
     try:
-        agent = _build_delegate_agent(spec, mode_getter=mode_getter)
+        agent = _build_delegate_agent(spec, mode_getter=mode_getter, session_cwd=session_cwd)
         active_agent = agent
         prompt = _build_delegate_prompt(task, context, carryover_summary)
 

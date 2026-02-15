@@ -5,6 +5,7 @@ from __future__ import annotations
 import contextlib
 from dataclasses import dataclass
 import logging
+from pathlib import Path
 from typing import Any, Awaitable, Callable, Dict
 
 from pydantic_ai.messages import FunctionToolCallEvent, FunctionToolResultEvent, RetryPromptPart
@@ -22,6 +23,7 @@ class PromptEnv:
     """Environment/state shared by the prompt runner."""
 
     session_modes: Dict[str, str]
+    session_cwds: Dict[str, Path]
     session_last_chunk: Dict[str, str | None]
     send_message_chunk: Callable[[str, str], Awaitable[None]]
     send_thought_chunk: Callable[[str, str], Awaitable[None]]

@@ -16,6 +16,7 @@ class SessionUIState:
     current_mode: str
     current_model: str
     mcp_servers: list[str]
+    agent_version: str | None = None
     collect_models: bool = False
     model_buffer: list[str] | None = None
     show_welcome_on_start: bool = True
