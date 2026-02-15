@@ -103,6 +103,9 @@ class PromptHandler:
             toolsets=toolsets,
             system_prompt=system_prompt,
             runner_factory=self._runner_factory,
+            auto_compact_ratio=self._AUTO_COMPACT_RATIO,
+            compact_user_message_max_tokens=self._COMPACT_USER_MESSAGE_MAX_TOKENS,
+            max_history_messages=self._MAX_HISTORY_MESSAGES,
         )
 
     async def handle_prompt(
@@ -158,7 +161,7 @@ class PromptHandler:
             if not content:
                 return
             role = str(msg.get("role") or "assistant")
-            state.history.append({"role": role, "content": content})
+            state.history.append({"role": role, "content": content, "source": "tool_summary"})
 
         async def _maybe_capture_plan(event: Any) -> None:
             if not isinstance(event, FunctionToolResultEvent):
@@ -202,8 +205,11 @@ class PromptHandler:
             record_recent_file(state.recent_files, event, self._MAX_RECENT_FILES)
             return handled
 
-        prompt_text = self._prepare_prompt_text(state, prompt_text)
-        state.history.append({"role": "user", "content": prompt_text})
+        raw_prompt_text = prompt_text
+        prompt_text = self._prepare_prompt_text(state, raw_prompt_text)
+        # Persist the original user intent (not provider-specific bootstrap text)
+        # so future turns and compaction keep clean, user-authored context only.
+        state.history.append({"role": "user", "content": raw_prompt_text, "source": "user"})
 
         async def _request_tool_approval(tool_call_id: str, tool_name: str, args: dict[str, Any]) -> bool:
             if tool_name != "run_command":
@@ -274,7 +280,7 @@ class PromptHandler:
         if response_text:
             payload = response_text if response_text.endswith("\n") else f"{response_text}\n"
             await self.env.send_message_chunk(session_id, payload)
-            state.history.append({"role": "assistant", "content": response_text})
+            state.history.append({"role": "assistant", "content": response_text, "source": "assistant"})
         if plan_progress and plan_progress.get("plan"):
             await self.env.send_plan_update(session_id, plan_progress["plan"], None, "completed")
         with log_ctx(session_id=session_id, model_id=state.model_id):
@@ -287,6 +293,10 @@ class PromptHandler:
             )
         normalized_usage = normalize_usage(usage)
         state.last_usage_total_tokens = extract_usage_total(normalized_usage)
+        if state.last_usage_total_tokens is not None:
+            # Keep a compaction-era cumulative usage signal. We reset it when
+            # compaction runs, so this tracks growth pressure between compactions.
+            state.usage_total_tokens_since_compaction += max(state.last_usage_total_tokens, 0)
         self.env.set_usage(session_id, normalized_usage)
         with log_ctx(session_id=session_id, model_id=state.model_id):
             log_event(logger, "prompt.handle.complete")
@@ -304,6 +314,8 @@ class PromptHandler:
         state.model_id = state.model_id or model_registry.current_model_id()
         state.model_error = None
         state.model_error_notified = False
+        state.usage_total_tokens_since_compaction = 0
+        state.last_compaction_checkpoint = None
 
     def session_ids(self) -> list[str]:
         return list(self._sessions.keys())
@@ -316,6 +328,8 @@ class PromptHandler:
             "history": list(state.history),
             "model_id": state.model_id,
             "recent_files": list(state.recent_files),
+            "usage_total_tokens_since_compaction": state.usage_total_tokens_since_compaction,
+            "last_compaction_checkpoint": state.last_compaction_checkpoint,
         }
 
     async def restore_snapshot(self, session_id: str, snapshot: dict[str, Any]) -> None:
@@ -326,3 +340,9 @@ class PromptHandler:
         state.history = list(snapshot.get("history") or [])
         state.model_id = snapshot.get("model_id") or state.model_id
         state.recent_files = list(snapshot.get("recent_files") or [])
+        usage_since_compaction = snapshot.get("usage_total_tokens_since_compaction")
+        state.usage_total_tokens_since_compaction = (
+            int(usage_since_compaction) if isinstance(usage_since_compaction, int) else 0
+        )
+        checkpoint = snapshot.get("last_compaction_checkpoint")
+        state.last_compaction_checkpoint = checkpoint if isinstance(checkpoint, dict) else None

@@ -212,3 +212,87 @@ def test_prompt_handler_compaction_drops_oldest_when_needed():
     assert trimmed
     assert len(trimmed) == 1
     assert trimmed[0]["content"].startswith("c")
+
+
+def test_collect_user_messages_skips_synthetic_bootstrap():
+    history = [
+        {"role": "user", "content": "You are a coding agent running in the Codex CLI."},
+        {"role": "user", "content": "real user request"},
+        {"role": "user", "content": "another", "synthetic": True},
+    ]
+
+    collected = compaction_utils.collect_user_messages(history)
+
+    assert collected == ["real user request"]
+
+
+@pytest.mark.asyncio
+async def test_prompt_handler_compaction_retries_on_context_overflow(monkeypatch):
+    calls: list[int] = []
+
+    async def fake_stream_with_runner(
+        _runner,
+        _prompt: str,
+        *_: object,
+        history=None,
+        **__: object,
+    ):
+        calls.append(len(history or []))
+        if len(calls) == 1:
+            return "Provider error: maximum context length exceeded", None
+        return "summary after retry", None
+
+    monkeypatch.setattr("isaac.agent.brain.compaction.stream_with_runner", fake_stream_with_runner)
+    monkeypatch.setattr("isaac.agent.brain.compaction.model_registry.get_context_limit", lambda *_: 200)
+
+    env, _ = _make_env()
+    state = SessionState(
+        runner=object(),
+        model_id="m",
+        history=[
+            {"role": "user", "content": "first"},
+            {"role": "assistant", "content": "second"},
+            {"role": "user", "content": "third"},
+        ],
+        last_usage_total_tokens=120,
+    )
+
+    await _compact_history(env, state, ratio=0.5)
+
+    assert len(calls) == 2
+    assert calls[1] == calls[0] - 1
+    assert "summary" in state.history[-1]["content"].lower()
+
+
+@pytest.mark.asyncio
+async def test_prompt_handler_compacts_from_usage_since_compaction(monkeypatch):
+    invoked = {"called": False}
+
+    async def fake_stream_with_runner(
+        _runner,
+        _prompt: str,
+        *_: object,
+        history=None,
+        **__: object,
+    ):
+        _ = history
+        invoked["called"] = True
+        return "summary", None
+
+    monkeypatch.setattr("isaac.agent.brain.compaction.stream_with_runner", fake_stream_with_runner)
+    monkeypatch.setattr("isaac.agent.brain.compaction.model_registry.get_context_limit", lambda *_: 200)
+
+    env, _ = _make_env()
+    state = SessionState(
+        runner=object(),
+        model_id="m",
+        history=[
+            {"role": "user", "content": "short"},
+            {"role": "assistant", "content": "done"},
+        ],
+        usage_total_tokens_since_compaction=150,
+    )
+
+    await _compact_history(env, state, ratio=0.5)
+
+    assert invoked["called"]

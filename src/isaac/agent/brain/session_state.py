@@ -18,5 +18,7 @@ class SessionState:
     history: list[ChatMessage] = field(default_factory=list)
     recent_files: list[str] = field(default_factory=list)
     last_usage_total_tokens: int | None = None
+    usage_total_tokens_since_compaction: int = 0
+    last_compaction_checkpoint: dict[str, Any] | None = None
     model_error: str | None = None
     model_error_notified: bool = False
