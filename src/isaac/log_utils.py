@@ -12,7 +12,9 @@ from logging.handlers import RotatingFileHandler
 from pathlib import Path
 from typing import Any, Dict, Iterator
 
-DEFAULT_LOG_DIR = Path.home() / ".isaac"
+from isaac.paths import log_dir
+
+DEFAULT_LOG_DIR = log_dir()
 DEFAULT_LOG_MAX_BYTES = 5_000_000
 DEFAULT_LOG_BACKUPS = 3
 

@@ -26,7 +26,6 @@ class PromptMixin:
         """Construct the prompt handler."""
         env = build_prompt_env(
             session_modes=self._session_modes,
-            session_cwds=self._session_cwds,
             session_last_chunk=self._session_last_chunk,
             send_update=self._send_update,
             request_run_permission=lambda session_id, tool_call_id, command, cwd: self._request_run_permission(  # type: ignore[arg-type]

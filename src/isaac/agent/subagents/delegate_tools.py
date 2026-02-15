@@ -57,7 +57,6 @@ class DelegateToolContext:
     request_run_permission: Callable[[str, str, str, str | None], Awaitable[bool]]
     send_update: Callable[[Any], Awaitable[None]]
     mode_getter: Callable[[], str]
-    cwd_getter: Callable[[], str | None]
 
 
 def set_delegate_tool_context(ctx: DelegateToolContext) -> contextvars.Token[DelegateToolContext | None]:
@@ -208,11 +207,10 @@ def _build_delegate_agent(
     spec: DelegateToolSpec,
     *,
     mode_getter: Callable[[], str] | None = None,
-    session_cwd: str | None = None,
 ) -> AgentRunner:
     """Create a delegate agent for the current session model."""
 
-    load_runtime_env(session_cwd)
+    load_runtime_env()
     config = load_models_config()
     model_id = model_registry.current_model_id()
     models_cfg = config.get("models", {})
@@ -497,9 +495,8 @@ async def run_delegate_tool(
     send_update = delegate_ctx.send_update if delegate_ctx else None
     parent_session_id = delegate_ctx.session_id if delegate_ctx else None
     mode_getter = delegate_ctx.mode_getter if delegate_ctx else (lambda: "ask")
-    session_cwd = delegate_ctx.cwd_getter() if delegate_ctx else None
     try:
-        agent = _build_delegate_agent(spec, mode_getter=mode_getter, session_cwd=session_cwd)
+        agent = _build_delegate_agent(spec, mode_getter=mode_getter)
         active_agent = agent
         prompt = _build_delegate_prompt(task, context, carryover_summary)
 

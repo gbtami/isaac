@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from pathlib import Path
 from typing import Any, Dict
 from pydantic_ai.messages import FunctionToolResultEvent  # type: ignore
 from pydantic_ai.usage import UsageLimits  # type: ignore
@@ -228,7 +227,6 @@ class PromptHandler:
                 request_run_permission=self.env.request_run_permission,
                 send_update=self.env.send_protocol_update,
                 mode_getter=lambda: self.env.session_modes.get(session_id, "ask"),
-                cwd_getter=lambda: str(self.env.session_cwds.get(session_id, Path.cwd())),
             )
         )
         try:

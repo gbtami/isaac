@@ -10,8 +10,8 @@ from __future__ import annotations
 import inspect
 import json
 import logging
-import os
 import configparser
+import os
 import re
 from pathlib import Path
 from typing import Any, Callable, Dict
@@ -69,6 +69,7 @@ from isaac.agent.oauth.openai_codex import (
     openai_auth_request_hook,
 )
 from isaac.agent.oauth.openai_codex.client import OpenAICodexAsyncClient
+from isaac.paths import config_dir
 
 logger = logging.getLogger(__name__)
 
@@ -93,8 +94,7 @@ DEFAULT_CONFIG = {
     },
 }
 
-CONFIG_DIR = Path(os.getenv("XDG_CONFIG_HOME") or (Path.home() / ".config")) / "isaac"
-CONFIG_DIR.mkdir(parents=True, exist_ok=True)
+CONFIG_DIR = config_dir()
 ENV_FILE = CONFIG_DIR / ".env"
 
 # Local models.json in the repository
@@ -105,23 +105,10 @@ MODELS_DEV_SNAPSHOT_FILE = Path(__file__).parent / "data" / "models_dev_api.json
 MODELS_DEV_CATALOG_FILE = Path(__file__).parent / "data" / "models_dev_catalog.json"
 
 
-def load_runtime_env(session_cwd: Path | str | None = None) -> None:
-    """Load shared and session-local environment files.
-
-    Shared config is loaded from ``~/.config/isaac/.env`` first, then a session
-    ``.env`` (when provided) overrides those values.
-    """
+def load_runtime_env() -> None:
+    """Load shared environment from the platform config dir."""
 
     load_dotenv(ENV_FILE, override=False)
-    if session_cwd is None:
-        load_dotenv(override=True)
-        return
-    try:
-        cwd = Path(session_cwd).expanduser()
-    except TypeError:
-        load_dotenv(override=True)
-        return
-    load_dotenv(cwd / ".env", override=True)
 
 
 def load_models_config() -> Dict[str, Any]:

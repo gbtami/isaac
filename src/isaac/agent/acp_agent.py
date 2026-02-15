@@ -25,6 +25,7 @@ from isaac.agent.brain.session_ops import RunnerFactory
 from isaac.agent.constants import TOOL_OUTPUT_LIMIT
 from isaac.agent.session_store import SessionStore
 from isaac.log_utils import log_event
+from isaac.paths import state_dir
 
 logger = logging.getLogger(__name__)
 DEFAULT_COMMAND_TIMEOUT_S = 30.0
@@ -74,7 +75,7 @@ class ACPAgent(
         self._command_timeout_s = DEFAULT_COMMAND_TIMEOUT_S
         self._tool_output_limit = TOOL_OUTPUT_LIMIT
         self._terminal_output_limit = TOOL_OUTPUT_LIMIT
-        self._session_store = SessionStore(Path.home() / ".isaac" / "sessions")
+        self._session_store = SessionStore(state_dir() / "sessions")
         self._session_last_chunk: Dict[str, str | None] = {}
         self._runner_factory = runner_factory
         self._prompt_handler: PromptHandler = self._build_prompt_handler()

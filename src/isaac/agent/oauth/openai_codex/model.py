@@ -7,12 +7,12 @@ import json
 import os
 import platform
 from dataclasses import dataclass
-from pathlib import Path
 from typing import Any
 
 import httpx
 
 from isaac.agent.oauth.openai_codex.storage import OAuthTokenSet
+from isaac.paths import config_dir
 
 OPENAI_CODEX_BASE_URL = os.getenv("ISAAC_OPENAI_CODEX_BASE_URL", "https://chatgpt.com/backend-api/codex")
 OPENAI_CODEX_ORIGINATOR = os.getenv("ISAAC_OPENAI_OAUTH_ORIGINATOR", "isaac")
@@ -23,7 +23,7 @@ DEFAULT_CODEX_MODELS = [
     "gpt-5.2-codex",
 ]
 
-CONFIG_DIR = Path(os.getenv("XDG_CONFIG_HOME") or (Path.home() / ".config")) / "isaac"
+CONFIG_DIR = config_dir()
 MODELS_FILE = CONFIG_DIR / "models.json"
 
 

@@ -96,7 +96,6 @@ async def test_tool_kinds_in_updates():
     env = PromptRunner(
         env=PromptEnv(
             session_modes={},
-            session_cwds={},
             session_last_chunk={},
             send_message_chunk=noop,
             send_thought_chunk=noop,

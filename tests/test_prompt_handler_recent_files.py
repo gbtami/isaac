@@ -30,7 +30,6 @@ async def test_prompt_handler_injects_recent_files_context(monkeypatch):
     noop = AsyncMock()
     env = PromptEnv(
         session_modes={},
-        session_cwds={},
         session_last_chunk={},
         send_message_chunk=noop,
         send_thought_chunk=noop,

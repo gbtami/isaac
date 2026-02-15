@@ -7,11 +7,11 @@ import os
 import time
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from pathlib import Path
 from typing import Any
 
-CONFIG_DIR = Path(os.getenv("XDG_CONFIG_HOME") or (Path.home() / ".config")) / "isaac"
-CONFIG_DIR.mkdir(parents=True, exist_ok=True)
+from isaac.paths import config_dir
+
+CONFIG_DIR = config_dir()
 TOKENS_FILE = CONFIG_DIR / "code_assist.json"
 
 

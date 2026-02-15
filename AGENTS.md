@@ -26,7 +26,7 @@ To test isaac with other ACP clients after code changes without bumping the vers
 - Run with another client: `cd ~/toad && uv run toad acp "isaac" --project-dir ~/playground`
 
 ## Environment variables
-- isaac loads a shared `.env` from `~/.config/isaac/.env`, then a `.env` in the current working directory (latter can override). Place provider keys (e.g., `OPENROUTER_API_KEY`) in the config path to use any cwd.
+- isaac loads environment variables from a shared `.env` in the platform config dir (`platformdirs`; Linux example: `~/.config/isaac/.env`). Place provider keys (e.g., `OPENROUTER_API_KEY`) there to use any cwd.
 - `ISAAC_ACP_STDIO_BUFFER_LIMIT_BYTES` optionally overrides ACP stdio pipe buffer limits for both `uv run isaac` and `python -m isaac.client ...` (defaults to `52428800` / 50MB).
 
 ## Required Checks (run every change)

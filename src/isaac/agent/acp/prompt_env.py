@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import contextlib
 from dataclasses import dataclass
-from pathlib import Path
 from typing import Any, Awaitable, Callable
 
 from acp.contrib.tool_calls import ToolCallTracker
@@ -98,7 +97,6 @@ class ACPPromptEnvAdapter:
 def build_prompt_env(
     *,
     session_modes: dict[str, str],
-    session_cwds: dict[str, Path],
     session_last_chunk: dict[str, str | None],
     send_update: Callable[[Any], Awaitable[None]],
     request_run_permission: Callable[[str, str, str, str | None], Awaitable[bool]],
@@ -109,7 +107,6 @@ def build_prompt_env(
     adapter = ACPPromptEnvAdapter(send_update=send_update)
     return PromptEnv(
         session_modes=session_modes,
-        session_cwds=session_cwds,
         session_last_chunk=session_last_chunk,
         send_message_chunk=adapter.send_message_chunk,
         send_thought_chunk=adapter.send_thought_chunk,

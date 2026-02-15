@@ -20,20 +20,17 @@ def _raise_model_error(*_: object, **__: object) -> object:
     raise RuntimeError("boom")
 
 
-def test_load_runtime_env_prefers_session_cwd(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+def test_load_runtime_env_reads_shared_config_env(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     shared_env = tmp_path / "xdg" / "isaac" / ".env"
     shared_env.parent.mkdir(parents=True, exist_ok=True)
     shared_env.write_text("OPENROUTER_API_KEY=shared-key\n", encoding="utf-8")
-    project_dir = tmp_path / "project"
-    project_dir.mkdir(parents=True, exist_ok=True)
-    (project_dir / ".env").write_text("OPENROUTER_API_KEY=session-key\n", encoding="utf-8")
 
     monkeypatch.setattr(model_registry, "ENV_FILE", shared_env)
     monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
 
-    model_registry.load_runtime_env(project_dir)
+    model_registry.load_runtime_env()
 
-    assert os.getenv("OPENROUTER_API_KEY") == "session-key"
+    assert os.getenv("OPENROUTER_API_KEY") == "shared-key"
 
 
 @pytest.mark.asyncio
@@ -63,7 +60,7 @@ async def test_set_config_option_model_changes_runner(monkeypatch, tmp_path: Pat
 
 
 @pytest.mark.asyncio
-async def test_set_config_option_model_uses_session_cwd_env(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
+async def test_set_config_option_model_uses_shared_env(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
     monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "xdg"))
     monkeypatch.setenv("HOME", str(tmp_path))
     monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
@@ -86,14 +83,14 @@ async def test_set_config_option_model_uses_session_cwd_env(monkeypatch: pytest.
         encoding="utf-8",
     )
 
-    project_dir = tmp_path / "project"
-    project_dir.mkdir(parents=True, exist_ok=True)
-    (project_dir / ".env").write_text("OPENROUTER_API_KEY=session-key\n", encoding="utf-8")
+    shared_env = tmp_path / "xdg" / "isaac" / ".env"
+    shared_env.write_text("OPENROUTER_API_KEY=shared-key\n", encoding="utf-8")
+    monkeypatch.setattr(model_registry, "ENV_FILE", shared_env)
 
     conn = AsyncMock(spec=AgentSideConnection)
     conn.session_update = AsyncMock()
     agent = ACPAgent(conn)
-    session = await agent.new_session(cwd=str(project_dir), mcp_servers=[])
+    session = await agent.new_session(cwd=str(tmp_path), mcp_servers=[])
 
     await agent.set_config_option(
         config_id="model",

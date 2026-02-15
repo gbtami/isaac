@@ -23,11 +23,10 @@ def create_subagent_for_model(
     toolsets: list[Any] | None = None,
     system_prompt: str | None = None,
     session_mode_getter: Callable[[], str] | None = None,
-    session_cwd: str | None = None,
 ) -> AgentRunner:
     """Build a single-runner agent for subagent mode."""
 
-    load_runtime_env(session_cwd)
+    load_runtime_env()
     config = load_models_config()
     models_cfg = config.get("models", {})
     if model_id not in models_cfg:

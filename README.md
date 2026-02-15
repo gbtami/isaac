@@ -41,8 +41,7 @@ uv run python -m isaac.client uv run isaac
 
 Isaac loads environment variables from:
 
-1. `~/.config/isaac/.env`
-2. `./.env` (current working directory, overrides shared values)
+1. `<platform config dir>/isaac/.env` (via `platformdirs`; Linux example: `~/.config/isaac/.env`)
 
 Common variables:
 
