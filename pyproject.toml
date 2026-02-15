@@ -1,6 +1,6 @@
 [project]
 name = "isaac-acp"
-version = "0.2.0"
+version = "0.3.0"
 description = "ACP-compliant coding agent and reference client."
 readme = "README.md"
 license = { text = "MIT" }
