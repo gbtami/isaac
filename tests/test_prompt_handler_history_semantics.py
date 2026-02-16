@@ -41,7 +41,7 @@ def _make_env() -> PromptEnv:
 
 
 @pytest.mark.asyncio
-async def test_first_turn_stores_raw_user_prompt_not_bootstrap(monkeypatch):
+async def test_first_turn_keeps_raw_prompt_for_openai_codex(monkeypatch):
     from isaac.agent import models as model_registry
 
     monkeypatch.setattr(
@@ -62,5 +62,4 @@ async def test_first_turn_stores_raw_user_prompt_not_bootstrap(monkeypatch):
     assert state.history[0]["role"] == "user"
     assert state.history[0]["content"] == "print hello"
     assert runner.prompt_texts
-    assert runner.prompt_texts[0] != "print hello"
-    assert "you are isaac" in runner.prompt_texts[0].lower()
+    assert runner.prompt_texts[0] == "print hello"

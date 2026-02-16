@@ -29,7 +29,6 @@ from isaac.agent.subagents.delegate_tools import (
 )
 from isaac.agent.tools import register_tools as default_register_tools
 from isaac.agent.usage import normalize_usage
-from isaac.agent.oauth.openai_codex.prompt import compose_codex_user_prompt
 from isaac.agent.oauth.code_assist.prompt import compose_antigravity_user_prompt
 from isaac.log_utils import log_context as log_ctx, log_event
 
@@ -64,9 +63,6 @@ class PromptHandler:
         model_id = state.model_id or ""
         model_entry = model_registry.list_models().get(model_id, {})
         provider = str(model_entry.get("provider") or "").lower()
-        if provider == "openai-codex" and not state.history:
-            system_prompt = state.system_prompt or SYSTEM_PROMPT
-            return compose_codex_user_prompt(system_prompt, prompt_text, SUBAGENT_INSTRUCTIONS)
         if provider == "code-assist" and not state.history:
             system_prompt = state.system_prompt or SYSTEM_PROMPT
             return compose_antigravity_user_prompt(system_prompt, prompt_text, SUBAGENT_INSTRUCTIONS)

@@ -13,7 +13,6 @@ from isaac.agent.brain.instrumentation import base_run_metadata, pydantic_ai_ins
 from isaac.agent.brain.prompt import SUBAGENT_INSTRUCTIONS, SYSTEM_PROMPT
 from isaac.agent.brain.tool_policies import build_prepare_tools_for_mode
 from isaac.agent.oauth.code_assist.prompt import antigravity_instructions
-from isaac.agent.oauth.openai_codex.prompt import codex_instructions
 from isaac.agent.models import load_models_config, load_runtime_env, _build_provider_model
 
 
@@ -40,11 +39,7 @@ def create_subagent_for_model(
     provider = str(model_entry.get("provider") or "").lower()
     effective_system_prompt = SYSTEM_PROMPT if system_prompt is None else system_prompt
     instructions = SUBAGENT_INSTRUCTIONS
-    if provider == "openai-codex":
-        # Codex backend rejects custom instructions; use Codex CLI prompt instead.
-        instructions = codex_instructions()
-        effective_system_prompt = ""
-    elif provider == "code-assist":
+    if provider == "code-assist":
         instructions = antigravity_instructions()
         effective_system_prompt = ""
 
