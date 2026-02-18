@@ -1256,6 +1256,7 @@ source = { editable = "." }
 dependencies = [
     { name = "agent-client-protocol" },
     { name = "aiocache" },
+    { name = "logfire" },
     { name = "pathspec" },
     { name = "platformdirs" },
     { name = "prompt-toolkit" },
@@ -1276,6 +1277,7 @@ test = [
 requires-dist = [
     { name = "agent-client-protocol", specifier = "==0.8.1" },
     { name = "aiocache", specifier = "==0.12.3" },
+    { name = "logfire", specifier = ">=4.16.0" },
     { name = "mypy", marker = "extra == 'test'", specifier = "==1.19.1" },
     { name = "pathspec", specifier = "==1.0.4" },
     { name = "platformdirs", specifier = "==4.9.2" },

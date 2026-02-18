@@ -6,6 +6,8 @@ import asyncio
 import logging
 from dataclasses import replace
 
+import logfire
+
 from isaac.acp_runtime import ACP_STDIO_BUFFER_LIMIT_BYTES
 from isaac.agent.acp_agent import ACPAgent
 from isaac.agent.tools import run_tool
@@ -20,6 +22,7 @@ async def run_acp_agent():
     """Run the ACP server."""
     from acp.core import run_agent  # Imported lazily to avoid hard dependency at import time
 
+    _setup_logfire()
     _setup_acp_logging()
     log_event(logger, "agent.start", transport="stdio")
 
@@ -38,6 +41,21 @@ def _setup_acp_logging():
                 "pydantic_ai.providers": config.level,
             },
         )
+    )
+
+
+def _setup_logfire() -> None:
+    """Configure Logfire without writing to stdout (required for ACP stdio transport)."""
+
+    logfire.configure(
+        send_to_logfire="if-token-present",
+        console=False,
+        inspect_arguments=False,
+    )
+    logfire.instrument_pydantic_ai(
+        include_binary_content=False,
+        include_content=True,
+        # Set include_content=False later if you want to stop exporting prompt/response text.
     )
 
 
