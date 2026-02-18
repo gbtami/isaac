@@ -1,6 +1,8 @@
 # 🍏 Isaac ACP 🍏 (`isaac-acp`)
 
 [![PyPI version](https://img.shields.io/pypi/v/isaac-acp)](https://pypi.org/project/isaac-acp/)
+[![PyPI - Python Version](https://img.shields.io/pypi/pyversions/isaac-acp)](https://pypi.org/project/isaac-acp/)
+[![License](https://img.shields.io/github/license/gbtami/isaac)](https://github.com/gbtami/isaac/blob/main/LICENSE)
 [![Lint](https://github.com/gbtami/isaac/actions/workflows/lint.yml/badge.svg)](https://github.com/gbtami/isaac/actions/workflows/lint.yml)
 [![Tests](https://github.com/gbtami/isaac/actions/workflows/test.yml/badge.svg)](https://github.com/gbtami/isaac/actions/workflows/test.yml)
 
