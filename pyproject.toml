@@ -16,6 +16,7 @@ classifiers = [
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
     "License :: OSI Approved :: MIT License",
     "Topic :: Software Development",
     "Topic :: Software Development :: Libraries",
@@ -23,7 +24,7 @@ classifiers = [
 ]
 dependencies = [
     "agent-client-protocol==0.8.1",
-    "pydantic-ai==1.60.0",
+    "pydantic-ai==1.61.0",
     "aiocache==0.12.3",
     "prompt-toolkit==3.0.52",
     "python-dotenv==1.2.1",
