@@ -13,13 +13,14 @@ from pathlib import Path
 from typing import Any, Iterable
 
 import asyncio.subprocess as aio_subprocess
-from acp import PROTOCOL_VERSION
+from acp import PROTOCOL_VERSION, RequestError
 from acp.core import connect_to_agent
-from acp.schema import ClientCapabilities, FileSystemCapability, Implementation
+from acp.schema import AuthMethod, ClientCapabilities, FileSystemCapability, Implementation
 
 from isaac.acp_runtime import ACP_STDIO_BUFFER_LIMIT_BYTES
-from isaac.client.mcp_config import load_mcp_config
 from isaac.client.acp_client import ACPClient, apply_session_config_options
+from isaac.client.auth import extract_auth_methods, extract_error_auth_methods, select_auth_method
+from isaac.client.mcp_config import load_mcp_config
 from isaac.client.repl import interactive_loop
 from isaac.client.session_state import SessionUIState
 from isaac.log_utils import build_log_config, configure_logging, log_event
@@ -42,6 +43,16 @@ def _extract_agent_version(init_resp: Any) -> str | None:
         return None
     text = str(version).strip()
     return text or None
+
+
+async def _authenticate_if_needed(conn: Any, auth_methods: list[AuthMethod | Any]) -> bool:
+    if not auth_methods:
+        return False
+    method_id = select_auth_method(auth_methods)
+    log_event(logger, "client.authenticate.request", method_id=method_id)
+    await conn.authenticate(method_id=method_id)
+    log_event(logger, "client.authenticate.success", method_id=method_id)
+    return True
 
 
 async def run_client(program: str, args: Iterable[str], mcp_servers: list[Any]) -> int:
@@ -93,6 +104,8 @@ async def run_client(program: str, args: Iterable[str], mcp_servers: list[Any]) 
             with contextlib.suppress(ProcessLookupError):
                 await proc.wait()
         return 1
+    auth_methods = extract_auth_methods(init_resp)
+    authenticated = False
     state.agent_version = _extract_agent_version(init_resp)
     state.notify_changed()
     state.mcp_servers = [
@@ -100,7 +113,15 @@ async def run_client(program: str, args: Iterable[str], mcp_servers: list[Any]) 
         for srv in mcp_servers
     ]
     cwd = os.getcwd()
-    session = await conn.new_session(cwd=cwd, mcp_servers=mcp_servers)
+    try:
+        session = await conn.new_session(cwd=cwd, mcp_servers=mcp_servers)
+    except RequestError as exc:
+        available_auth_methods = auth_methods or extract_error_auth_methods(getattr(exc, "data", None))
+        if exc.code == -32000 and available_auth_methods and not authenticated:
+            authenticated = await _authenticate_if_needed(conn, available_auth_methods)
+            session = await conn.new_session(cwd=cwd, mcp_servers=mcp_servers)
+        else:
+            raise
     state.session_id = session.session_id
     state.cwd = cwd
     if getattr(session, "config_options", None):

@@ -5,7 +5,7 @@ from unittest.mock import AsyncMock
 
 from acp.agent.connection import AgentSideConnection
 from acp import RequestPermissionResponse
-from acp.schema import AllowedOutcome
+from acp.schema import AllowedOutcome, AuthMethod
 import httpx
 from isaac.agent import ACPAgent
 from isaac.agent.tools import register_tools
@@ -14,7 +14,11 @@ from pydantic_ai import DeferredToolRequests  # type: ignore
 from pydantic_ai.models.test import TestModel  # type: ignore
 
 
-def make_function_agent(conn: AgentSideConnection) -> ACPAgent:
+def make_function_agent(
+    conn: AgentSideConnection,
+    *,
+    auth_methods: list[AuthMethod | dict[str, object] | str] | None = None,
+) -> ACPAgent:
     """Helper to build ACPAgent with a deterministic in-process model."""
 
     runner = PydanticAgent(TestModel(call_tools=[]), output_type=[str, DeferredToolRequests])
@@ -32,7 +36,11 @@ def make_function_agent(conn: AgentSideConnection) -> ACPAgent:
             pass
         else:
             conn.request_permission = _default_perm  # type: ignore[attr-defined]
-    return ACPAgent(conn, runner_factory=lambda *_args, **_kwargs: runner)
+    return ACPAgent(
+        conn,
+        runner_factory=lambda *_args, **_kwargs: runner,
+        auth_methods=auth_methods,
+    )
 
 
 def make_error_agent(conn: AgentSideConnection) -> ACPAgent:

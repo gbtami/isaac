@@ -10,6 +10,7 @@ from typing import Any, Dict
 from acp import Agent
 from acp.agent.connection import AgentSideConnection
 
+from isaac.agent.acp.auth_methods import AuthMethodInput, coerce_auth_method, default_auth_methods
 from isaac.agent.acp.extensions import ExtensionsMixin
 from isaac.agent.acp.filesystem import FileSystemMixin
 from isaac.agent.acp.initialization import InitializationMixin
@@ -53,6 +54,7 @@ class ACPAgent(
         agent_title: str = "Isaac ACP Agent",
         agent_version: str = "0.3.0",
         runner_factory: RunnerFactory | None = None,
+        auth_methods: list[AuthMethodInput] | None = None,
     ) -> None:
         self._conn: AgentSideConnection | None = conn
         self._sessions: set[str] = set()
@@ -80,6 +82,9 @@ class ACPAgent(
         self._runner_factory = runner_factory
         self._prompt_handler: PromptHandler = self._build_prompt_handler()
         self._session_system_prompts: Dict[str, str | None] = {}
+        raw_auth_methods = auth_methods if auth_methods is not None else default_auth_methods()
+        self._auth_methods = [coerce_auth_method(item) for item in raw_auth_methods]
+        self._is_authenticated = False
 
     def on_connect(self, conn: AgentSideConnection) -> None:  # type: ignore[override]
         """Capture connection when wiring via run_agent/connect_to_agent."""

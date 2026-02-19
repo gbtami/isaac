@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from acp import AuthenticateResponse, InitializeResponse, PROTOCOL_VERSION
+from acp import AuthenticateResponse, InitializeResponse, PROTOCOL_VERSION, RequestError
 from acp.schema import (
     AgentCapabilities,
     Implementation,
@@ -14,6 +14,8 @@ from acp.schema import (
     SessionCapabilities,
     SessionListCapabilities,
 )
+from isaac.agent.acp.auth_flow import authenticate_method
+from isaac.agent.acp.auth_methods import find_auth_method, normalize_method_id
 from isaac.log_utils import log_event
 
 logger = logging.getLogger(__name__)
@@ -61,9 +63,18 @@ class InitializationMixin:
                 title=self._agent_title,
                 version=self._agent_version,
             ),
+            auth_methods=list(self._auth_methods),
         )
 
     async def authenticate(self, method_id: str, **_: Any) -> AuthenticateResponse | None:
-        """Return a no-op authentication response (Initialization auth step)."""
-        log_event(logger, "acp.authenticate.request", method_id=method_id)
-        return AuthenticateResponse()
+        """Authenticate the client using one of the initialize-advertised methods."""
+        normalized_method = normalize_method_id(method_id)
+        log_event(logger, "acp.authenticate.request", method_id=normalized_method)
+        method = find_auth_method(self._auth_methods, normalized_method)
+        if method is None:
+            log_event(logger, "acp.authenticate.unknown_method", level=logging.WARNING, method_id=normalized_method)
+            raise RequestError.invalid_params({"message": f"Unknown auth method id: {normalized_method}"})
+        response = await authenticate_method(method, method_id=normalized_method)
+        self._is_authenticated = True
+        log_event(logger, "acp.authenticate.success", method_id=normalized_method)
+        return response
