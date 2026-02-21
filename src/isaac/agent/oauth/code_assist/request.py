@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import base64
 import uuid
 from typing import Any
 
@@ -25,7 +26,7 @@ def apply_code_assist_envelope(
         request.setdefault("session_id", _build_session_id(model_name, project_id))
 
     payload.setdefault("project", project_id)
-    return payload
+    return _json_safe(payload)
 
 
 def _build_session_id(model_name: str, project_id: str) -> str:
@@ -84,3 +85,22 @@ def _normalize_tools(request: dict[str, Any]) -> None:
         return
     if other_tools:
         request["tools"] = other_tools[:1]
+
+
+def _json_safe(value: Any) -> Any:
+    """Recursively coerce provider payload values to JSON-serializable types.
+
+    pydantic-ai may pass bytes (e.g. thought signatures) in Google message parts.
+    The Code Assist HTTP path uses httpx ``json=...`` and must not contain raw
+    bytes, so encode binary values as base64 strings.
+    """
+
+    if isinstance(value, dict):
+        return {k: _json_safe(v) for k, v in value.items()}
+    if isinstance(value, list):
+        return [_json_safe(v) for v in value]
+    if isinstance(value, tuple):
+        return [_json_safe(v) for v in value]
+    if isinstance(value, (bytes, bytearray, memoryview)):
+        return base64.b64encode(bytes(value)).decode("ascii")
+    return value

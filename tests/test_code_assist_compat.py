@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import base64
+
 from isaac.agent.oauth.code_assist.client import (
     CodeAssistClient,
     _header_styles,
@@ -22,6 +24,29 @@ def test_code_assist_request_defaults_to_gemini_cli_shape(monkeypatch) -> None:
     assert "userAgent" not in shaped
     assert "session_id" in shaped["request"]
     assert "role" not in shaped["request"]["systemInstruction"]
+
+
+def test_code_assist_request_converts_bytes_to_base64_strings() -> None:
+    payload = {
+        "model": "gemini-2.5-pro",
+        "request": {
+            "contents": [
+                {
+                    "role": "model",
+                    "parts": [
+                        {
+                            "function_call": {"name": "fetch_url", "args": {"url": "https://example.com"}},
+                            "thought_signature": b"skip_thought_signature_validator",
+                        }
+                    ],
+                }
+            ]
+        },
+    }
+    shaped = apply_code_assist_envelope(payload, "gemini-2.5-pro", "projects/test")
+    sig = shaped["request"]["contents"][0]["parts"][0]["thought_signature"]
+    assert isinstance(sig, str)
+    assert sig == base64.b64encode(b"skip_thought_signature_validator").decode("ascii")
 
 
 def test_code_assist_header_styles_default_to_gemini_cli(monkeypatch) -> None:
