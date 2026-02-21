@@ -29,7 +29,7 @@ from isaac.agent.subagents.delegate_tools import (
 )
 from isaac.agent.tools import register_tools as default_register_tools
 from isaac.agent.usage import normalize_usage
-from isaac.agent.oauth.code_assist.prompt import compose_antigravity_user_prompt
+from isaac.agent.oauth.code_assist.prompt import compose_code_assist_user_prompt
 from isaac.log_utils import log_context as log_ctx, log_event
 
 logger = logging.getLogger(__name__)
@@ -65,7 +65,7 @@ class PromptHandler:
         provider = str(model_entry.get("provider") or "").lower()
         if provider == "code-assist" and not state.history:
             system_prompt = state.system_prompt or SYSTEM_PROMPT
-            return compose_antigravity_user_prompt(system_prompt, prompt_text, SUBAGENT_INSTRUCTIONS)
+            return compose_code_assist_user_prompt(system_prompt, prompt_text, SUBAGENT_INSTRUCTIONS)
         return prompt_text
 
     async def init_session(self, session_id: str, toolsets: list[Any], system_prompt: str | None = None) -> None:

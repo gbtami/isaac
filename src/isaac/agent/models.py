@@ -63,6 +63,7 @@ from pydantic_ai.providers.vercel import VercelProvider  # type: ignore
 from pydantic_ai.providers.xai import XaiProvider  # type: ignore
 
 from isaac.agent.oauth.code_assist import CodeAssistModel
+from isaac.agent.oauth.code_assist.storage import load_tokens as load_code_assist_tokens
 from isaac.agent.oauth.openai_codex import (
     OPENAI_CODEX_BASE_URL,
     has_openai_tokens,
@@ -532,6 +533,8 @@ def _build_provider_model(model_id: str, model_entry: Dict[str, Any]) -> tuple[M
         return OpenAIChatModel(str(model_spec), provider=provider_obj), None
 
     if provider == "code-assist":
+        if load_code_assist_tokens() is None:
+            raise RuntimeError("Code Assist tokens not found. Run /login code-assist first.")
         return CodeAssistModel(str(model_spec)), None
 
     if provider == "openrouter":

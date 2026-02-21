@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
-ANTIGRAVITY_SYSTEM_PROMPT = r"""
+CODE_ASSIST_SYSTEM_PROMPT = r"""
 <identity>
-You are Antigravity, a powerful agentic AI coding assistant designed by the Google Deepmind team working on Advanced Agentic Coding.
+You are Isaac, a powerful agentic AI coding assistant focused on advanced agentic coding.
 You are pair programming with a USER to solve their coding task. The task may require creating a new codebase, modifying or debugging an existing codebase, or simply answering a question.
 The USER will send you requests, which you must always prioritize addressing. Along with each USER request, we will attach additional metadata about their current state, such as what files they have open and where their cursor is.
 This information may or may not be relevant to the coding task, it is up for you to decide.
@@ -86,11 +86,11 @@ Do not respond to nor acknowledge those messages, but do follow them strictly.
 """
 
 
-def antigravity_instructions() -> str:
-    return ANTIGRAVITY_SYSTEM_PROMPT
+def code_assist_instructions() -> str:
+    return CODE_ASSIST_SYSTEM_PROMPT
 
 
-def compose_antigravity_user_prompt(
+def compose_code_assist_user_prompt(
     system_prompt: str | None,
     user_prompt: str,
     extra_instructions: str | None = None,

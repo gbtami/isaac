@@ -22,7 +22,7 @@ from acp.schema import (
 )
 
 from isaac.agent import models as model_registry
-from isaac.agent.acp.auth_methods import auth_method_env_var_name, auth_method_payload
+from isaac.agent.acp.auth_methods import auth_method_env_var_name, auth_method_payload, find_auth_method
 from isaac.agent.brain.model_errors import ModelBuildError
 from isaac.agent.brain.prompt import SYSTEM_PROMPT
 from isaac.agent.mcp_support import build_mcp_toolsets
@@ -252,27 +252,52 @@ class SessionLifecycleMixin:
 
     def _auth_required_from_model_build_error(self, exc: ModelBuildError) -> dict[str, Any] | None:
         error_text = str(exc)
+        lowered_error = error_text.lower()
+        matched_method_payloads: list[dict[str, Any]] = []
+        seen_ids: set[str] = set()
+
+        def _append_method_payload_by_id(method_id: str) -> None:
+            method = find_auth_method(self._auth_methods, method_id)
+            if method is None:
+                return
+            payload = auth_method_payload(method)
+            payload_id = str(payload.get("id") or "").strip().lower()
+            if not payload_id or payload_id in seen_ids:
+                return
+            seen_ids.add(payload_id)
+            matched_method_payloads.append(payload)
+
+        # OAuth-style agent auth hints (OpenAI Codex / Code Assist).
+        oauth_hints = {
+            "openai": ("run /login openai", "openai codex oauth tokens not found"),
+            "code-assist": ("run /login code-assist", "code assist tokens not found"),
+        }
+        for method_id, hints in oauth_hints.items():
+            if any(hint in lowered_error for hint in hints):
+                _append_method_payload_by_id(method_id)
+
         env_names = {
             token.strip()
             for token in re.findall(r"\b[A-Z][A-Z0-9_]*\b", error_text)
             if token.strip().endswith(("_API_KEY", "_TOKEN"))
         }
-        if not env_names:
-            return None
 
-        matched_methods = []
         for method in self._auth_methods:
             env_name = auth_method_env_var_name(method)
             if env_name and env_name in env_names:
-                matched_methods.append(auth_method_payload(method))
-        if not matched_methods:
+                method_payload = auth_method_payload(method)
+                payload_id = str(method_payload.get("id") or "").strip().lower()
+                if payload_id and payload_id not in seen_ids:
+                    seen_ids.add(payload_id)
+                    matched_method_payloads.append(method_payload)
+
+        if not matched_method_payloads:
             return None
 
-        primary_missing = next(iter(sorted(env_names)))
-        return {
-            "authMethods": matched_methods,
-            "missingEnvVar": primary_missing,
-        }
+        auth_payload: dict[str, Any] = {"authMethods": matched_method_payloads}
+        if env_names:
+            auth_payload["missingEnvVar"] = next(iter(sorted(env_names)))
+        return auth_payload
 
     async def set_config_option(
         self,

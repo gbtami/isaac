@@ -12,7 +12,7 @@ from isaac.agent.brain.history_processors import sanitize_message_history
 from isaac.agent.brain.instrumentation import base_run_metadata, pydantic_ai_instrument_enabled
 from isaac.agent.brain.prompt import SUBAGENT_INSTRUCTIONS, SYSTEM_PROMPT
 from isaac.agent.brain.tool_policies import build_prepare_tools_for_mode
-from isaac.agent.oauth.code_assist.prompt import antigravity_instructions
+from isaac.agent.oauth.code_assist.prompt import code_assist_instructions
 from isaac.agent.models import load_models_config, load_runtime_env, _build_provider_model
 
 
@@ -40,7 +40,7 @@ def create_subagent_for_model(
     effective_system_prompt = SYSTEM_PROMPT if system_prompt is None else system_prompt
     instructions = SUBAGENT_INSTRUCTIONS
     if provider == "code-assist":
-        instructions = antigravity_instructions()
+        instructions = code_assist_instructions()
         effective_system_prompt = ""
 
     mode_getter = session_mode_getter or (lambda: "ask")

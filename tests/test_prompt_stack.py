@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from isaac.agent.brain import agent_factory
 from isaac.agent.brain.prompt import SUBAGENT_INSTRUCTIONS, SYSTEM_PROMPT
-from isaac.agent.oauth.code_assist.prompt import antigravity_instructions
+from isaac.agent.oauth.code_assist.prompt import code_assist_instructions
 
 
 class _CapturingAgent:
@@ -25,6 +25,12 @@ def test_isaac_prompts_do_not_include_foreign_codex_tool_names() -> None:
     )
     for name in forbidden_names:
         assert name not in prompt_text
+
+
+def test_system_prompt_enforces_isaac_identity() -> None:
+    prompt_text = SYSTEM_PROMPT.lower()
+    assert "who you are" in prompt_text
+    assert "you are isaac" in prompt_text
 
 
 def test_openai_codex_uses_standard_isaac_prompt_stack(monkeypatch) -> None:
@@ -76,4 +82,4 @@ def test_code_assist_still_uses_provider_specific_prompt_stack(monkeypatch) -> N
     )
 
     assert runner.system_prompt == ""
-    assert runner.instructions == antigravity_instructions()
+    assert runner.instructions == code_assist_instructions()

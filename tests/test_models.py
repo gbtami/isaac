@@ -151,6 +151,96 @@ async def test_set_config_option_model_returns_auth_required_for_missing_provide
 
 
 @pytest.mark.asyncio
+async def test_set_config_option_model_returns_auth_required_for_openai_codex_login(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "xdg"))
+    monkeypatch.setenv("HOME", str(tmp_path))
+
+    local_models = tmp_path / "xdg" / "isaac" / "models.json"
+    monkeypatch.setattr(model_registry, "LOCAL_MODELS_FILE", local_models)
+    local_models.parent.mkdir(parents=True, exist_ok=True)
+    local_models.write_text(
+        json.dumps(
+            {
+                "models": {
+                    "openai-codex:test": {
+                        "provider": "openai-codex",
+                        "model": "gpt-5.2-codex",
+                        "description": "test openai codex model",
+                    }
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    conn = AsyncMock(spec=AgentSideConnection)
+    conn.session_update = AsyncMock()
+    agent = ACPAgent(conn)
+    session = await agent.new_session(cwd=str(tmp_path), mcp_servers=[])
+
+    with pytest.raises(RequestError) as exc_info:
+        await agent.set_config_option(
+            config_id="model",
+            session_id=session.session_id,
+            value="openai-codex:test",
+        )
+
+    assert exc_info.value.code == -32000
+    assert isinstance(exc_info.value.data, dict)
+    methods = exc_info.value.data.get("authMethods")
+    assert isinstance(methods, list)
+    method_ids = {str(item.get("id")) for item in methods if isinstance(item, dict)}
+    assert "openai" in method_ids
+
+
+@pytest.mark.asyncio
+async def test_set_config_option_model_returns_auth_required_for_code_assist_login(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "xdg"))
+    monkeypatch.setenv("HOME", str(tmp_path))
+
+    local_models = tmp_path / "xdg" / "isaac" / "models.json"
+    monkeypatch.setattr(model_registry, "LOCAL_MODELS_FILE", local_models)
+    local_models.parent.mkdir(parents=True, exist_ok=True)
+    local_models.write_text(
+        json.dumps(
+            {
+                "models": {
+                    "code-assist:test": {
+                        "provider": "code-assist",
+                        "model": "gemini-2.5-pro",
+                        "description": "test code assist model",
+                    }
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    conn = AsyncMock(spec=AgentSideConnection)
+    conn.session_update = AsyncMock()
+    agent = ACPAgent(conn)
+    session = await agent.new_session(cwd=str(tmp_path), mcp_servers=[])
+
+    with pytest.raises(RequestError) as exc_info:
+        await agent.set_config_option(
+            config_id="model",
+            session_id=session.session_id,
+            value="code-assist:test",
+        )
+
+    assert exc_info.value.code == -32000
+    assert isinstance(exc_info.value.data, dict)
+    methods = exc_info.value.data.get("authMethods")
+    assert isinstance(methods, list)
+    method_ids = {str(item.get("id")) for item in methods if isinstance(item, dict)}
+    assert "code-assist" in method_ids
+
+
+@pytest.mark.asyncio
 async def test_model_build_failure_surfaces_error(monkeypatch, tmp_path: Path):
     monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "xdg"))
     monkeypatch.setenv("HOME", str(tmp_path))

@@ -1,4 +1,4 @@
-"""Request shaping helpers for Google Code Assist (Antigravity)."""
+"""Request shaping helpers for Google Code Assist."""
 
 from __future__ import annotations
 
@@ -8,27 +8,24 @@ from typing import Any
 DEFAULT_MAX_OUTPUT_TOKENS = 64000
 DEFAULT_TOP_K = 64
 DEFAULT_TOP_P = 0.95
-REQUEST_TYPE = "agent"
-USER_AGENT = "antigravity"
 
 
-def apply_antigravity_envelope(payload: dict[str, Any], model_name: str, project_id: str) -> dict[str, Any]:
+def apply_code_assist_envelope(
+    payload: dict[str, Any],
+    model_name: str,
+    project_id: str,
+) -> dict[str, Any]:
     request = payload.get("request")
     if isinstance(request, dict):
         _strip_system_role(request)
         _normalize_tools(request)
         _apply_generation_defaults(request)
-        request.setdefault("sessionId", _build_session_id(model_name, project_id))
+        if "sessionId" in request and "session_id" not in request:
+            request["session_id"] = request.pop("sessionId")
+        request.setdefault("session_id", _build_session_id(model_name, project_id))
 
     payload.setdefault("project", project_id)
-    payload.setdefault("requestId", _build_request_id())
-    payload.setdefault("requestType", REQUEST_TYPE)
-    payload.setdefault("userAgent", USER_AGENT)
     return payload
-
-
-def _build_request_id() -> str:
-    return f"agent-{uuid.uuid4()}"
 
 
 def _build_session_id(model_name: str, project_id: str) -> str:

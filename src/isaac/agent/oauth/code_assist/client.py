@@ -6,6 +6,8 @@ import asyncio
 import json
 import logging
 import os
+import platform
+from importlib.metadata import PackageNotFoundError, version
 from typing import Any, AsyncIterator
 
 import httpx
@@ -17,7 +19,8 @@ CODE_ASSIST_ENDPOINT = primary_code_assist_endpoint()
 CODE_ASSIST_API_VERSION = os.getenv("ISAAC_CODE_ASSIST_API_VERSION", "v1internal")
 CODE_ASSIST_RATE_LIMIT_RETRIES = int(os.getenv("ISAAC_CODE_ASSIST_RATE_LIMIT_RETRIES", "5"))
 CODE_ASSIST_RATE_LIMIT_MAX_WAIT_S = float(os.getenv("ISAAC_CODE_ASSIST_RATE_LIMIT_MAX_WAIT_S", "60"))
-CODE_ASSIST_HEADER_STYLES = os.getenv("ISAAC_CODE_ASSIST_HEADER_STYLES", "antigravity")
+CODE_ASSIST_HEADER_STYLES_ENV = "ISAAC_CODE_ASSIST_HEADER_STYLES"
+DEFAULT_CODE_ASSIST_HEADER_STYLE = "gemini-cli"
 
 _FALLBACK_STATUSES = {403, 404, 408, 429, 500, 502, 503, 504}
 _RATE_LIMIT_MESSAGE_MAX = 240
@@ -41,20 +44,95 @@ class CodeAssistClient:
     def base_url(self) -> str:
         return self._base_url
 
-    async def post_method(self, method: str, payload: dict[str, Any], access_token: str) -> dict[str, Any]:
-        header_styles = _header_styles()
+    async def post_method(
+        self,
+        method: str,
+        payload: dict[str, Any],
+        access_token: str,
+        model_name: str | None = None,
+    ) -> dict[str, Any]:
+        header_style = _header_style()
         last_exc: Exception | None = None
         rate_limit_error: Exception | None = None
         for base_url in self._base_urls:
             url = f"{base_url}:{method}"
             try:
                 advance_endpoint = False
-                for header_style in header_styles:
-                    headers = self._headers(access_token, header_style)
-                    last_response: httpx.Response | None = None
-                    switch_style = False
-                    for attempt in range(CODE_ASSIST_RATE_LIMIT_RETRIES):
-                        response = await self._client.post(url, json=payload, headers=headers)
+                headers = self._headers(access_token, model_name=model_name)
+                last_response: httpx.Response | None = None
+                for attempt in range(CODE_ASSIST_RATE_LIMIT_RETRIES):
+                    response = await self._client.post(url, json=payload, headers=headers)
+                    last_response = response
+                    if response.status_code == 429:
+                        delay, summary, error_info = await _parse_rate_limit_error(response)
+                        if summary:
+                            logger.warning(
+                                "Code Assist rate limited (attempt %s/%s, style=%s): %s",
+                                attempt + 1,
+                                CODE_ASSIST_RATE_LIMIT_RETRIES,
+                                header_style,
+                                summary,
+                            )
+                        if _should_abort_rate_limit(error_info, delay):
+                            rate_limit_error = RuntimeError(
+                                "Code Assist quota exhausted (RESOURCE_EXHAUSTED). "
+                                "Try again later or use a different account."
+                            )
+                            advance_endpoint = True
+                            break
+                        retry_delay = delay if delay is not None else 2.0
+                        if retry_delay < CODE_ASSIST_RATE_LIMIT_MAX_WAIT_S:
+                            await asyncio.sleep(retry_delay + 0.1)
+                            continue
+                    if response.status_code >= 400:
+                        await _log_http_error(response, method, header_style)
+                    response.raise_for_status()
+                    return response.json()
+                if advance_endpoint:
+                    logger.warning(
+                        "Code Assist rate limit exhaustion on %s (style=%s); trying next endpoint.",
+                        base_url,
+                        header_style,
+                    )
+                    continue
+                if last_response is not None:
+                    last_response.raise_for_status()
+            except httpx.HTTPStatusError as exc:
+                if not _should_fallback(exc):
+                    raise
+                last_exc = exc
+            except httpx.HTTPError as exc:
+                last_exc = exc
+        if rate_limit_error:
+            raise rate_limit_error
+        if last_exc:
+            raise last_exc
+        raise RuntimeError("Code Assist request failed without an error response.")
+
+    async def stream_method(
+        self,
+        method: str,
+        payload: dict[str, Any],
+        access_token: str,
+        model_name: str | None = None,
+    ) -> AsyncIterator[dict[str, Any]]:
+        header_style = _header_style()
+        last_exc: Exception | None = None
+        rate_limit_error: Exception | None = None
+        for base_url in self._base_urls:
+            url = f"{base_url}:{method}"
+            try:
+                advance_endpoint = False
+                headers = self._headers(access_token, model_name=model_name)
+                last_response: httpx.Response | None = None
+                for attempt in range(CODE_ASSIST_RATE_LIMIT_RETRIES):
+                    async with self._client.stream(
+                        "POST",
+                        url,
+                        params={"alt": "sse"},
+                        headers={**headers, "Accept": "text/event-stream"},
+                        json=payload,
+                    ) as response:
                         last_response = response
                         if response.status_code == 429:
                             delay, summary, error_info = await _parse_rate_limit_error(response)
@@ -73,9 +151,6 @@ class CodeAssistClient:
                                 )
                                 advance_endpoint = True
                                 break
-                            if _should_switch_style(header_style, error_info, summary):
-                                switch_style = True
-                                break
                             retry_delay = delay if delay is not None else 2.0
                             if retry_delay < CODE_ASSIST_RATE_LIMIT_MAX_WAIT_S:
                                 await asyncio.sleep(retry_delay + 0.1)
@@ -83,102 +158,22 @@ class CodeAssistClient:
                         if response.status_code >= 400:
                             await _log_http_error(response, method, header_style)
                         response.raise_for_status()
-                        return response.json()
-                    if switch_style:
-                        continue
-                    if advance_endpoint:
-                        logger.warning(
-                            "Code Assist rate limit exhaustion on %s (style=%s); trying next endpoint.",
-                            base_url,
-                            header_style,
-                        )
-                        break
-                    if last_response is not None:
-                        last_response.raise_for_status()
+                        async for item in _iter_sse(response):
+                            yield item
+                        return
                 if advance_endpoint:
+                    logger.warning(
+                        "Code Assist rate limit exhaustion on %s (style=%s); trying next endpoint.",
+                        base_url,
+                        header_style,
+                    )
                     continue
-            except httpx.HTTPStatusError as exc:
-                if not _should_fallback(exc):
-                    raise
-                last_exc = exc
-            except httpx.HTTPError as exc:
-                last_exc = exc
-        if rate_limit_error:
-            raise rate_limit_error
-        if last_exc:
-            raise last_exc
-        raise RuntimeError("Code Assist request failed without an error response.")
-
-    async def stream_method(
-        self, method: str, payload: dict[str, Any], access_token: str
-    ) -> AsyncIterator[dict[str, Any]]:
-        header_styles = _header_styles()
-        last_exc: Exception | None = None
-        rate_limit_error: Exception | None = None
-        for base_url in self._base_urls:
-            url = f"{base_url}:{method}"
-            try:
-                advance_endpoint = False
-                for header_style in header_styles:
-                    headers = self._headers(access_token, header_style)
-                    last_response: httpx.Response | None = None
-                    switch_style = False
-                    for attempt in range(CODE_ASSIST_RATE_LIMIT_RETRIES):
-                        async with self._client.stream(
-                            "POST",
-                            url,
-                            params={"alt": "sse"},
-                            headers={**headers, "Accept": "text/event-stream"},
-                            json=payload,
-                        ) as response:
-                            last_response = response
-                            if response.status_code == 429:
-                                delay, summary, error_info = await _parse_rate_limit_error(response)
-                                if summary:
-                                    logger.warning(
-                                        "Code Assist rate limited (attempt %s/%s, style=%s): %s",
-                                        attempt + 1,
-                                        CODE_ASSIST_RATE_LIMIT_RETRIES,
-                                        header_style,
-                                        summary,
-                                    )
-                                if _should_abort_rate_limit(error_info, delay):
-                                    rate_limit_error = RuntimeError(
-                                        "Code Assist quota exhausted (RESOURCE_EXHAUSTED). "
-                                        "Try again later or use a different account."
-                                    )
-                                    advance_endpoint = True
-                                    break
-                                if _should_switch_style(header_style, error_info, summary):
-                                    switch_style = True
-                                    break
-                                retry_delay = delay if delay is not None else 2.0
-                                if retry_delay < CODE_ASSIST_RATE_LIMIT_MAX_WAIT_S:
-                                    await asyncio.sleep(retry_delay + 0.1)
-                                    continue
-                            if response.status_code >= 400:
-                                await _log_http_error(response, method, header_style)
-                            response.raise_for_status()
-                            async for item in _iter_sse(response):
-                                yield item
-                            return
-                    if switch_style:
-                        continue
-                    if advance_endpoint:
-                        logger.warning(
-                            "Code Assist rate limit exhaustion on %s (style=%s); trying next endpoint.",
-                            base_url,
-                            header_style,
-                        )
-                        break
-                    if last_response is not None:
-                        raise httpx.HTTPStatusError(
-                            "Rate limited",
-                            request=last_response.request,
-                            response=last_response,
-                        )
-                if advance_endpoint:
-                    continue
+                if last_response is not None:
+                    raise httpx.HTTPStatusError(
+                        "Rate limited",
+                        request=last_response.request,
+                        response=last_response,
+                    )
             except httpx.HTTPStatusError as exc:
                 if not _should_fallback(exc):
                     raise
@@ -210,30 +205,13 @@ class CodeAssistClient:
             raise last_exc
         raise RuntimeError("Code Assist operation lookup failed without an error response.")
 
-    def _headers(self, access_token: str, style: str) -> dict[str, str]:
+    def _headers(self, access_token: str, model_name: str | None = None) -> dict[str, str]:
         headers = {
             "Authorization": f"Bearer {access_token}",
             "Content-Type": "application/json",
             "Accept": "application/json",
+            "User-Agent": _gemini_cli_user_agent(model_name),
         }
-        normalized = style.strip().lower()
-        if normalized == "gemini-cli":
-            headers.update(
-                {
-                    "User-Agent": "google-api-nodejs-client/9.15.1",
-                    "X-Goog-Api-Client": "gl-node/22.17.0",
-                    "Client-Metadata": "ideType=IDE_UNSPECIFIED,platform=PLATFORM_UNSPECIFIED,pluginType=GEMINI",
-                }
-            )
-        else:
-            headers.update(
-                {
-                    "User-Agent": "antigravity/1.11.5 windows/amd64",
-                    "X-Goog-Api-Client": "google-cloud-sdk vscode_cloudshelleditor/0.1",
-                    "Client-Metadata": '{"ideType":"IDE_UNSPECIFIED","platform":"PLATFORM_UNSPECIFIED","pluginType":"GEMINI"}',
-                    "x-goog-api-key": "",
-                }
-            )
         return headers
 
 
@@ -374,34 +352,17 @@ async def _log_http_error(response: httpx.Response, method: str, header_style: s
         return
 
 
+def _header_style() -> str:
+    style_config = os.getenv(CODE_ASSIST_HEADER_STYLES_ENV, DEFAULT_CODE_ASSIST_HEADER_STYLE)
+    for item in style_config.split(","):
+        key = item.strip().lower()
+        if key == "gemini-cli":
+            return "gemini-cli"
+    return "gemini-cli"
+
+
 def _header_styles() -> list[str]:
-    raw = [item.strip() for item in CODE_ASSIST_HEADER_STYLES.split(",")]
-    seen: set[str] = set()
-    styles: list[str] = []
-    for item in raw:
-        if not item:
-            continue
-        key = item.lower()
-        if key in seen:
-            continue
-        if key not in {"antigravity", "gemini-cli"}:
-            continue
-        seen.add(key)
-        styles.append(key)
-    return styles or ["antigravity"]
-
-
-def _should_switch_style(header_style: str, error_info: dict[str, Any] | None, summary: str | None) -> bool:
-    if header_style != "antigravity":
-        return False
-    status = ""
-    message = ""
-    if error_info:
-        status = str(error_info.get("status") or "")
-        message = str(error_info.get("message") or "")
-    if summary and not message:
-        message = summary
-    return "RESOURCE_EXHAUSTED" in status or "Resource has been exhausted" in message
+    return [_header_style()]
 
 
 def _should_abort_rate_limit(error_info: dict[str, Any] | None, delay: float | None) -> bool:
@@ -420,3 +381,33 @@ def _should_fallback(exc: httpx.HTTPStatusError) -> bool:
     if status == 401:
         return False
     return status in _FALLBACK_STATUSES
+
+
+def _gemini_cli_user_agent(model_name: str | None) -> str:
+    version_text = _isaac_version()
+    model_text = model_name or "unknown-model"
+    return f"GeminiCLI/{version_text}/{model_text} ({_platform_name()}; {_platform_arch()})"
+
+
+def _isaac_version() -> str:
+    try:
+        return version("isaac-acp")
+    except PackageNotFoundError:
+        return "0.0.0"
+
+
+def _platform_name() -> str:
+    if os.name == "nt":
+        return "win32"
+    if os.name == "posix" and "darwin" in platform.system().lower():
+        return "darwin"
+    return "linux"
+
+
+def _platform_arch() -> str:
+    machine = platform.machine().lower()
+    if machine in {"x86_64", "amd64"}:
+        return "x64"
+    if machine in {"aarch64", "arm64"}:
+        return "arm64"
+    return machine or "unknown"

@@ -60,7 +60,7 @@ _SYNTHETIC_BOOTSTRAP_HINTS = (
     "within this context, codex refers to the open-source agentic coding interface",
     "## responsiveness",
     "<identity>",
-    "you are antigravity",
+    "you are isaac, a powerful agentic ai coding assistant",
     "<web_application_development>",
 )
 

@@ -298,6 +298,40 @@ async def test_set_config_option_value_retries_after_auth_required(monkeypatch: 
     assert "alibaba-secret" in env_text
 
 
+@pytest.mark.asyncio
+async def test_set_config_option_value_retries_after_agent_auth_required() -> None:
+    conn = AsyncMock()
+    conn.authenticate = AsyncMock()
+    conn.set_config_option = AsyncMock(
+        side_effect=[
+            RequestError.auth_required(
+                {
+                    "authMethods": [
+                        {
+                            "id": "openai",
+                            "name": "OpenAI Codex OAuth",
+                            "_meta": {"type": "agent"},
+                        }
+                    ]
+                }
+            ),
+            SimpleNamespace(config_options=[]),
+        ]
+    )
+    state = SessionUIState(
+        current_mode="ask",
+        current_model="function:function",
+        mcp_servers=[],
+        config_option_ids={"model": "model"},
+        config_option_values={"model": {"function:function", "openai-codex:test"}},
+    )
+
+    await set_config_option_value(conn, "session-1", state, "model", "openai-codex:test")
+
+    assert conn.set_config_option.await_count == 2
+    conn.authenticate.assert_awaited_once_with(method_id="openai")
+
+
 def test_usage_line_hidden_during_status_refresh_window() -> None:
     state = SessionUIState(current_mode="ask", current_model="openai:gpt-5", mcp_servers=[])
     state.suppress_usage_output = False

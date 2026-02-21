@@ -21,7 +21,7 @@ from pydantic_ai.profiles.google import google_model_profile
 
 from isaac.agent.oauth.code_assist.auth import ensure_project, get_access_token
 from isaac.agent.oauth.code_assist.client import CODE_ASSIST_ENDPOINT, CodeAssistClient
-from isaac.agent.oauth.code_assist.request import apply_antigravity_envelope
+from isaac.agent.oauth.code_assist.request import apply_code_assist_envelope
 
 
 class CodeAssistProvider(Provider[object]):
@@ -101,8 +101,13 @@ class CodeAssistModel(Model):
         tokens = await get_access_token()
         tokens = await ensure_project(tokens)
         request_payload["project"] = tokens.project_id
-        request_payload = apply_antigravity_envelope(request_payload, self._model_name, tokens.project_id)
-        response_data = await self._client.post_method("generateContent", request_payload, tokens.access_token)
+        request_payload = apply_code_assist_envelope(request_payload, self._model_name, tokens.project_id)
+        response_data = await self._client.post_method(
+            "generateContent",
+            request_payload,
+            tokens.access_token,
+            model_name=self._model_name,
+        )
         response_payload = response_data.get("response") or {}
         if response_data.get("traceId") and "responseId" not in response_payload:
             response_payload["responseId"] = response_data["traceId"]
@@ -131,7 +136,12 @@ class CodeAssistModel(Model):
         }
         tokens = await get_access_token()
         tokens = await ensure_project(tokens)
-        response = await self._client.post_method("countTokens", payload, tokens.access_token)
+        response = await self._client.post_method(
+            "countTokens",
+            payload,
+            tokens.access_token,
+            model_name=self._model_name,
+        )
         total_tokens = response.get("totalTokens")
         if total_tokens is None:
             raise RuntimeError("Code Assist countTokens response missing totalTokens.")
@@ -157,10 +167,15 @@ class CodeAssistModel(Model):
         tokens = await get_access_token()
         tokens = await ensure_project(tokens)
         request_payload["project"] = tokens.project_id
-        request_payload = apply_antigravity_envelope(request_payload, self._model_name, tokens.project_id)
+        request_payload = apply_code_assist_envelope(request_payload, self._model_name, tokens.project_id)
 
         async def _iter_responses() -> AsyncIterator[types.GenerateContentResponse]:
-            async for item in self._client.stream_method("streamGenerateContent", request_payload, tokens.access_token):
+            async for item in self._client.stream_method(
+                "streamGenerateContent",
+                request_payload,
+                tokens.access_token,
+                model_name=self._model_name,
+            ):
                 response_payload = item.get("response") or {}
                 if item.get("traceId") and "responseId" not in response_payload:
                     response_payload["responseId"] = item["traceId"]
