@@ -52,7 +52,7 @@ class ACPAgent(
         *,
         agent_name: str = "isaac",
         agent_title: str = "Isaac ACP Agent",
-        agent_version: str = "0.3.0",
+        agent_version: str = "0.3.1",
         runner_factory: RunnerFactory | None = None,
         auth_methods: list[AuthMethodInput] | None = None,
     ) -> None:

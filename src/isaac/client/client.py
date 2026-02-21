@@ -160,7 +160,7 @@ async def _start_runtime_connection(
             fs=FileSystemCapability(read_text_file=False, write_text_file=False),
             terminal=True,
         ),
-        client_info=Implementation(name="example-client", title="Example Client", version="0.3.0"),
+        client_info=Implementation(name="example-client", title="Example Client", version="0.3.1"),
     )
     if init_resp.protocol_version != PROTOCOL_VERSION:
         await _shutdown_runtime_connection(_RuntimeConnection(proc=proc, conn=conn, auth_methods=[]))
