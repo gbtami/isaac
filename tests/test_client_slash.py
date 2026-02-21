@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import asyncio
+import os
+import sys
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock
 
@@ -8,7 +10,7 @@ import pytest
 
 from acp import RequestError, text_block
 
-from isaac.client.acp_client import ACPClient
+from isaac.client.acp_client import ACPClient, set_config_option_value
 from isaac.client.slash import _handle_mode, _handle_model, _handle_status, handle_slash_command
 from isaac.client.session_state import SessionUIState
 
@@ -251,6 +253,49 @@ async def test_client_ext_method_unknown_raises_method_not_found() -> None:
 
     with pytest.raises(RequestError):
         await client.ext_method("nope", {})
+
+
+@pytest.mark.asyncio
+async def test_set_config_option_value_retries_after_auth_required(monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:
+    conn = AsyncMock()
+    conn.authenticate = AsyncMock()
+    conn.set_config_option = AsyncMock(
+        side_effect=[
+            RequestError.auth_required(
+                {
+                    "authMethods": [
+                        {
+                            "id": "env_var:alibaba_api_key",
+                            "name": "Alibaba API key",
+                            "_meta": {"type": "env_var", "varName": "ALIBABA_API_KEY"},
+                        }
+                    ]
+                }
+            ),
+            SimpleNamespace(config_options=[]),
+        ]
+    )
+    state = SessionUIState(
+        current_mode="ask",
+        current_model="openai:gpt-5",
+        mcp_servers=[],
+        config_option_ids={"model": "model"},
+        config_option_values={"model": {"openai:gpt-5", "alibaba:test-qwen"}},
+    )
+    env_file = tmp_path / ".env"
+    monkeypatch.setattr("isaac.client.acp_client._shared_env_file", lambda: env_file)
+    monkeypatch.setattr(sys.stdin, "isatty", lambda: True)
+    monkeypatch.setattr("isaac.client.acp_client.getpass.getpass", lambda _prompt: "alibaba-secret")
+    monkeypatch.setenv("ALIBABA_API_KEY", "")
+
+    await set_config_option_value(conn, "session-1", state, "model", "alibaba:test-qwen")
+
+    assert conn.set_config_option.await_count == 2
+    conn.authenticate.assert_awaited_once_with(method_id="env_var:alibaba_api_key")
+    assert os.getenv("ALIBABA_API_KEY") == "alibaba-secret"
+    env_text = env_file.read_text(encoding="utf-8")
+    assert "ALIBABA_API_KEY" in env_text
+    assert "alibaba-secret" in env_text
 
 
 def test_usage_line_hidden_during_status_refresh_window() -> None:

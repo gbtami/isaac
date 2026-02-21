@@ -2,11 +2,15 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Callable
 
+import getpass
 import json
 import logging
+import os
+import sys
 import time
+from pathlib import Path
 from acp import (
     Client,
     CreateTerminalRequest,
@@ -42,7 +46,16 @@ from acp.schema import (
     ToolCallProgress,
     ToolCallStart,
 )
+from dotenv import set_key
 
+from isaac.client.auth import (
+    auth_method_env_var_name,
+    auth_method_link,
+    auth_method_type,
+    extract_error_auth_methods,
+    find_auth_method,
+    select_auth_method,
+)
 from isaac.client.client_terminal import ClientTerminalManager
 from isaac.client.display import (
     print_agent_text,
@@ -55,10 +68,54 @@ from isaac.client.display import (
 )
 from isaac.client.session_state import SessionUIState
 from isaac.log_utils import log_context as log_ctx, log_event
+from isaac.paths import config_dir
 
 logger = logging.getLogger(__name__)
 MODE_CONFIG_KEY = "mode"
 MODEL_CONFIG_KEY = "model"
+
+
+def _shared_env_file() -> Path:
+    return config_dir() / ".env"
+
+
+def _prompt_env_var_value(
+    env_name: str,
+    *,
+    link: str | None,
+    prompt_secret: Callable[[str], str] | None = None,
+) -> str:
+    if not sys.stdin.isatty():
+        raise RuntimeError(f"{env_name} is required; restart this client with the variable set.")
+    if link:
+        print(f"Get a key here: {link}")
+    secret_reader = prompt_secret or getpass.getpass
+    value = secret_reader(f"Enter value for {env_name}: ").strip()
+    if not value:
+        raise RuntimeError(f"{env_name} was empty; cannot authenticate.")
+    return value
+
+
+def _persist_shared_env_var(env_name: str, value: str) -> None:
+    env_file = _shared_env_file()
+    env_file.parent.mkdir(parents=True, exist_ok=True)
+    set_key(str(env_file), env_name, value)
+
+
+async def _authenticate_from_error(conn: Any, error_data: Any) -> bool:
+    methods = extract_error_auth_methods(error_data)
+    if not methods:
+        return False
+    method_id = select_auth_method(methods)
+    method = find_auth_method(methods, method_id)
+    if method is not None and auth_method_type(method) == "env_var":
+        env_name = auth_method_env_var_name(method)
+        if env_name and not os.getenv(env_name):
+            value = _prompt_env_var_value(env_name, link=auth_method_link(method))
+            _persist_shared_env_var(env_name, value)
+            os.environ[env_name] = value
+    await conn.authenticate(method_id=method_id)
+    return True
 
 
 def _iter_select_values(options: list[Any]) -> set[str]:
@@ -468,7 +525,13 @@ async def set_config_option_value(
     setter = getattr(conn, "set_config_option", None)
     if not callable(setter):
         raise RuntimeError("Connection does not support session/set_config_option.")
-    response = await setter(config_id=config_id, session_id=session_id, value=value)
+    try:
+        response = await setter(config_id=config_id, session_id=session_id, value=value)
+    except RequestError as exc:
+        if exc.code == -32000 and await _authenticate_from_error(conn, getattr(exc, "data", None)):
+            response = await setter(config_id=config_id, session_id=session_id, value=value)
+        else:
+            raise
     options = getattr(response, "config_options", []) or []
     if isinstance(options, list):
         apply_session_config_options(state, options)

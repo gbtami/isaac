@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
 import uuid
 from pathlib import Path
 from typing import Any
@@ -21,6 +22,7 @@ from acp.schema import (
 )
 
 from isaac.agent import models as model_registry
+from isaac.agent.acp.auth_methods import auth_method_env_var_name, auth_method_payload
 from isaac.agent.brain.model_errors import ModelBuildError
 from isaac.agent.brain.prompt import SYSTEM_PROMPT
 from isaac.agent.mcp_support import build_mcp_toolsets
@@ -222,18 +224,21 @@ class SessionLifecycleMixin:
                     model_id=model_id,
                     error=str(exc),
                 )
-        except ModelBuildError:
+        except ModelBuildError as exc:
             try:
                 model_registry.set_current_model(previous_model_id)
-            except Exception as exc:
+            except Exception as rollback_exc:
                 log_event(
                     logger,
                     "acp.session.model.persist_rollback_failed",
                     level=logging.WARNING,
                     session_id=session_id,
                     model_id=previous_model_id,
-                    error=str(exc),
+                    error=str(rollback_exc),
                 )
+            payload = self._auth_required_from_model_build_error(exc)
+            if payload:
+                raise RequestError.auth_required(payload)
             raise
         await self._send_update(self._config_options_update(session_id))
         self._persist_session_meta(
@@ -244,6 +249,30 @@ class SessionLifecycleMixin:
             current_model=model_id,
         )
         return SetSessionModelResponse()
+
+    def _auth_required_from_model_build_error(self, exc: ModelBuildError) -> dict[str, Any] | None:
+        error_text = str(exc)
+        env_names = {
+            token.strip()
+            for token in re.findall(r"\b[A-Z][A-Z0-9_]*\b", error_text)
+            if token.strip().endswith(("_API_KEY", "_TOKEN"))
+        }
+        if not env_names:
+            return None
+
+        matched_methods = []
+        for method in self._auth_methods:
+            env_name = auth_method_env_var_name(method)
+            if env_name and env_name in env_names:
+                matched_methods.append(auth_method_payload(method))
+        if not matched_methods:
+            return None
+
+        primary_missing = next(iter(sorted(env_names)))
+        return {
+            "authMethods": matched_methods,
+            "missingEnvVar": primary_missing,
+        }
 
     async def set_config_option(
         self,

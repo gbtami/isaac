@@ -6,6 +6,7 @@ from pathlib import Path
 from unittest.mock import AsyncMock
 
 import pytest
+from acp import RequestError
 from acp.agent.connection import AgentSideConnection
 from acp import text_block
 from acp.schema import AgentMessageChunk
@@ -99,6 +100,54 @@ async def test_set_config_option_model_uses_shared_env(monkeypatch: pytest.Monke
     )
 
     assert agent._session_model_ids[session.session_id] == "openrouter:test-openrouter"
+
+
+@pytest.mark.asyncio
+async def test_set_config_option_model_returns_auth_required_for_missing_provider_key(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "xdg"))
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.delenv("ALIBABA_API_KEY", raising=False)
+    monkeypatch.delenv("DASHSCOPE_API_KEY", raising=False)
+
+    local_models = tmp_path / "xdg" / "isaac" / "models.json"
+    monkeypatch.setattr(model_registry, "LOCAL_MODELS_FILE", local_models)
+    local_models.parent.mkdir(parents=True, exist_ok=True)
+    local_models.write_text(
+        json.dumps(
+            {
+                "models": {
+                    "alibaba:test-qwen": {
+                        "provider": "alibaba",
+                        "model": "qwen-max",
+                        "description": "test alibaba model",
+                    }
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    conn = AsyncMock(spec=AgentSideConnection)
+    conn.session_update = AsyncMock()
+    agent = ACPAgent(conn)
+    session = await agent.new_session(cwd=str(tmp_path), mcp_servers=[])
+
+    with pytest.raises(RequestError) as exc_info:
+        await agent.set_config_option(
+            config_id="model",
+            session_id=session.session_id,
+            value="alibaba:test-qwen",
+        )
+
+    assert exc_info.value.code == -32000
+    assert isinstance(exc_info.value.data, dict)
+    methods = exc_info.value.data.get("authMethods")
+    assert isinstance(methods, list)
+    method_ids = {str(item.get("id")) for item in methods if isinstance(item, dict)}
+    assert "env_var:alibaba_api_key" in method_ids
+    assert "env_var:dashscope_api_key" in method_ids
 
 
 @pytest.mark.asyncio
