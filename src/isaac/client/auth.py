@@ -59,6 +59,39 @@ def select_auth_method(auth_methods: list[AuthMethod | Any]) -> str:
     return _auth_method_id(auth_methods[0])
 
 
+def find_auth_method(auth_methods: list[AuthMethod | Any], method_id: str) -> AuthMethod | Any | None:
+    target = method_id.strip().lower()
+    for method in auth_methods:
+        if _auth_method_id(method).strip().lower() == target:
+            return method
+    return None
+
+
+def auth_method_type(auth_method: AuthMethod | Any) -> str:
+    # ACP treats "agent" as the default type for backward compatibility.
+    payload_type = _payload_value(auth_method, "type")
+    meta_type = _auth_method_meta(auth_method).get("type")
+    value = str(payload_type or meta_type or "agent").strip().lower()
+    return value or "agent"
+
+
+def auth_method_env_var_name(auth_method: AuthMethod | Any) -> str | None:
+    value = _payload_value(auth_method, "varName", "var_name")
+    if not value:
+        meta = _auth_method_meta(auth_method)
+        value = meta.get("varName") or meta.get("var_name")
+    env_name = str(value or "").strip()
+    return env_name or None
+
+
+def auth_method_link(auth_method: AuthMethod | Any) -> str | None:
+    value = _payload_value(auth_method, "link")
+    if not value:
+        value = _auth_method_meta(auth_method).get("link")
+    link = str(value or "").strip()
+    return link or None
+
+
 def _auth_method_id(auth_method: AuthMethod | Any) -> str:
     if isinstance(auth_method, dict):
         return str(auth_method.get("id", "")).strip()
@@ -75,3 +108,24 @@ def _auth_method_description(auth_method: AuthMethod | Any) -> str:
     if isinstance(auth_method, dict):
         return str(auth_method.get("description", "") or "").strip()
     return str(getattr(auth_method, "description", "") or "").strip()
+
+
+def _payload_value(auth_method: AuthMethod | Any, *keys: str) -> Any:
+    if isinstance(auth_method, dict):
+        for key in keys:
+            if key in auth_method:
+                return auth_method.get(key)
+        return None
+    for key in keys:
+        value = getattr(auth_method, key, None)
+        if value is not None:
+            return value
+    return None
+
+
+def _auth_method_meta(auth_method: AuthMethod | Any) -> dict[str, Any]:
+    if isinstance(auth_method, dict):
+        raw = auth_method.get("_meta")
+        return raw if isinstance(raw, dict) else {}
+    raw = getattr(auth_method, "_meta", None)
+    return raw if isinstance(raw, dict) else {}
