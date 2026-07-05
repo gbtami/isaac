@@ -80,8 +80,12 @@ def test_history_capabilities_are_exposed_as_pydantic_ai_capabilities() -> None:
 
 
 @pytest.mark.asyncio
-async def test_base_capabilities_reinject_current_system_prompt() -> None:
+async def test_base_capabilities_reinject_current_system_prompt(monkeypatch: pytest.MonkeyPatch) -> None:
     from isaac.agent.capabilities import build_base_capabilities
+
+    monkeypatch.delenv("ISAAC_HARNESS_FILESYSTEM", raising=False)
+    monkeypatch.delenv("ISAAC_HARNESS_SHELL", raising=False)
+    monkeypatch.delenv("ISAAC_HARNESS_CODE_MODE", raising=False)
 
     class CapturingTestModel(TestModel):
         captured_messages: list[ai_messages.ModelMessage]
@@ -90,7 +94,7 @@ async def test_base_capabilities_reinject_current_system_prompt() -> None:
             self.captured_messages = list(messages)
             return super()._request(messages, model_settings, model_request_parameters)
 
-    model = CapturingTestModel(custom_output_text="ok")
+    model = CapturingTestModel(call_tools=[], custom_output_text="ok")
     agent = PydanticAgent(
         model,
         system_prompt="CURRENT_SYSTEM_PROMPT",
@@ -128,3 +132,29 @@ def test_optional_harness_capabilities_are_disabled_by_default(monkeypatch: pyte
     monkeypatch.delenv("ISAAC_HARNESS_CODE_MODE", raising=False)
 
     assert build_optional_harness_capabilities() == []
+
+
+@pytest.mark.asyncio
+async def test_optional_harness_filesystem_capability_runs_when_enabled(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    try:
+        import pydantic_ai_harness  # type: ignore  # noqa: F401
+    except Exception:
+        pytest.skip("pydantic-ai-harness is not installed")
+
+    from isaac.agent.capabilities import build_base_capabilities
+
+    monkeypatch.setenv("ISAAC_HARNESS_FILESYSTEM", "1")
+    monkeypatch.delenv("ISAAC_HARNESS_SHELL", raising=False)
+    monkeypatch.delenv("ISAAC_HARNESS_CODE_MODE", raising=False)
+
+    agent = PydanticAgent(
+        TestModel(call_tools=[], custom_output_text="ok"),
+        system_prompt="CURRENT_SYSTEM_PROMPT",
+        capabilities=build_base_capabilities(lambda: "ask"),
+    )
+
+    result = await agent.run("new prompt")
+
+    assert result.output == "ok"

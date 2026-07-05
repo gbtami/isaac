@@ -252,7 +252,7 @@ def build_optional_harness_capabilities() -> list[Any]:
         except Exception:
             pass
         else:
-            capabilities.append(PrefixTools(ToolsetCapability(FileSystem()), prefix="harness"))
+            capabilities.append(PrefixTools(FileSystem(), prefix="harness"))
 
     if _env_enabled("ISAAC_HARNESS_SHELL"):
         try:
@@ -260,7 +260,7 @@ def build_optional_harness_capabilities() -> list[Any]:
         except Exception:
             pass
         else:
-            capabilities.append(PrefixTools(ToolsetCapability(Shell()), prefix="harness"))
+            capabilities.append(PrefixTools(Shell(), prefix="harness"))
 
     if _env_enabled("ISAAC_HARNESS_CODE_MODE"):
         try:
