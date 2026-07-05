@@ -25,8 +25,7 @@ from pydantic_ai.usage import UsageLimits  # type: ignore
 from acp.helpers import session_notification, text_block, update_agent_thought
 from isaac.agent.ai_types import AgentRunner
 from isaac.agent import models as model_registry
-from isaac.agent.brain.history_processors import sanitize_message_history
-from isaac.agent.brain.instrumentation import base_run_metadata, pydantic_ai_instrument_enabled
+from isaac.agent.brain.instrumentation import base_run_metadata
 from isaac.agent.brain.prompt import SYSTEM_PROMPT
 from isaac.agent.capabilities import build_base_capabilities
 from isaac.agent.models import load_models_config, load_runtime_env, _build_provider_model
@@ -231,8 +230,6 @@ def _build_delegate_agent(
         instructions=spec.instructions,
         model_settings=model_settings,
         capabilities=build_base_capabilities(mode_getter or (lambda: "ask")),
-        history_processors=(sanitize_message_history,),
-        instrument=pydantic_ai_instrument_enabled(),
         metadata=base_run_metadata(component=f"isaac.delegate.{spec.name}", model_id=model_id),
     )
 

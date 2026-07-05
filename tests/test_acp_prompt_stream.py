@@ -1,12 +1,11 @@
 from __future__ import annotations
 
-from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pytest
 from acp import text_block
 from acp.schema import AgentMessageChunk, AgentPlanUpdate, ToolCallProgress, ToolCallStart
-from pydantic_ai.messages import FunctionToolCallEvent, FunctionToolResultEvent, ToolCallPart  # type: ignore
+from pydantic_ai.messages import FunctionToolCallEvent, FunctionToolResultEvent, ToolCallPart, ToolReturnPart  # type: ignore
 
 from isaac.agent import ACPAgent
 from isaac.agent.brain.plan_schema import PlanStep, PlanSteps
@@ -29,7 +28,7 @@ class _StreamRunner:
             part = ToolCallPart(tool_name="planner", args={"task": prompt}, tool_call_id="tc1")
             yield FunctionToolCallEvent(part=part)
             yield FunctionToolResultEvent(
-                result=SimpleNamespace(tool_name="planner", content=self._plan, tool_call_id=part.tool_call_id)
+                part=ToolReturnPart(tool_name="planner", content=self._plan, tool_call_id=part.tool_call_id)
             )
             yield "done"
 

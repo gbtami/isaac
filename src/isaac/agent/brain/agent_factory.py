@@ -8,8 +8,7 @@ from pydantic_ai import Agent as PydanticAgent  # type: ignore
 from pydantic_ai import DeferredToolRequests  # type: ignore
 
 from isaac.agent.ai_types import AgentRunner, ModelLike, ModelSettingsLike, ToolRegister
-from isaac.agent.brain.history_processors import sanitize_message_history
-from isaac.agent.brain.instrumentation import base_run_metadata, pydantic_ai_instrument_enabled
+from isaac.agent.brain.instrumentation import base_run_metadata
 from isaac.agent.brain.prompt import SUBAGENT_INSTRUCTIONS, SYSTEM_PROMPT
 from isaac.agent.capabilities import build_base_capabilities
 from isaac.agent.oauth.code_assist.prompt import code_assist_instructions
@@ -52,8 +51,6 @@ def create_subagent_for_model(
         instructions=instructions,
         model_settings=model_settings,
         capabilities=build_base_capabilities(mode_getter),
-        history_processors=(sanitize_message_history,),
-        instrument=pydantic_ai_instrument_enabled(),
         metadata=base_run_metadata(component="isaac.agent.main", model_id=model_id),
     )
     register_tools(runner)

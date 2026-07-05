@@ -19,48 +19,8 @@ from typing import Any, Callable, Dict
 import httpx
 from dotenv import load_dotenv
 from pydantic_ai.models import Model  # type: ignore
-from pydantic_ai.models.anthropic import AnthropicModel, AnthropicModelSettings  # type: ignore
-from pydantic_ai.models.bedrock import BedrockConverseModel  # type: ignore
-from pydantic_ai.models.cerebras import CerebrasModel  # type: ignore
-from pydantic_ai.models.cohere import CohereModel  # type: ignore
-from pydantic_ai.models.google import GoogleModel, GoogleModelSettings  # type: ignore
-from pydantic_ai.models.groq import GroqModel  # type: ignore
-from pydantic_ai.models.huggingface import HuggingFaceModel  # type: ignore
-from pydantic_ai.models.mistral import MistralModel  # type: ignore
-from pydantic_ai.models.openai import (  # type: ignore
-    OpenAIChatModel,
-    OpenAIChatModelSettings,
-    OpenAIResponsesModel,
-    OpenAIResponsesModelSettings,
-)
-from pydantic_ai.models.openrouter import OpenRouterModel, OpenRouterModelSettings  # type: ignore
-from pydantic_ai.models.test import TestModel  # type: ignore
-from pydantic_ai.models.xai import XaiModel  # type: ignore
 from pydantic_ai.settings import ModelSettings  # type: ignore
 
-from pydantic_ai.providers.alibaba import AlibabaProvider  # type: ignore
-from pydantic_ai.providers.anthropic import AnthropicProvider  # type: ignore
-from pydantic_ai.providers.azure import AzureProvider  # type: ignore
-from pydantic_ai.providers.bedrock import BedrockProvider  # type: ignore
-from pydantic_ai.providers.cerebras import CerebrasProvider  # type: ignore
-from pydantic_ai.providers.cohere import CohereProvider  # type: ignore
-from pydantic_ai.providers.deepseek import DeepSeekProvider  # type: ignore
-from pydantic_ai.providers.fireworks import FireworksProvider  # type: ignore
-from pydantic_ai.providers.github import GitHubProvider  # type: ignore
-from pydantic_ai.providers.google import GoogleProvider  # type: ignore
-from pydantic_ai.providers.google_vertex import GoogleVertexProvider  # type: ignore
-from pydantic_ai.providers.groq import GroqProvider  # type: ignore
-from pydantic_ai.providers.huggingface import HuggingFaceProvider  # type: ignore
-from pydantic_ai.providers.mistral import MistralProvider  # type: ignore
-from pydantic_ai.providers.moonshotai import MoonshotAIProvider  # type: ignore
-from pydantic_ai.providers.nebius import NebiusProvider  # type: ignore
-from pydantic_ai.providers.ollama import OllamaProvider  # type: ignore
-from pydantic_ai.providers.openai import OpenAIProvider  # type: ignore
-from pydantic_ai.providers.openrouter import OpenRouterProvider  # type: ignore
-from pydantic_ai.providers.ovhcloud import OVHcloudProvider  # type: ignore
-from pydantic_ai.providers.together import TogetherProvider  # type: ignore
-from pydantic_ai.providers.vercel import VercelProvider  # type: ignore
-from pydantic_ai.providers.xai import XaiProvider  # type: ignore
 
 from isaac.agent.oauth.code_assist import CodeAssistModel
 from isaac.agent.oauth.code_assist.storage import load_tokens as load_code_assist_tokens
@@ -414,6 +374,9 @@ def _build_provider_model(model_id: str, model_entry: Dict[str, Any]) -> tuple[M
         raise RuntimeError(f"{required_names} is required for {provider_name} models")
 
     if provider == "openai":
+        from pydantic_ai.models.openai import OpenAIChatModel, OpenAIChatModelSettings  # type: ignore
+        from pydantic_ai.providers.openai import OpenAIProvider  # type: ignore
+
         key = _resolve_api_key("openai", "OPENAI_API_KEY")
         provider_obj = _provider_with_http_client(OpenAIProvider, "openai", api_key=key)
         settings: OpenAIChatModelSettings | None = None
@@ -422,6 +385,9 @@ def _build_provider_model(model_id: str, model_entry: Dict[str, Any]) -> tuple[M
         return OpenAIChatModel(model_spec, provider=provider_obj), settings
 
     if provider == "azure":
+        from pydantic_ai.models.openai import OpenAIChatModel  # type: ignore
+        from pydantic_ai.providers.azure import AzureProvider  # type: ignore
+
         endpoint = model_entry.get("azure_endpoint") or os.getenv("AZURE_OPENAI_ENDPOINT")
         api_version = model_entry.get("api_version") or os.getenv("OPENAI_API_VERSION")
         if not endpoint:
@@ -437,11 +403,17 @@ def _build_provider_model(model_id: str, model_entry: Dict[str, Any]) -> tuple[M
         return OpenAIChatModel(str(model_spec), provider=provider_obj), None
 
     if provider == "alibaba":
+        from pydantic_ai.models.openai import OpenAIChatModel  # type: ignore
+        from pydantic_ai.providers.alibaba import AlibabaProvider  # type: ignore
+
         key = _resolve_api_key("alibaba", "ALIBABA_API_KEY", "DASHSCOPE_API_KEY")
         provider_obj = _provider_with_http_client(AlibabaProvider, "alibaba", api_key=key)
         return OpenAIChatModel(str(model_spec), provider=provider_obj), None
 
     if provider == "openai-codex":
+        from pydantic_ai.models.openai import OpenAIResponsesModel, OpenAIResponsesModelSettings  # type: ignore
+        from pydantic_ai.providers.openai import OpenAIProvider  # type: ignore
+
         if not has_openai_tokens():
             raise RuntimeError("OpenAI Codex OAuth tokens not found. Run /login openai first.")
         http_client = _get_http_client(
@@ -463,71 +435,106 @@ def _build_provider_model(model_id: str, model_entry: Dict[str, Any]) -> tuple[M
 
     if provider == "anthropic":
         key = _resolve_api_key("anthropic", "ANTHROPIC_API_KEY")
+
+        from pydantic_ai.models.anthropic import AnthropicModel, AnthropicModelSettings  # type: ignore
+        from pydantic_ai.providers.anthropic import AnthropicProvider  # type: ignore
         provider_obj = _provider_with_http_client(AnthropicProvider, "anthropic", api_key=key)
         settings = AnthropicModelSettings(anthropic_thinking={"type": "enabled", "budget_tokens": 512})
         return AnthropicModel(model_spec, provider=provider_obj), settings
-
     if provider == "bedrock":
+        from pydantic_ai.models.bedrock import BedrockConverseModel  # type: ignore
+        from pydantic_ai.providers.bedrock import BedrockProvider  # type: ignore
+
         provider_obj = _provider_with_http_client(BedrockProvider, "bedrock", api_key=api_key)
         return BedrockConverseModel(str(model_spec), provider=provider_obj), None
 
     if provider == "cohere":
         key = _resolve_api_key("cohere", "CO_API_KEY")
+
+        from pydantic_ai.models.cohere import CohereModel  # type: ignore
+        from pydantic_ai.providers.cohere import CohereProvider  # type: ignore
         provider_obj = _provider_with_http_client(CohereProvider, "cohere", api_key=key)
         return CohereModel(str(model_spec), provider=provider_obj), None
-
     if provider == "deepseek":
+        from pydantic_ai.models.openai import OpenAIChatModel  # type: ignore
+        from pydantic_ai.providers.deepseek import DeepSeekProvider  # type: ignore
+
         key = _resolve_api_key("deepseek", "DEEPSEEK_API_KEY")
         provider_obj = _provider_with_http_client(DeepSeekProvider, "deepseek", api_key=key)
         return OpenAIChatModel(str(model_spec), provider=provider_obj), None
 
     if provider == "fireworks":
+        from pydantic_ai.models.openai import OpenAIChatModel  # type: ignore
+        from pydantic_ai.providers.fireworks import FireworksProvider  # type: ignore
+
         key = _resolve_api_key("fireworks", "FIREWORKS_API_KEY")
         provider_obj = _provider_with_http_client(FireworksProvider, "fireworks", api_key=key)
         return OpenAIChatModel(str(model_spec), provider=provider_obj), None
 
     if provider == "github":
+        from pydantic_ai.models.openai import OpenAIChatModel  # type: ignore
+        from pydantic_ai.providers.github import GitHubProvider  # type: ignore
+
         key = _resolve_api_key("github", "GITHUB_API_KEY")
         provider_obj = _provider_with_http_client(GitHubProvider, "github", api_key=key)
         return OpenAIChatModel(str(model_spec), provider=provider_obj), None
 
     if provider == "mistral":
         key = _resolve_api_key("mistral", "MISTRAL_API_KEY")
+
+        from pydantic_ai.models.mistral import MistralModel  # type: ignore
+        from pydantic_ai.providers.mistral import MistralProvider  # type: ignore
         provider_obj = _provider_with_http_client(MistralProvider, "mistral", api_key=key)
         return MistralModel(model_spec, provider=provider_obj), None
-
     if provider == "cerebras":
         key = _resolve_api_key("cerebras", "CEREBRAS_API_KEY")
+
+        from pydantic_ai.models.cerebras import CerebrasModel  # type: ignore
+        from pydantic_ai.providers.cerebras import CerebrasProvider  # type: ignore
         provider_obj = _provider_with_http_client(CerebrasProvider, "cerebras", api_key=key)
         return CerebrasModel(model_spec, provider=provider_obj), None
-
     if provider == "google":
         key = _resolve_api_key("google", "GOOGLE_API_KEY", "GEMINI_API_KEY")
+
+        from pydantic_ai.models.google import GoogleModel, GoogleModelSettings  # type: ignore
+        from pydantic_ai.providers.google import GoogleProvider  # type: ignore
         provider_obj = _provider_with_http_client(GoogleProvider, "google", api_key=key)
         settings = GoogleModelSettings(google_thinking_config={"include_thoughts": True})
         return GoogleModel(model_spec, provider=provider_obj), settings
-
     if provider == "google-vertex":
+        from pydantic_ai.models.google import GoogleModel, GoogleModelSettings  # type: ignore
+        from pydantic_ai.providers.google_vertex import GoogleVertexProvider  # type: ignore
+
         provider_obj = _provider_with_http_client(GoogleVertexProvider, "google-vertex")
         settings = GoogleModelSettings(google_thinking_config={"include_thoughts": True})
         return GoogleModel(str(model_spec), provider=provider_obj), settings
 
     if provider == "groq":
         key = _resolve_api_key("groq", "GROQ_API_KEY")
+
+        from pydantic_ai.models.groq import GroqModel  # type: ignore
+        from pydantic_ai.providers.groq import GroqProvider  # type: ignore
         provider_obj = _provider_with_http_client(GroqProvider, "groq", api_key=key)
         return GroqModel(str(model_spec), provider=provider_obj), None
-
     if provider == "huggingface":
         key = _resolve_api_key("huggingface", "HF_TOKEN")
+
+        from pydantic_ai.models.huggingface import HuggingFaceModel  # type: ignore
+        from pydantic_ai.providers.huggingface import HuggingFaceProvider  # type: ignore
         provider_obj = _provider_with_http_client(HuggingFaceProvider, "huggingface", api_key=key)
         return HuggingFaceModel(str(model_spec), provider=provider_obj), None
-
     if provider == "moonshotai":
+        from pydantic_ai.models.openai import OpenAIChatModel  # type: ignore
+        from pydantic_ai.providers.moonshotai import MoonshotAIProvider  # type: ignore
+
         key = _resolve_api_key("moonshotai", "MOONSHOTAI_API_KEY")
         provider_obj = _provider_with_http_client(MoonshotAIProvider, "moonshotai", api_key=key)
         return OpenAIChatModel(str(model_spec), provider=provider_obj), None
 
     if provider == "nebius":
+        from pydantic_ai.models.openai import OpenAIChatModel  # type: ignore
+        from pydantic_ai.providers.nebius import NebiusProvider  # type: ignore
+
         key = _resolve_api_key("nebius", "NEBIUS_API_KEY")
         provider_obj = _provider_with_http_client(NebiusProvider, "nebius", api_key=key)
         return OpenAIChatModel(str(model_spec), provider=provider_obj), None
@@ -538,36 +545,55 @@ def _build_provider_model(model_id: str, model_entry: Dict[str, Any]) -> tuple[M
         return CodeAssistModel(str(model_spec)), None
 
     if provider == "openrouter":
+        from pydantic_ai.models.openrouter import OpenRouterModel, OpenRouterModelSettings  # type: ignore
+        from pydantic_ai.providers.openrouter import OpenRouterProvider  # type: ignore
+
         key = _resolve_api_key("openrouter", "OPENROUTER_API_KEY")
         provider_obj = _provider_with_http_client(OpenRouterProvider, "openrouter", api_key=key)
         settings = OpenRouterModelSettings(openrouter_reasoning={"effort": "medium"})
         return OpenRouterModel(model_spec, provider=provider_obj), settings
 
     if provider == "ovhcloud":
+        from pydantic_ai.models.openai import OpenAIChatModel  # type: ignore
+        from pydantic_ai.providers.ovhcloud import OVHcloudProvider  # type: ignore
+
         key = _resolve_api_key("ovhcloud", "OVHCLOUD_API_KEY")
         provider_obj = _provider_with_http_client(OVHcloudProvider, "ovhcloud", api_key=key)
         return OpenAIChatModel(str(model_spec), provider=provider_obj), None
 
     if provider == "together":
+        from pydantic_ai.models.openai import OpenAIChatModel  # type: ignore
+        from pydantic_ai.providers.together import TogetherProvider  # type: ignore
+
         key = _resolve_api_key("together", "TOGETHER_API_KEY")
         provider_obj = _provider_with_http_client(TogetherProvider, "together", api_key=key)
         return OpenAIChatModel(str(model_spec), provider=provider_obj), None
 
     if provider == "vercel":
+        from pydantic_ai.models.openai import OpenAIChatModel  # type: ignore
+        from pydantic_ai.providers.vercel import VercelProvider  # type: ignore
+
         provider_obj = _provider_with_http_client(VercelProvider, "vercel", api_key=api_key)
         return OpenAIChatModel(str(model_spec), provider=provider_obj), None
 
     if provider == "xai":
         key = _resolve_api_key("xai", "XAI_API_KEY")
+
+        from pydantic_ai.models.xai import XaiModel  # type: ignore
+        from pydantic_ai.providers.xai import XaiProvider  # type: ignore
         provider_obj = _provider_with_http_client(XaiProvider, "xai", api_key=key)
         return XaiModel(str(model_spec), provider=provider_obj), None
-
     if provider == "ollama":
+        from pydantic_ai.models.openai import OpenAIChatModel  # type: ignore
+        from pydantic_ai.providers.ollama import OllamaProvider  # type: ignore
+
         # Force JSON mode so local models emit parseable tool payloads.
         provider_obj = _provider_with_http_client(OllamaProvider, "ollama", base_url=OLLAMA_BASE_URL)
         return OpenAIChatModel(model_spec, provider=provider_obj), None
 
     if provider == "function":
+        from pydantic_ai.models.test import TestModel  # type: ignore
+
         return TestModel(call_tools=[]), None
 
     # default to test or direct spec

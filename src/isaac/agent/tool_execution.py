@@ -12,7 +12,7 @@ from typing import Any, Awaitable, Callable, Dict
 
 from acp import (
     CreateTerminalRequest,
-    KillTerminalCommandRequest,
+    KillTerminalRequest as KillTerminalCommandRequest,
     ReleaseTerminalRequest,
     TerminalOutputRequest,
 )

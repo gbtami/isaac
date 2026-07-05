@@ -4,9 +4,11 @@ from __future__ import annotations
 
 from typing import Any, Iterable, TypeAlias
 
-from acp.schema import AuthMethod
+from acp.schema import AuthEnvVar, AuthMethodAgent, EnvVarAuthMethod, TerminalAuthMethod
 
+AuthMethod: TypeAlias = AuthMethodAgent | EnvVarAuthMethod | TerminalAuthMethod
 AuthMethodInput: TypeAlias = AuthMethod | dict[str, Any] | str
+_AUTH_METHOD_CLASSES = (AuthMethodAgent, EnvVarAuthMethod, TerminalAuthMethod)
 
 _ENV_VAR_AUTH_FIELDS: list[tuple[str, str]] = [
     ("OpenRouter", "OPENROUTER_API_KEY"),
@@ -38,7 +40,7 @@ def normalize_method_id(method_id: str) -> str:
 
 
 def coerce_auth_method(entry: AuthMethodInput) -> AuthMethod:
-    if isinstance(entry, AuthMethod):
+    if isinstance(entry, _AUTH_METHOD_CLASSES):
         return entry
     if isinstance(entry, str):
         token = entry.strip()
@@ -53,7 +55,8 @@ def coerce_auth_method(entry: AuthMethodInput) -> AuthMethod:
             method_name = token
         if not method_id:
             raise ValueError("Authentication method id cannot be empty.")
-        return AuthMethod(id=method_id, name=method_name or method_id)
+        return AuthMethodAgent(id=method_id, name=method_name or method_id)
+
     method_id = str(entry.get("id", "")).strip()
     method_name = str(entry.get("name", "")).strip() or method_id
     description = entry.get("description")
@@ -62,29 +65,68 @@ def coerce_auth_method(entry: AuthMethodInput) -> AuthMethod:
         field_meta = None
     if not method_id:
         raise ValueError("Authentication method id cannot be empty.")
-    return AuthMethod(id=method_id, name=method_name, description=description, _meta=field_meta)
+
+    method_type = str(entry.get("type") or (field_meta or {}).get("type") or "agent").strip().lower()
+    if method_type == "env_var":
+        raw_vars = entry.get("vars")
+        vars_payload: list[Any]
+        if isinstance(raw_vars, list) and raw_vars:
+            vars_payload = raw_vars
+        else:
+            env_name = str(
+                entry.get("varName")
+                or entry.get("var_name")
+                or (field_meta or {}).get("varName")
+                or (field_meta or {}).get("var_name")
+                or ""
+            ).strip()
+            if not env_name:
+                raise ValueError(f"Environment-variable auth method {method_id!r} is missing a variable name.")
+            vars_payload = [AuthEnvVar(name=env_name)]
+        return EnvVarAuthMethod(
+            type="env_var",
+            id=method_id,
+            name=method_name,
+            description=description,
+            vars=vars_payload,
+            link=entry.get("link"),
+            _meta=field_meta,
+        )
+    if method_type == "terminal":
+        return TerminalAuthMethod(
+            type="terminal",
+            id=method_id,
+            name=method_name,
+            description=description,
+            args=entry.get("args"),
+            env=entry.get("env"),
+            _meta=field_meta,
+        )
+    return AuthMethodAgent(id=method_id, name=method_name, description=description, _meta=field_meta)
 
 
 def default_auth_methods() -> list[AuthMethod]:
-    agent_methods = [
-        AuthMethod(
+    agent_methods: list[AuthMethod] = [
+        AuthMethodAgent(
             id="openai",
             name="OpenAI Codex OAuth",
             description="Authenticate with OpenAI Codex in a browser.",
             _meta={"type": "agent"},
         ),
-        AuthMethod(
+        AuthMethodAgent(
             id="code-assist",
             name="Code Assist OAuth",
             description="Authenticate with Google Code Assist in a browser.",
             _meta={"type": "agent"},
         ),
     ]
-    env_var_methods = [
-        AuthMethod(
+    env_var_methods: list[AuthMethod] = [
+        EnvVarAuthMethod(
+            type="env_var",
             id=f"env_var:{env_name.lower()}",
             name=f"{provider_name} API key",
             description=f"Set {env_name} in the agent environment.",
+            vars=[AuthEnvVar(name=env_name, label=f"{provider_name} API key", secret=True)],
             _meta={
                 "type": "env_var",
                 "varName": env_name,
@@ -109,15 +151,29 @@ def auth_method_payload(method: AuthMethod) -> dict[str, Any]:
 
 
 def auth_method_type(method: AuthMethod) -> str:
+    if isinstance(method, EnvVarAuthMethod):
+        return "env_var"
+    if isinstance(method, TerminalAuthMethod):
+        return "terminal"
     payload = auth_method_payload(method)
     field_meta = payload.get("_meta")
     method_meta = field_meta if isinstance(field_meta, dict) else {}
-    return str(method_meta.get("type") or "agent").strip().lower()
+    return str(payload.get("type") or method_meta.get("type") or "agent").strip().lower()
 
 
 def auth_method_env_var_name(method: AuthMethod) -> str | None:
+    if isinstance(method, EnvVarAuthMethod):
+        for env_var in method.vars:
+            name = str(getattr(env_var, "name", "") or "").strip()
+            if name:
+                return name
     payload = auth_method_payload(method)
     field_meta = payload.get("_meta")
     method_meta = field_meta if isinstance(field_meta, dict) else {}
+    for item in payload.get("vars") or []:
+        if isinstance(item, dict):
+            env_name = str(item.get("name") or "").strip()
+            if env_name:
+                return env_name
     env_name = str(method_meta.get("varName") or method_meta.get("var_name") or "").strip()
     return env_name or None

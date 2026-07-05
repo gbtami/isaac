@@ -184,9 +184,10 @@ class PromptHandler:
         )
 
         async def _on_event(event: Any) -> bool:
+            result_part = getattr(event, "result", None) or getattr(event, "part", None)
             is_planner_result = (
                 isinstance(event, FunctionToolResultEvent)
-                and getattr(getattr(event, "result", None), "tool_name", "") == "planner"
+                and getattr(result_part, "tool_name", "") == "planner"
             )
             if is_planner_result and plan_progress is not None:
                 saved_plan = plan_progress.get("plan")

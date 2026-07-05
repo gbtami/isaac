@@ -6,14 +6,14 @@ from typing import Any
 
 from acp import (
     CreateTerminalResponse,
-    KillTerminalCommandResponse,
+    KillTerminalResponse as KillTerminalCommandResponse,
     ReleaseTerminalResponse,
     TerminalOutputResponse,
     WaitForTerminalExitResponse,
 )
 from acp.schema import (
     CreateTerminalRequest,
-    KillTerminalCommandRequest,
+    KillTerminalRequest as KillTerminalCommandRequest,
     ReleaseTerminalRequest,
     TerminalOutputRequest,
     WaitForTerminalExitRequest,

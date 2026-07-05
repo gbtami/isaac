@@ -76,3 +76,5 @@ uv run mypy src tests
 uv run pytest
 uv build --wheel --sdist
 ```
+
+Development note: `uv sync` installs the default `dev` dependency group, so local check commands such as `uv run pytest`, `uv run ruff check .`, and `uv run mypy` work after a normal sync. The `test` extra is kept for pip/CI compatibility.

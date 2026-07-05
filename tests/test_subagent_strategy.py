@@ -58,7 +58,7 @@ class _FakeRunner:
             call_event = FunctionToolCallEvent(part=part)
             yield call_event
             result_event = FunctionToolResultEvent(
-                result=SimpleNamespace(tool_name="planner", content=self._plan, tool_call_id=part.tool_call_id)
+                part=ToolReturnPart(tool_name="planner", content=self._plan, tool_call_id=part.tool_call_id)
             )
             yield result_event
             yield "done"
@@ -275,12 +275,12 @@ async def test_subagent_records_tool_history(tmp_path, monkeypatch):
 
             async def _gen():
                 yield FunctionToolCallEvent(part=part)
-                result_part = SimpleNamespace(
+                result_part = ToolReturnPart(
                     tool_name="run_command",
                     content={"command": "python main.py", "cwd": str(tmp_path), "stdout": "ok"},
                     tool_call_id=part.tool_call_id,
                 )
-                yield FunctionToolResultEvent(result=result_part)
+                yield FunctionToolResultEvent(part=result_part)
                 yield AgentRunResultEvent(result=AgentRunResult("done"))
 
             return _gen()

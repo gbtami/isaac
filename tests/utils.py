@@ -3,15 +3,17 @@ from __future__ import annotations
 import inspect
 from unittest.mock import AsyncMock
 
-from acp.agent.connection import AgentSideConnection
-from acp import RequestPermissionResponse
-from acp.schema import AllowedOutcome, AuthMethod
 import httpx
+from acp import RequestPermissionResponse
+from acp.agent.connection import AgentSideConnection
+from acp.schema import AllowedOutcome, AuthMethodAgent, EnvVarAuthMethod, TerminalAuthMethod
 from isaac.agent import ACPAgent
 from isaac.agent.tools import register_tools
 from pydantic_ai import Agent as PydanticAgent  # type: ignore
 from pydantic_ai import DeferredToolRequests  # type: ignore
 from pydantic_ai.models.test import TestModel  # type: ignore
+
+AuthMethod = AuthMethodAgent | EnvVarAuthMethod | TerminalAuthMethod
 
 
 def make_function_agent(

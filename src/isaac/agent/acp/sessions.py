@@ -10,10 +10,11 @@ from pathlib import Path
 from typing import Any
 
 from acp import LoadSessionResponse, NewSessionResponse, RequestError, SetSessionModeResponse, SetSessionModelResponse
+from acp.schema import CloseSessionResponse
 from acp.schema import (
     ConfigOptionUpdate,
     ListSessionsResponse,
-    SessionConfigOption,
+    SessionConfigOptionBoolean,
     SessionConfigOptionSelect,
     SessionConfigSelectOption,
     SessionInfo,
@@ -181,6 +182,28 @@ class SessionLifecycleMixin:
         _ = (cwd, session_id, mcp_servers)
         raise RequestError.method_not_found("session/resume")
 
+
+    async def close_session(self, session_id: str, **_: Any) -> CloseSessionResponse | None:
+        """Close a session and discard in-memory session state."""
+        with log_context(session_id=session_id):
+            log_event(logger, "acp.session.close")
+        event = self._cancel_events.pop(session_id, None)
+        if event:
+            event.set()
+        self._sessions.discard(session_id)
+        self._session_cwds.pop(session_id, None)
+        self._session_modes.pop(session_id, None)
+        self._session_model_ids.pop(session_id, None)
+        self._session_history.pop(session_id, None)
+        self._session_allowed_commands.pop(session_id, None)
+        self._session_mcp_servers.pop(session_id, None)
+        self._session_usage.pop(session_id, None)
+        self._session_toolsets.pop(session_id, None)
+        self._session_commands_advertised.discard(session_id)
+        self._session_last_chunk.pop(session_id, None)
+        self._session_system_prompts.pop(session_id, None)
+        return CloseSessionResponse()
+
     async def set_session_mode(self, mode_id: str, session_id: str, **_: Any) -> SetSessionModeResponse | None:
         """Update the current session mode and broadcast (Session Modes)."""
         with log_context(session_id=session_id, mode_id=mode_id):
@@ -333,7 +356,7 @@ class SessionLifecycleMixin:
     def _available_modes() -> list[dict[str, str]]:
         return available_modes()
 
-    def _session_config_options(self, session_id: str) -> list[SessionConfigOption]:
+    def _session_config_options(self, session_id: str) -> list[SessionConfigOptionSelect | SessionConfigOptionBoolean]:
         mode_id = self._session_modes.get(session_id, "ask")
         model_id = self._session_model_ids.get(session_id, self._current_model_id())
         mode_options = [
@@ -353,27 +376,23 @@ class SessionLifecycleMixin:
             for model_id_entry, meta in model_registry.list_user_models().items()
         ]
         return [
-            SessionConfigOption(
-                root=SessionConfigOptionSelect(
-                    id=self.MODE_CONFIG_ID,
-                    name="Mode",
-                    description="How the agent handles permission prompts.",
-                    category="session",
-                    type="select",
-                    current_value=mode_id,
-                    options=mode_options,
-                )
+            SessionConfigOptionSelect(
+                id=self.MODE_CONFIG_ID,
+                name="Mode",
+                description="How the agent handles permission prompts.",
+                category="session",
+                type="select",
+                current_value=mode_id,
+                options=mode_options,
             ),
-            SessionConfigOption(
-                root=SessionConfigOptionSelect(
-                    id=self.MODEL_CONFIG_ID,
-                    name="Model",
-                    description="Model used for this session.",
-                    category="session",
-                    type="select",
-                    current_value=model_id,
-                    options=model_options,
-                )
+            SessionConfigOptionSelect(
+                id=self.MODEL_CONFIG_ID,
+                name="Model",
+                description="Model used for this session.",
+                category="session",
+                type="select",
+                current_value=model_id,
+                options=model_options,
             ),
         ]
 
