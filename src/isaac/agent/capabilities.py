@@ -15,8 +15,16 @@ import os
 from typing import Any, Awaitable, Callable
 
 from pydantic_ai import DeferredToolRequests, DeferredToolResults, RunContext, ToolDenied  # type: ignore
-from pydantic_ai.capabilities import HandleDeferredToolCalls, PrepareTools  # type: ignore
+from pydantic_ai.capabilities import (  # type: ignore
+    HandleDeferredToolCalls,
+    PrefixTools,
+    PrepareTools,
+    ProcessHistory,
+    Toolset as ToolsetCapability,
+)
 from pydantic_ai.tools import ToolDefinition  # type: ignore
+
+from isaac.agent.brain.history_processors import sanitize_message_history
 
 ModeGetter = Callable[[], str]
 ToolApprovalCallback = Callable[[str, str, dict[str, Any]], Awaitable[bool] | bool]
@@ -118,10 +126,23 @@ def build_acp_permission_capability(request_tool_approval: ToolApprovalCallback)
     return HandleDeferredToolCalls(handle_deferred)
 
 
+def build_history_sanitizer_capability() -> Any:
+    """Build the capability that cleans provider-bound message history.
+
+    This keeps Isaac's provider-safety history processor on Pydantic AI's
+    capability hook instead of relying on removed/constructor-level history
+    processor plumbing. The processor itself stays Isaac-owned because it
+    preserves pydantic-ai message metadata while dropping empty text parts that
+    several providers reject.
+    """
+
+    return ProcessHistory(sanitize_message_history)
+
+
 def build_base_capabilities(mode_getter: ModeGetter) -> list[Any]:
     """Capabilities that belong on every Isaac coding agent."""
 
-    capabilities: list[Any] = [build_mode_capability(mode_getter)]
+    capabilities: list[Any] = [build_history_sanitizer_capability(), build_mode_capability(mode_getter)]
     capabilities.extend(build_optional_harness_capabilities())
     return capabilities
 
@@ -134,28 +155,57 @@ def build_prompt_capabilities(request_tool_approval: ToolApprovalCallback | None
     return [build_acp_permission_capability(request_tool_approval)]
 
 
+_ENV_TRUE = {"1", "true", "yes", "on"}
+
+
+def _env_enabled(name: str) -> bool:
+    return os.getenv(name, "").strip().lower() in _ENV_TRUE
+
+
 def build_optional_harness_capabilities() -> list[Any]:
     """Load opt-in Harness capabilities without making them a base dependency.
 
-    CodeMode is intentionally disabled by default because it changes the tool UX
-    substantially by wrapping normal tools behind a ``run_code`` tool. Enable it
-    for experiments with ``ISAAC_HARNESS_CODE_MODE=1`` after reviewing approval
-    and sandbox behaviour for the target client.
+    Harness integration is intentionally experimental and opt-in. FileSystem and
+    Shell are prefixed as ``harness_*`` tools so they cannot change Isaac's
+    existing ACP-visible tool contract or collide with Isaac's own ``read_file``,
+    ``edit_file``, and ``run_command`` tools. CodeMode remains disabled by
+    default because it changes the tool UX substantially by wrapping normal tools
+    behind a ``run_code`` tool.
     """
 
-    if os.getenv("ISAAC_HARNESS_CODE_MODE", "").strip().lower() not in {"1", "true", "yes", "on"}:
-        return []
-    try:
-        from pydantic_ai_harness import CodeMode  # type: ignore
-    except Exception:
-        return []
-    return [CodeMode()]
+    capabilities: list[Any] = []
+    if _env_enabled("ISAAC_HARNESS_FILESYSTEM"):
+        try:
+            from pydantic_ai_harness import FileSystem  # type: ignore
+        except Exception:
+            pass
+        else:
+            capabilities.append(PrefixTools(ToolsetCapability(FileSystem()), prefix="harness"))
+
+    if _env_enabled("ISAAC_HARNESS_SHELL"):
+        try:
+            from pydantic_ai_harness import Shell  # type: ignore
+        except Exception:
+            pass
+        else:
+            capabilities.append(PrefixTools(ToolsetCapability(Shell()), prefix="harness"))
+
+    if _env_enabled("ISAAC_HARNESS_CODE_MODE"):
+        try:
+            from pydantic_ai_harness import CodeMode  # type: ignore
+        except Exception:
+            pass
+        else:
+            capabilities.append(CodeMode())
+
+    return capabilities
 
 
 __all__ = [
     "build_acp_deferred_tool_results",
     "build_acp_permission_capability",
     "build_base_capabilities",
+    "build_history_sanitizer_capability",
     "build_mode_capability",
     "build_optional_harness_capabilities",
     "build_prompt_capabilities",

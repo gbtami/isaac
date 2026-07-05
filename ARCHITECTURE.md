@@ -65,9 +65,11 @@ Isaac-specific cross-cutting agent behavior should live in
 `src/isaac/agent/capabilities.py` before adding more prompt-handler state.
 Current capability assembly includes:
 
+- `build_history_sanitizer_capability()`: wraps Pydantic AI `ProcessHistory` so empty provider-bound text parts are stripped without losing message metadata.
 - `build_mode_capability()`: wraps Pydantic AI `PrepareTools` to map ACP session mode (`ask`/`yolo`) to tool visibility/approval semantics.
 - `build_acp_permission_capability()`: wraps Pydantic AI `HandleDeferredToolCalls` to resolve deferred approval requests through ACP permission prompts during a run.
 - `build_isaac_tools_capability()`: wraps Isaac's existing ACP-compatible coding tools in a Pydantic AI `Toolset` capability so normal agents get tools at construction time instead of via post-construction mutation.
+- `build_optional_harness_capabilities()`: opt-in bridge for Harness experiments. FileSystem/Shell are prefixed as `harness_*` tools and CodeMode remains explicit opt-in.
 
 The old prompt runner still owns ACP event projection while the modernization is
 in progress, but it now treats Pydantic AI `run_stream_events()` as an async

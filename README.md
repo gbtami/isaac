@@ -78,3 +78,21 @@ uv build --wheel --sdist
 ```
 
 Development note: `uv sync` installs the default `dev` dependency group, so local check commands such as `uv run pytest`, `uv run ruff check .`, and `uv run mypy` work after a normal sync. The `test` extra is kept for pip/CI compatibility.
+
+### Optional Harness experiments
+
+Install the optional Harness extra when experimenting with Pydantic AI Harness integrations:
+
+```bash
+uv sync --extra harness
+```
+
+Optional Harness tools are disabled by default. FileSystem and Shell experiments are exposed with prefixed `harness_*` tool names so they do not replace Isaac's ACP-compatible tools:
+
+```bash
+ISAAC_HARNESS_FILESYSTEM=1 uv run isaac
+ISAAC_HARNESS_SHELL=1 uv run isaac
+ISAAC_HARNESS_CODE_MODE=1 uv run isaac
+```
+
+Review approval and sandbox behavior before using Harness tools with mutating operations.

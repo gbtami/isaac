@@ -61,3 +61,22 @@ async def test_sanitize_message_history_preserves_response_metadata() -> None:
     assert len(cleaned_response.parts) == 1
     assert isinstance(cleaned_response.parts[0], ai_messages.TextPart)
     assert cleaned_response.parts[0].content == "answer"
+
+
+def test_history_sanitizer_is_exposed_as_pydantic_ai_capability() -> None:
+    from isaac.agent.capabilities import build_base_capabilities, build_history_sanitizer_capability
+
+    capability = build_history_sanitizer_capability()
+
+    assert type(capability).__name__ == "ProcessHistory"
+    assert type(build_base_capabilities(lambda: "ask")[0]).__name__ == "ProcessHistory"
+
+
+def test_optional_harness_capabilities_are_disabled_by_default(monkeypatch: pytest.MonkeyPatch) -> None:
+    from isaac.agent.capabilities import build_optional_harness_capabilities
+
+    monkeypatch.delenv("ISAAC_HARNESS_FILESYSTEM", raising=False)
+    monkeypatch.delenv("ISAAC_HARNESS_SHELL", raising=False)
+    monkeypatch.delenv("ISAAC_HARNESS_CODE_MODE", raising=False)
+
+    assert build_optional_harness_capabilities() == []
