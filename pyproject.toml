@@ -24,7 +24,6 @@ classifiers = [
 dependencies = [
     "agent-client-protocol>=0.10.1,<0.11.0",
     "pydantic-ai>=2.5.0,<3.0.0",
-    "pydantic-ai-harness[code-mode]>=0.5.0,<0.6.0",
     "aiocache==0.12.3",
     "prompt-toolkit==3.0.52",
     "python-dotenv==1.2.2",
@@ -48,6 +47,9 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project.optional-dependencies]
+harness = [
+    "pydantic-ai-harness[code-mode]>=0.5.0,<0.6.0",
+]
 test = [
     "ruff==0.15.4",
     "pytest==9.0.2",
@@ -65,7 +67,7 @@ packages = ["src/isaac"]
 pythonpath = ["src"]
 
 [tool.mypy]
-python_version = "3.10"
+python_version = "3.11"
 ignore_missing_imports = true
 disallow_untyped_defs = false
 warn_unused_ignores = false

@@ -19,6 +19,12 @@ Isaac is an ACP-compliant coding agent and reference CLI client.
 pip install isaac-acp
 ```
 
+Optional Harness experiments are not installed by default:
+
+```bash
+pip install "isaac-acp[harness]"
+```
+
 ## Quickstart
 
 Run the agent:
@@ -56,7 +62,7 @@ Common variables:
 - Pydantic AI 2.x capability-based agent assembly
 - Prompt turns, tool calls, filesystem and terminal ACP flows
 - ACP-backed approval flow for `run_command` with an experimental Pydantic AI capability bridge
-- Optional Pydantic AI Harness CodeMode experiments via `ISAAC_HARNESS_CODE_MODE=1`
+- Optional Pydantic AI Harness CodeMode experiments via `ISAAC_HARNESS_CODE_MODE=1` and the `harness` extra
 - Interactive client slash commands (`/mode`, `/model`, `/status`, `/usage`)
 - MCP server config forwarding from the client to the agent
 

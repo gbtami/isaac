@@ -2,92 +2,126 @@
 
 The goal of this module is to keep Isaac-specific behaviour at Pydantic AI's
 extension boundary instead of threading ad-hoc callbacks through every runner.
-Capabilities are deliberately small and composable so we can replace more of the
-legacy prompt-handler glue incrementally.
+Capabilities are deliberately assembled as small, composable built-ins so we can
+replace more of the legacy prompt-handler glue incrementally.
 """
 
 from __future__ import annotations
 
-import asyncio
-from dataclasses import dataclass, replace
+import copy
+from dataclasses import is_dataclass, replace
 import inspect
 import os
-from typing import Any, Awaitable, Callable, Iterable
+from typing import Any, Awaitable, Callable
 
-from pydantic_ai import DeferredToolRequests, DeferredToolResults, RunContext, ToolApproved, ToolDenied  # type: ignore
-from pydantic_ai.capabilities import AbstractCapability  # type: ignore
+from pydantic_ai import DeferredToolRequests, DeferredToolResults, RunContext, ToolDenied  # type: ignore
+from pydantic_ai.capabilities import HandleDeferredToolCalls, PrepareTools  # type: ignore
 from pydantic_ai.tools import ToolDefinition  # type: ignore
 
 ModeGetter = Callable[[], str]
 ToolApprovalCallback = Callable[[str, str, dict[str, Any]], Awaitable[bool] | bool]
 
 
-@dataclass
-class ToolModeCapability(AbstractCapability[Any]):
-    """Apply Isaac's session mode policy to the visible tool definitions.
+def _copy_tool_definition(tool_def: ToolDefinition, **updates: Any) -> ToolDefinition:
+    """Return a ToolDefinition copy with ``updates`` applied.
+
+    Pydantic AI's public docs treat ``ToolDefinition`` as the object passed to
+    tool-preparation hooks, but implementation details have changed across the
+    fast-moving v2 releases. Keep this helper defensive so Isaac's mode policy
+    does not depend on whether the object is currently a dataclass, pydantic
+    model, attrs object, or plain class.
+    """
+
+    model_copy = getattr(tool_def, "model_copy", None)
+    if callable(model_copy):
+        return model_copy(update=updates)
+    if is_dataclass(tool_def):
+        return replace(tool_def, **updates)
+    copied = copy.copy(tool_def)
+    for key, value in updates.items():
+        setattr(copied, key, value)
+    return copied
+
+
+async def _prepare_tools_for_mode(
+    mode_getter: ModeGetter,
+    ctx: RunContext[Any],
+    tool_defs: list[ToolDefinition],
+) -> list[ToolDefinition]:
+    """Apply Isaac's session mode policy to visible tool definitions.
 
     In normal ``ask`` mode, ``run_command`` remains an approval-required tool.
-    In ``yolo`` mode, Isaac exposes it as a normal function tool. Pydantic AI v2
-    capabilities make this policy part of the assembled agent rather than a
-    standalone ``prepare_tools`` constructor callback.
+    In ``yolo`` mode, Isaac exposes it as a normal function tool. This is now
+    plugged into Pydantic AI through the built-in ``PrepareTools`` capability
+    instead of the older Agent constructor hook.
     """
 
-    mode_getter: ModeGetter
+    _ = ctx
+    mode = (mode_getter() or "ask").strip().lower()
+    if mode != "yolo":
+        return tool_defs
 
-    async def prepare_tools(self, ctx: RunContext[Any], tool_defs: list[ToolDefinition]) -> list[ToolDefinition]:
-        _ = ctx
-        mode = (self.mode_getter() or "ask").strip().lower()
-        if mode != "yolo":
-            return tool_defs
-        updated: list[ToolDefinition] = []
-        for tool_def in tool_defs:
-            if tool_def.name == "run_command" and tool_def.kind == "unapproved":
-                updated.append(replace(tool_def, kind="function"))
-            else:
-                updated.append(tool_def)
-        return updated
+    updated: list[ToolDefinition] = []
+    for tool_def in tool_defs:
+        if getattr(tool_def, "name", None) == "run_command" and getattr(tool_def, "kind", None) == "unapproved":
+            updated.append(_copy_tool_definition(tool_def, kind="function"))
+        else:
+            updated.append(tool_def)
+    return updated
 
 
-@dataclass
-class ACPPermissionCapability(AbstractCapability[Any]):
-    """Resolve Pydantic AI deferred approval requests through ACP permissions.
+async def build_acp_deferred_tool_results(
+    requests: DeferredToolRequests,
+    request_tool_approval: ToolApprovalCallback,
+) -> DeferredToolResults | None:
+    """Resolve Pydantic AI deferred approval requests through Isaac's ACP policy.
 
-    Pydantic AI v2 can resolve approval-required tool calls inside the same agent
-    run via ``handle_deferred_tool_calls``. Isaac still keeps the ACP permission
-    UI/policy, but no longer needs to end the model run and manually resume it
-    when the provider emits a ``DeferredToolRequests`` output.
+    This helper is shared by the modern inline capability path and the legacy
+    fallback path in ``stream_with_runner``. Keeping one implementation avoids
+    diverging approval semantics while the old deferred-output resume loop is
+    still present for compatibility with test doubles and older runners.
     """
 
-    request_tool_approval: ToolApprovalCallback
+    approvals_in = list(getattr(requests, "approvals", []) or [])
+    if not approvals_in:
+        return None
 
-    async def handle_deferred_tool_calls(
-        self,
-        ctx: RunContext[Any],
-        *,
-        requests: DeferredToolRequests,
-    ) -> DeferredToolResults | None:
+    approvals: dict[str, bool | ToolDenied] = {}
+    for approval in approvals_in:
+        tool_name = str(getattr(approval, "tool_name", "") or "")
+        tool_call_id = str(getattr(approval, "tool_call_id", "") or "")
+        raw_args = getattr(approval, "args", None)
+        args = dict(raw_args) if isinstance(raw_args, dict) else {}
+        maybe_allowed = request_tool_approval(tool_call_id, tool_name, args)
+        allowed = bool(await maybe_allowed) if inspect.isawaitable(maybe_allowed) else bool(maybe_allowed)
+        approvals[tool_call_id] = True if allowed else ToolDenied("permission denied")
+
+    return requests.build_results(approvals=approvals, metadata=getattr(requests, "metadata", None) or {})
+
+
+def build_mode_capability(mode_getter: ModeGetter) -> Any:
+    """Build the capability that maps Isaac modes to Pydantic AI tools."""
+
+    async def prepare_tools(ctx: RunContext[Any], tool_defs: list[ToolDefinition]) -> list[ToolDefinition]:
+        return await _prepare_tools_for_mode(mode_getter, ctx, tool_defs)
+
+    return PrepareTools(prepare_tools)
+
+
+def build_acp_permission_capability(request_tool_approval: ToolApprovalCallback) -> Any:
+    """Build the capability that resolves deferred approvals via ACP."""
+
+    async def handle_deferred(ctx: RunContext[Any], requests: DeferredToolRequests) -> DeferredToolResults | None:
         _ = ctx
-        approvals_in = list(getattr(requests, "approvals", []) or [])
-        if not approvals_in:
-            return None
+        return await build_acp_deferred_tool_results(requests, request_tool_approval)
 
-        approvals: dict[str, ToolApproved | ToolDenied] = {}
-        for approval in approvals_in:
-            tool_name = str(getattr(approval, "tool_name", "") or "")
-            tool_call_id = str(getattr(approval, "tool_call_id", "") or "")
-            raw_args = getattr(approval, "args", None)
-            args = dict(raw_args) if isinstance(raw_args, dict) else {}
-            maybe_allowed = self.request_tool_approval(tool_call_id, tool_name, args)
-            allowed = bool(await maybe_allowed) if inspect.isawaitable(maybe_allowed) else bool(maybe_allowed)
-            approvals[tool_call_id] = ToolApproved() if allowed else ToolDenied("permission denied")
-
-        return DeferredToolResults(approvals=approvals, metadata=getattr(requests, "metadata", None) or {})
+    return HandleDeferredToolCalls(handle_deferred)
 
 
 def build_base_capabilities(mode_getter: ModeGetter) -> list[Any]:
     """Capabilities that belong on every Isaac coding agent."""
 
-    capabilities: list[Any] = [ToolModeCapability(mode_getter)]
+    capabilities: list[Any] = [build_mode_capability(mode_getter)]
     capabilities.extend(build_optional_harness_capabilities())
     return capabilities
 
@@ -97,11 +131,11 @@ def build_prompt_capabilities(request_tool_approval: ToolApprovalCallback | None
 
     if request_tool_approval is None:
         return []
-    return [ACPPermissionCapability(request_tool_approval)]
+    return [build_acp_permission_capability(request_tool_approval)]
 
 
 def build_optional_harness_capabilities() -> list[Any]:
-    """Load opt-in Harness capabilities without making them mandatory at import time.
+    """Load opt-in Harness capabilities without making them a base dependency.
 
     CodeMode is intentionally disabled by default because it changes the tool UX
     substantially by wrapping normal tools behind a ``run_code`` tool. Enable it
@@ -119,9 +153,10 @@ def build_optional_harness_capabilities() -> list[Any]:
 
 
 __all__ = [
-    "ACPPermissionCapability",
-    "ToolModeCapability",
+    "build_acp_deferred_tool_results",
+    "build_acp_permission_capability",
     "build_base_capabilities",
+    "build_mode_capability",
     "build_optional_harness_capabilities",
     "build_prompt_capabilities",
 ]

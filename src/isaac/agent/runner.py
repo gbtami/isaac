@@ -11,7 +11,7 @@ import logging
 from typing import Any, Callable, Protocol, Sequence
 
 import httpx
-from pydantic_ai import DeferredToolRequests, DeferredToolResults, ToolApproved, ToolDenied  # type: ignore
+from pydantic_ai import DeferredToolRequests, DeferredToolResults  # type: ignore
 from pydantic_ai import exceptions as ai_exc  # type: ignore
 from pydantic_ai import messages as ai_messages  # type: ignore
 
@@ -25,7 +25,7 @@ try:
     from pydantic_ai import AgentRunResultEvent  # type: ignore
 except ImportError:  # pragma: no cover - older pydantic-ai compatibility
     from pydantic_ai.run import AgentRunResultEvent  # type: ignore
-from isaac.agent.capabilities import build_prompt_capabilities
+from isaac.agent.capabilities import build_acp_deferred_tool_results, build_prompt_capabilities
 from isaac.agent.history_types import ChatMessage, HistoryInput
 from isaac.log_utils import log_chunks_enabled, log_context as log_ctx, log_event
 
@@ -129,25 +129,13 @@ async def stream_with_runner(
         return messages or None
 
     async def _resolve_deferred_tool_results(requests: DeferredToolRequests) -> DeferredToolResults:
-        approvals: dict[str, ToolApproved | ToolDenied] = {}
-        for approval in requests.approvals:
-            tool_name = str(getattr(approval, "tool_name", "") or "")
-            tool_call_id = str(getattr(approval, "tool_call_id", "") or "")
-            raw_args = getattr(approval, "args", None)
-            args = dict(raw_args) if isinstance(raw_args, dict) else {}
-            allowed = False
-            if request_tool_approval is None:
-                allowed = False
-            elif asyncio.iscoroutinefunction(request_tool_approval):
-                allowed = bool(await request_tool_approval(tool_call_id, tool_name, args))
-            else:
-                maybe_allowed = request_tool_approval(tool_call_id, tool_name, args)
-                if inspect.isawaitable(maybe_allowed):
-                    allowed = bool(await maybe_allowed)
-                else:
-                    allowed = bool(maybe_allowed)
-            approvals[tool_call_id] = ToolApproved() if allowed else ToolDenied("permission denied")
-        return DeferredToolResults(approvals=approvals, metadata=requests.metadata or {})
+        async def _deny_all(_tool_call_id: str, _tool_name: str, _args: dict[str, Any]) -> bool:
+            return False
+
+        results = await build_acp_deferred_tool_results(requests, request_tool_approval or _deny_all)
+        if results is not None:
+            return results
+        return requests.build_results(approvals={}, metadata=requests.metadata or {})
 
     def _run_stream_events(
         prompt: str | None,
@@ -331,7 +319,7 @@ async def stream_with_runner(
                         if isinstance(full, DeferredToolRequests):
                             # Fallback for older pydantic-ai versions or runners that
                             # do not support per-run capabilities. The v2 path should
-                            # normally be handled inside ACPPermissionCapability.
+                            # normally be handled inside the per-run ACP permission capability.
                             deferred_tool_results = await _resolve_deferred_tool_results(full)
                             if safe_history:
                                 safe_history = [*safe_history, *msgs]

@@ -63,18 +63,19 @@ flowchart TD
 
 Isaac-specific cross-cutting agent behavior should live in
 `src/isaac/agent/capabilities.py` before adding more prompt-handler state.
-Current capabilities include:
+Current capability assembly includes:
 
-- `ToolModeCapability`: maps ACP session mode (`ask`/`yolo`) to Pydantic AI tool visibility/approval semantics.
-- `ACPPermissionCapability`: resolves Pydantic AI deferred approval requests through ACP permission prompts during a run.
+- `build_mode_capability()`: wraps Pydantic AI `PrepareTools` to map ACP session mode (`ask`/`yolo`) to tool visibility/approval semantics.
+- `build_acp_permission_capability()`: wraps Pydantic AI `HandleDeferredToolCalls` to resolve deferred approval requests through ACP permission prompts during a run.
 
 The old prompt runner still owns ACP event projection while the modernization is
 in progress, but it now treats Pydantic AI `run_stream_events()` as an async
 context manager and passes per-run capabilities where available.
 
-Pydantic AI Harness is available for opt-in experiments. CodeMode is intentionally
-disabled by default and can be enabled with `ISAAC_HARNESS_CODE_MODE=1` once the
-approval/sandbox UX has been reviewed for the target ACP client.
+Pydantic AI Harness is available through the optional `harness` extra for opt-in
+experiments. CodeMode is intentionally disabled by default and can be enabled with
+`ISAAC_HARNESS_CODE_MODE=1` once the approval/sandbox UX has been reviewed for
+the target ACP client.
 
 ## Prompt Handling Flow
 

@@ -76,4 +76,4 @@ async def test_stream_with_runner_passes_approval_as_per_run_capability() -> Non
     assert runner.kwargs is not None
     capabilities = runner.kwargs.get("capabilities")
     assert capabilities
-    assert any(type(capability).__name__ == "ACPPermissionCapability" for capability in capabilities)
+    assert any(type(capability).__name__ == "HandleDeferredToolCalls" for capability in capabilities)
