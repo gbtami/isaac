@@ -18,9 +18,9 @@ logger = logging.getLogger(__name__)
 class PermissionMixin:
     async def request_permission(
         self,
-        options: list[PermissionOption],
         session_id: str,
         tool_call: ToolCall,
+        options: list[PermissionOption],
         **_: Any,
     ) -> RequestPermissionResponse | None:
         """Return a permission outcome, following Prompt Turn guidance for gated tools."""
@@ -29,7 +29,7 @@ class PermissionMixin:
         requester = getattr(self._conn, "request_permission", None)
         if requester is None:
             raise RuntimeError("Connection missing request_permission handler")
-        return await requester(options=options, session_id=session_id, tool_call=tool_call)
+        return await requester(session_id=session_id, tool_call=tool_call, options=options)
 
     async def _request_run_permission(
         self,
@@ -75,7 +75,7 @@ class PermissionMixin:
             requester = getattr(self._conn, "request_permission", None)
             if requester is None:
                 raise RuntimeError("Connection missing request_permission handler")
-            resp = await requester(options=options, session_id=session_id, tool_call=tool_call_update)
+            resp = await requester(session_id=session_id, tool_call=tool_call_update, options=options)
             outcome = getattr(resp, "outcome", None)
             option_id = ""
             if outcome is not None:

@@ -26,7 +26,11 @@ async def run_acp_agent():
     _setup_acp_logging()
     log_event(logger, "agent.start", transport="stdio")
 
-    await run_agent(ACPAgent(), stdio_buffer_limit_bytes=ACP_STDIO_BUFFER_LIMIT_BYTES)
+    await run_agent(
+        ACPAgent(),
+        stdio_buffer_limit_bytes=ACP_STDIO_BUFFER_LIMIT_BYTES,
+        use_unstable_protocol=True,
+    )
 
 
 def _setup_acp_logging():

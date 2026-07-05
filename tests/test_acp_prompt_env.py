@@ -5,6 +5,7 @@ from unittest.mock import AsyncMock
 import pytest
 from acp.schema import (
     AgentMessageChunk,
+    AgentPlanContentUpdate,
     AgentPlanUpdate,
     AgentThoughtChunk,
     ToolCallProgress,
@@ -84,3 +85,19 @@ async def test_acp_prompt_env_plan_updates_emit_progress() -> None:
     assert isinstance(update, AgentPlanUpdate)
     assert update.entries[0].status == "in_progress"
     assert update.entries[1].status == "pending"
+
+
+@pytest.mark.asyncio
+async def test_acp_prompt_env_uses_granular_plan_updates_when_supported() -> None:
+    send_update = AsyncMock()
+    adapter = ACPPromptEnvAdapter(send_update=send_update, supports_plan_updates=lambda: True)
+
+    steps = PlanSteps(entries=[PlanStep(content="first"), PlanStep(content="second")])
+    await adapter.send_plan_update("s1", steps, active_index=1, status_all=None)
+    note = send_update.await_args.args[0]
+    update = getattr(note, "update", note)
+
+    assert isinstance(update, AgentPlanContentUpdate)
+    assert update.plan.type == "items"
+    assert update.plan.entries[0].status == "completed"
+    assert update.plan.entries[1].status == "in_progress"

@@ -6,9 +6,11 @@ from typing import Any
 from uuid import uuid4
 
 from acp.helpers import update_plan
-from acp.schema import PlanEntry
+from acp.schema import AgentPlanContentUpdate, AgentPlanRemovedUpdate, PlanEntry, PlanUpdateItems
 
 from isaac.agent.brain.plan_schema import PlanSteps, PlanStep
+
+DEFAULT_PLAN_ID = "isaac-plan"
 
 
 def _plan_entries(plan_steps: PlanSteps, *, active_index: int | None, status_all: str | None) -> list[PlanEntry]:
@@ -44,8 +46,15 @@ def build_plan_update(
     *,
     active_index: int | None = None,
     status_all: str | None = None,
+    use_incremental: bool = False,
+    plan_id: str = DEFAULT_PLAN_ID,
 ) -> Any | None:
-    """Convert PlanSteps into an ACP update with status metadata."""
+    """Convert PlanSteps into an ACP plan update with status metadata.
+
+    ACP 0.11 adds granular ``plan_update`` session updates. Isaac emits those
+    when the connected client advertises plan-update support, and falls back to
+    the legacy full-plan ``plan`` update otherwise.
+    """
 
     if not isinstance(plan_steps, PlanSteps):
         return None
@@ -53,9 +62,20 @@ def build_plan_update(
     if not entries:
         return None
     try:
+        if use_incremental:
+            return AgentPlanContentUpdate(
+                session_update="plan_update",
+                plan=PlanUpdateItems(type="items", id=plan_id, entries=entries),
+            )
         return update_plan(entries)
     except Exception:
         return None
+
+
+def build_plan_removed(*, plan_id: str = DEFAULT_PLAN_ID) -> AgentPlanRemovedUpdate:
+    """Build an ACP 0.11 granular plan-removal update."""
+
+    return AgentPlanRemovedUpdate(session_update="plan_removed", id=plan_id)
 
 
 def plan_steps_from_entries(steps: list[PlanStep]) -> PlanSteps:
@@ -64,4 +84,4 @@ def plan_steps_from_entries(steps: list[PlanStep]) -> PlanSteps:
     return PlanSteps(entries=steps)
 
 
-__all__ = ["build_plan_update", "plan_steps_from_entries"]
+__all__ = ["DEFAULT_PLAN_ID", "build_plan_removed", "build_plan_update", "plan_steps_from_entries"]

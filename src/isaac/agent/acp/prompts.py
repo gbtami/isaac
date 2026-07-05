@@ -34,6 +34,7 @@ class PromptMixin:
                 cwd=cwd,
             ),
             set_usage=lambda session_id, usage: self._session_usage.__setitem__(session_id, usage),
+            supports_plan_updates=self._client_supports_plan_updates,
         )
         return PromptHandler(
             env=env,
@@ -42,8 +43,8 @@ class PromptMixin:
 
     async def prompt(
         self,
-        prompt: list[ContentBlock],
         session_id: str,
+        prompt: list[ContentBlock],
         **_: Any,
     ) -> PromptResponse:
         """Process a prompt turn per Prompt Turn lifecycle (session/prompt)."""
@@ -71,7 +72,13 @@ class PromptMixin:
 
         plan_request = parse_plan_shortcut(prompt_text)
         if plan_request:
-            await self._send_update(build_plan_shortcut_notification(session_id, plan_request))
+            await self._send_update(
+                build_plan_shortcut_notification(
+                    session_id,
+                    plan_request,
+                    use_incremental=self._client_supports_plan_updates(),
+                )
+            )
             return PromptResponse(stop_reason="end_turn")
 
         if cancel_event.is_set():

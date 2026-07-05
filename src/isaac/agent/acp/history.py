@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any, Iterable, List
 
-from acp.schema import AgentMessageChunk, AgentPlanUpdate, ToolCallProgress, UserMessageChunk
+from acp.schema import AgentMessageChunk, AgentPlanContentUpdate, AgentPlanUpdate, ToolCallProgress, UserMessageChunk
 from isaac.agent.history_types import ChatMessage
 
 
@@ -45,6 +45,12 @@ def build_chat_history(updates: Iterable[Any]) -> List[ChatMessage]:
                     history.append({"role": "assistant", "content": text, "_src": "tool"})
         elif isinstance(update_obj, AgentPlanUpdate):
             entries = getattr(update_obj, "entries", None) or []
+            text = "\n".join(f"- {getattr(e, 'content', '')}" for e in entries if getattr(e, "content", ""))
+            if text:
+                history.append({"role": "assistant", "content": f"Plan:\n{text}", "_src": "plan"})
+        elif isinstance(update_obj, AgentPlanContentUpdate):
+            plan = getattr(update_obj, "plan", None)
+            entries = getattr(plan, "entries", None) or []
             text = "\n".join(f"- {getattr(e, 'content', '')}" for e in entries if getattr(e, "content", ""))
             if text:
                 history.append({"role": "assistant", "content": f"Plan:\n{text}", "_src": "plan"})

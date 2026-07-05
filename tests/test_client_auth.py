@@ -5,6 +5,7 @@ from unittest.mock import AsyncMock
 
 import pytest
 
+from isaac.client.acp_client import _coerce_elicitation_value
 from isaac.client.auth import auth_method_env_var_name, auth_method_link, auth_method_type, find_auth_method
 from isaac.client.client import _auth_methods_for_error, _authenticate_if_needed
 
@@ -86,3 +87,15 @@ def test_auth_methods_for_error_prefers_narrowed_list() -> None:
     methods = _auth_methods_for_error(init_methods, error_data)
 
     assert methods == [{"id": "openai"}]
+
+
+def test_coerce_elicitation_value_handles_primitive_cli_inputs() -> None:
+    class Prop:
+        def __init__(self, type_: str) -> None:
+            self.type = type_
+
+    assert _coerce_elicitation_value(Prop("boolean"), "yes") is True
+    assert _coerce_elicitation_value(Prop("boolean"), "no") is False
+    assert _coerce_elicitation_value(Prop("integer"), "42") == 42
+    assert _coerce_elicitation_value(Prop("number"), "3.5") == 3.5
+    assert _coerce_elicitation_value(Prop("array"), "a, b,, c") == ["a", "b", "c"]

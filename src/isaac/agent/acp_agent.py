@@ -86,6 +86,13 @@ class ACPAgent(
         self._auth_methods = [coerce_auth_method(item) for item in raw_auth_methods]
         self._is_authenticated = False
 
+    def _client_supports_plan_updates(self) -> bool:
+        """Return whether the connected client advertised ACP 0.11 plan-update support."""
+        capabilities = self._client_capabilities
+        if isinstance(capabilities, dict):
+            return capabilities.get("plan") is not None
+        return getattr(capabilities, "plan", None) is not None
+
     def on_connect(self, conn: AgentSideConnection) -> None:  # type: ignore[override]
         """Capture connection when wiring via run_agent/connect_to_agent."""
         self._conn = conn

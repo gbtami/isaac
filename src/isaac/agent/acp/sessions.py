@@ -9,7 +9,7 @@ import uuid
 from pathlib import Path
 from typing import Any
 
-from acp import LoadSessionResponse, NewSessionResponse, RequestError, SetSessionModeResponse, SetSessionModelResponse
+from acp import LoadSessionResponse, NewSessionResponse, RequestError, SetSessionModeResponse
 from acp.schema import CloseSessionResponse
 from acp.schema import (
     ConfigOptionUpdate,
@@ -52,7 +52,8 @@ class SessionLifecycleMixin:
     async def new_session(
         self,
         cwd: str,
-        mcp_servers: list[Any],
+        additional_directories: list[str] | None = None,
+        mcp_servers: list[Any] | None = None,
         **_: Any,
     ) -> NewSessionResponse:
         """Create a new session (Session Setup / creation)."""
@@ -64,6 +65,8 @@ class SessionLifecycleMixin:
             self._session_cwds[session_id] = cwd_path
             session_system_prompt = self._build_session_system_prompt(cwd_path)
             self._session_system_prompts[session_id] = session_system_prompt
+            _ = additional_directories
+            mcp_servers = mcp_servers or []
             self._cancel_events[session_id] = asyncio.Event()
             toolsets = build_mcp_toolsets(mcp_servers)
             self._session_toolsets[session_id] = toolsets
@@ -91,8 +94,9 @@ class SessionLifecycleMixin:
     async def load_session(
         self,
         cwd: str,
-        mcp_servers: list[Any],
         session_id: str,
+        mcp_servers: list[Any] | None = None,
+        additional_directories: list[str] | None = None,
         **_: Any,
     ) -> LoadSessionResponse | None:
         """Reload an existing session and replay history (Session Setup / loading)."""
@@ -105,6 +109,7 @@ class SessionLifecycleMixin:
         session_system_prompt = self._build_session_system_prompt(cwd_path)
         self._session_system_prompts[session_id] = session_system_prompt
         self._cancel_events.setdefault(session_id, asyncio.Event())
+        _ = additional_directories
         mcp_servers = mcp_servers or stored_meta.get("mcpServers", [])
         toolsets = build_mcp_toolsets(mcp_servers)
         self._session_toolsets[session_id] = toolsets
@@ -162,24 +167,26 @@ class SessionLifecycleMixin:
 
     async def fork_session(
         self,
-        cwd: str,
         session_id: str,
+        cwd: str,
+        additional_directories: list[str] | None = None,
         mcp_servers: list[Any] | None = None,
         **_: Any,
     ) -> Any:
         """Forking is not implemented yet."""
-        _ = (cwd, session_id, mcp_servers)
+        _ = (session_id, cwd, additional_directories, mcp_servers)
         raise RequestError.method_not_found("session/fork")
 
     async def resume_session(
         self,
-        cwd: str,
         session_id: str,
+        cwd: str,
+        additional_directories: list[str] | None = None,
         mcp_servers: list[Any] | None = None,
         **_: Any,
     ) -> Any:
         """Resuming is not implemented yet."""
-        _ = (cwd, session_id, mcp_servers)
+        _ = (session_id, cwd, additional_directories, mcp_servers)
         raise RequestError.method_not_found("session/resume")
 
     async def close_session(self, session_id: str, **_: Any) -> CloseSessionResponse | None:
@@ -203,7 +210,7 @@ class SessionLifecycleMixin:
         self._session_system_prompts.pop(session_id, None)
         return CloseSessionResponse()
 
-    async def set_session_mode(self, mode_id: str, session_id: str, **_: Any) -> SetSessionModeResponse | None:
+    async def set_session_mode(self, session_id: str, mode_id: str, **_: Any) -> SetSessionModeResponse | None:
         """Update the current session mode and broadcast (Session Modes)."""
         with log_context(session_id=session_id, mode_id=mode_id):
             log_event(logger, "acp.session.mode")
@@ -222,7 +229,7 @@ class SessionLifecycleMixin:
         )
         return SetSessionModeResponse()
 
-    async def set_session_model(self, model_id: str, session_id: str, **_: Any) -> SetSessionModelResponse | None:
+    async def _set_session_model(self, session_id: str, model_id: str) -> None:
         """Switch the backing model for a session."""
         with log_context(session_id=session_id, model_id=model_id):
             log_event(logger, "acp.session.model")
@@ -270,7 +277,7 @@ class SessionLifecycleMixin:
             current_mode=self._session_modes.get(session_id, "ask"),
             current_model=model_id,
         )
-        return SetSessionModelResponse()
+        return None
 
     def _auth_required_from_model_build_error(self, exc: ModelBuildError) -> dict[str, Any] | None:
         error_text = str(exc)
@@ -325,17 +332,17 @@ class SessionLifecycleMixin:
         self,
         config_id: str,
         session_id: str,
-        value: str,
+        value: str | bool,
         **_: Any,
     ) -> SetSessionConfigOptionResponse:
         """Set session config options (mode/model) via ACP session-config-options API."""
         with log_context(session_id=session_id, config_id=config_id, value=value):
             log_event(logger, "acp.session.config_option")
         if config_id == self.MODE_CONFIG_ID:
-            await self.set_session_mode(mode_id=value, session_id=session_id)
+            await self.set_session_mode(session_id=session_id, mode_id=str(value))
             return SetSessionConfigOptionResponse(config_options=self._session_config_options(session_id))
         if config_id == self.MODEL_CONFIG_ID:
-            await self.set_session_model(model_id=value, session_id=session_id)
+            await self._set_session_model(session_id=session_id, model_id=str(value))
             return SetSessionConfigOptionResponse(config_options=self._session_config_options(session_id))
         raise RequestError.invalid_params({"message": f"Unknown config option id: {config_id}"})
 

@@ -12,7 +12,10 @@ import sys
 import time
 from pathlib import Path
 from acp import (
+    AcceptElicitationResponse,
+    CancelElicitationResponse,
     Client,
+    CreateElicitationResponse,
     CreateTerminalRequest,
     CreateTerminalResponse,
     KillTerminalRequest as KillTerminalCommandRequest,
@@ -21,6 +24,7 @@ from acp import (
     ReleaseTerminalResponse,
     RequestError,
     RequestPermissionResponse,
+    ElicitationMode,
     SessionNotification,
     TerminalOutputRequest,
     TerminalOutputResponse,
@@ -30,6 +34,8 @@ from acp import (
 from acp.schema import (
     AgentMessageChunk,
     AgentThoughtChunk,
+    AgentPlanContentUpdate,
+    AgentPlanRemovedUpdate,
     AgentPlanUpdate,
     AllowedOutcome,
     AudioContentBlock,
@@ -105,6 +111,26 @@ def _persist_shared_env_var(env_name: str, value: str) -> None:
     env_file = _shared_env_file()
     env_file.parent.mkdir(parents=True, exist_ok=True)
     set_key(str(env_file), env_name, value)
+
+
+def _coerce_elicitation_value(prop: Any, raw: str) -> Any:
+    """Coerce a CLI elicitation answer to the requested primitive schema type."""
+    prop_type = str(getattr(prop, "type", "") or "").lower()
+    if prop_type == "boolean":
+        return raw.lower() in {"1", "true", "yes", "y", "on"}
+    if prop_type == "integer":
+        try:
+            return int(raw)
+        except ValueError:
+            return raw
+    if prop_type == "number":
+        try:
+            return float(raw)
+        except ValueError:
+            return raw
+    if prop_type == "array":
+        return [part.strip() for part in raw.split(",") if part.strip()]
+    return raw
 
 
 async def _authenticate_from_error(conn: Any, error_data: Any) -> bool:
@@ -198,9 +224,9 @@ class ACPClient(Client):
 
     async def request_permission(
         self,
-        options,
         session_id: str,
         tool_call: Any,
+        options,
         **_: Any,
     ) -> RequestPermissionResponse:
         """Prompt the user for a permission choice (Prompt Turn permission flow)."""
@@ -243,19 +269,72 @@ class ACPClient(Client):
         """No-op connect hook for compatibility with ACP client interface."""
         return None
 
-    async def write_text_file(self, *args: Any, **kwargs: Any):  # type: ignore[override]
+    async def create_elicitation(
+        self,
+        message: str,
+        mode: ElicitationMode,
+        **_: Any,
+    ) -> CreateElicitationResponse:
+        """Handle ACP 0.11 structured elicitation requests from the agent."""
+        if self._state.thinking_status is not None:
+            self._state.thinking_status.stop()
+        print_agent_text(f"\n{message}\n")
+        url = getattr(mode, "url", None)
+        if url is not None:
+            print_agent_text(f"Open this URL to continue: {url}\n")
+            return AcceptElicitationResponse(action="accept", content={})
+
+        requested_schema = getattr(mode, "requested_schema", None)
+        properties = getattr(requested_schema, "properties", {}) or {}
+        required = set(getattr(requested_schema, "required", []) or [])
+        if not properties:
+            return AcceptElicitationResponse(action="accept", content={})
+        if not sys.stdin.isatty():
+            return CancelElicitationResponse(action="cancel")
+
+        content: dict[str, Any] = {}
+        try:
+            for name, prop in properties.items():
+                title = getattr(prop, "title", None) or name
+                description = getattr(prop, "description", None)
+                suffix = "" if name in required else " (optional)"
+                if description:
+                    print_agent_text(f"{description}\n")
+                raw = input(f"{title}{suffix}: ").strip()
+                if not raw and name not in required:
+                    continue
+                content[name] = _coerce_elicitation_value(prop, raw)
+        except (EOFError, KeyboardInterrupt):
+            return CancelElicitationResponse(action="cancel")
+        return AcceptElicitationResponse(action="accept", content=content)
+
+    async def complete_elicitation(self, elicitation_id: str, **_: Any) -> None:
+        """Receive ACP 0.11 elicitation completion notifications."""
+        log_event(self._logger, "client.elicitation.complete", elicitation_id=elicitation_id)
+        return None
+
+    async def write_text_file(self, session_id: str, path: str, content: str, **_: Any):  # type: ignore[override]
+        _ = (session_id, path, content)
         raise RequestError.method_not_found("fs/write_text_file")
 
-    async def read_text_file(self, *args: Any, **kwargs: Any):  # type: ignore[override]
+    async def read_text_file(
+        self,
+        session_id: str,
+        path: str,
+        line: int | None = None,
+        limit: int | None = None,
+        **_: Any,
+    ):  # type: ignore[override]
+        _ = (session_id, path, line, limit)
         raise RequestError.method_not_found("fs/read_text_file")
 
     async def create_terminal(
         self,
-        command: str,
         session_id: str,
+        command: str,
         args=None,
-        cwd=None,
         env=None,
+        cwd=None,
         output_byte_limit=None,
         **_: Any,
     ) -> CreateTerminalResponse:
@@ -295,9 +374,14 @@ class ACPClient(Client):
     async def session_update(self, session_id: str, update: SessionNotification | Any, **_: Any) -> None:
         if self._state.thinking_status is not None:
             self._state.thinking_status.stop()
-        if self._session_accumulator is not None and isinstance(update, SessionNotification):
+        if self._session_accumulator is not None:
             try:
-                self._session_accumulator.apply(update)
+                note = (
+                    update
+                    if isinstance(update, SessionNotification)
+                    else SessionNotification(session_id=session_id, update=update)
+                )
+                self._session_accumulator.apply(note)
                 snapshot = self._session_accumulator.snapshot()
                 self._state.acp_snapshot = snapshot
             except Exception:
@@ -398,6 +482,19 @@ class ACPClient(Client):
                                 print_diff(raw_out["diff"])
                             else:
                                 print_agent_text(payload)
+            return
+        if isinstance(update, AgentPlanContentUpdate):
+            plan = getattr(update, "plan", None)
+            entries = getattr(plan, "entries", None)
+            if entries is not None:
+                print_plan(entries or [])
+            else:
+                content = getattr(plan, "content", None) or getattr(plan, "path", None)
+                if content:
+                    print_agent_text(f"Plan: {content}\n")
+            return
+        if isinstance(update, AgentPlanRemovedUpdate):
+            print_agent_text("[plan removed]\n")
             return
         if isinstance(update, AgentPlanUpdate):
             print_plan(update.entries or [])

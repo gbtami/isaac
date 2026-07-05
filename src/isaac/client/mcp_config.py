@@ -7,7 +7,7 @@ import sys
 from pathlib import Path
 from typing import Any
 
-from acp.schema import EnvVariable, HttpHeader, HttpMcpServer, McpServerStdio, SseMcpServer
+from acp.schema import AcpMcpServer, EnvVariable, HttpHeader, HttpMcpServer, McpServerStdio, SseMcpServer
 
 
 def load_mcp_config(path: str) -> list[Any]:
@@ -74,4 +74,9 @@ def load_mcp_config(path: str) -> list[Any]:
                     ],
                 )
             )
+        elif stype == "acp":
+            server_id = entry.get("id")
+            if not name or not server_id:
+                continue
+            servers.append(AcpMcpServer(name=name, id=server_id, type="acp"))
     return servers

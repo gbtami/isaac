@@ -21,8 +21,12 @@ from acp.schema import (
     EnvVarAuthMethod,
     TerminalAuthMethod,
     ClientCapabilities,
+    ElicitationCapabilities,
+    ElicitationFormCapabilities,
+    ElicitationUrlCapabilities,
     FileSystemCapabilities,
     Implementation,
+    PlanCapabilities,
 )
 
 from isaac.acp_runtime import ACP_STDIO_BUFFER_LIMIT_BYTES
@@ -162,12 +166,17 @@ async def _start_runtime_connection(
     )
     if proc.stdin is None or proc.stdout is None:
         raise RuntimeError("Agent process does not expose stdio pipes")
-    conn = connect_to_agent(client_impl, proc.stdin, proc.stdout)
+    conn = connect_to_agent(client_impl, proc.stdin, proc.stdout, use_unstable_protocol=True)
     init_resp = await conn.initialize(
         protocol_version=PROTOCOL_VERSION,
         client_capabilities=ClientCapabilities(
             fs=FileSystemCapabilities(read_text_file=False, write_text_file=False),
             terminal=True,
+            plan=PlanCapabilities(),
+            elicitation=ElicitationCapabilities(
+                form=ElicitationFormCapabilities(),
+                url=ElicitationUrlCapabilities(),
+            ),
         ),
         client_info=Implementation(name="example-client", title="Example Client", version="0.4.0"),
     )

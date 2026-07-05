@@ -11,12 +11,31 @@ from isaac.agent.fs import read_text_file, write_text_file
 
 
 class FileSystemMixin:
-    async def read_text_file(self, path: str, session_id: str, **kwargs: Any) -> ReadTextFileResponse:
+    async def read_text_file(
+        self,
+        session_id: str,
+        path: str,
+        line: int | None = None,
+        limit: int | None = None,
+        **kwargs: Any,
+    ) -> ReadTextFileResponse:
         """Serve fs/read_text_file to clients (File System section)."""
-        params = ReadTextFileRequest(path=path, session_id=session_id, field_meta=kwargs or None)
+        params = ReadTextFileRequest(
+            path=path,
+            session_id=session_id,
+            line=line,
+            limit=limit,
+            field_meta=kwargs or None,
+        )
         return await read_text_file(self._session_cwds, params)
 
-    async def write_text_file(self, content: str, path: str, session_id: str, **kwargs: Any) -> WriteTextFileResponse:
+    async def write_text_file(
+        self,
+        session_id: str,
+        path: str,
+        content: str,
+        **kwargs: Any,
+    ) -> WriteTextFileResponse:
         """Serve fs/write_text_file to clients (File System section)."""
         params = WriteTextFileRequest(content=content, path=path, session_id=session_id, field_meta=kwargs or None)
         return await write_text_file(self._session_cwds, params)

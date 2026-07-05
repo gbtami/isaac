@@ -27,6 +27,7 @@ class ACPPromptEnvAdapter:
     """Translate brain prompt events into ACP updates."""
 
     send_update: Callable[[Any], Awaitable[None]]
+    supports_plan_updates: Callable[[], bool] = lambda: False
 
     def __post_init__(self) -> None:
         self._tool_trackers: dict[str, ToolCallTracker] = {}
@@ -88,7 +89,12 @@ class ACPPromptEnvAdapter:
         active_index: int | None,
         status_all: str | None,
     ) -> None:
-        update = build_plan_update(plan_steps, active_index=active_index, status_all=status_all)
+        update = build_plan_update(
+            plan_steps,
+            active_index=active_index,
+            status_all=status_all,
+            use_incremental=self.supports_plan_updates(),
+        )
         if update is None:
             return
         await self.send_update(session_notification(session_id, update))
@@ -101,10 +107,11 @@ def build_prompt_env(
     send_update: Callable[[Any], Awaitable[None]],
     request_run_permission: Callable[[str, str, str, str | None], Awaitable[bool]],
     set_usage: Callable[[str, Any | None], None],
+    supports_plan_updates: Callable[[], bool] = lambda: False,
 ) -> PromptEnv:
     """Construct a PromptEnv wired to ACP update helpers."""
 
-    adapter = ACPPromptEnvAdapter(send_update=send_update)
+    adapter = ACPPromptEnvAdapter(send_update=send_update, supports_plan_updates=supports_plan_updates)
     return PromptEnv(
         session_modes=session_modes,
         session_last_chunk=session_last_chunk,
