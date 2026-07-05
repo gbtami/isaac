@@ -22,6 +22,7 @@ DEFAULT_CODEX_MODELS = [
     "gpt-5.2",
     "gpt-5.2-codex",
 ]
+OPENAI_CODEX_OAUTH_SOURCE = "openai-codex-oauth"
 
 CONFIG_DIR = config_dir()
 MODELS_FILE = CONFIG_DIR / "models.json"
@@ -112,26 +113,47 @@ async def fetch_codex_models(
 
 
 def add_openai_codex_models(models: list[str]) -> int:
+    """Upsert the live Codex OAuth model list and prune stale synced entries."""
+
     config = _load_models_config()
     models_config = config.setdefault("models", {})
     added = 0
+    changed = False
 
-    for model_name in models:
-        name = str(model_name).strip()
-        if not name:
+    live_names = [name for name in dict.fromkeys(str(model).strip() for model in models) if name]
+    live_ids = {f"openai-codex:{name}" for name in live_names}
+
+    for model_id, meta in list(models_config.items()):
+        if not isinstance(meta, dict):
             continue
+        if str(meta.get("provider") or "").lower() != "openai-codex":
+            continue
+        if str(meta.get("oauth_source") or "").lower() != OPENAI_CODEX_OAUTH_SOURCE:
+            continue
+        if model_id not in live_ids:
+            del models_config[model_id]
+            changed = True
+
+    for name in live_names:
         model_id = f"openai-codex:{name}"
-        if model_id in models_config:
-            continue
-        models_config[model_id] = {
+        model_entry = {
             "provider": "openai-codex",
             "model": name,
             "description": f"OpenAI Codex {name} (OAuth, ChatGPT login)",
-            "oauth_source": "openai-codex-oauth",
+            "oauth_source": OPENAI_CODEX_OAUTH_SOURCE,
         }
-        added += 1
+        existing = models_config.get(model_id)
+        if not isinstance(existing, dict):
+            models_config[model_id] = model_entry
+            added += 1
+            changed = True
+            continue
+        merged = {**existing, **model_entry}
+        if merged != existing:
+            models_config[model_id] = merged
+            changed = True
 
-    if added:
+    if changed:
         _save_models_config(config)
     return added
 

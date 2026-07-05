@@ -42,6 +42,13 @@ _HTTP_CLIENTS: dict[str, httpx.AsyncClient] = {}
 
 FUNCTION_MODEL_ID = "function:function"
 HIDDEN_MODELS = {FUNCTION_MODEL_ID}
+# The Codex OAuth backend exposes account-specific model access. The static
+# models.dev catalog contains API/Codex model names that may not be usable with
+# ChatGPT-login Codex OAuth, so do not publish those catalog entries as selectable
+# models by default. `/login openai` syncs the account-specific list into the
+# user config with `oauth_source=openai-codex-oauth`.
+OPENAI_CODEX_CATALOG_MODELS_ENV = "ISAAC_OPENAI_CODEX_CATALOG_MODELS"
+OPENAI_CODEX_OAUTH_SOURCE = "openai-codex-oauth"
 DEFAULT_MODEL_PROVIDER = "function"
 DEFAULT_MODEL_NAME = "function"
 DEFAULT_MODEL_ID = f"{DEFAULT_MODEL_PROVIDER}:{DEFAULT_MODEL_NAME}"
@@ -162,7 +169,27 @@ def list_models() -> Dict[str, Any]:
 
 def list_user_models() -> Dict[str, Any]:
     """Return models suitable for end users (hides internal/testing models)."""
-    return {mid: meta for mid, meta in list_models().items() if mid not in HIDDEN_MODELS}
+
+    return {mid: meta for mid, meta in list_models().items() if _is_user_visible_model(mid, meta)}
+
+
+def _is_user_visible_model(model_id: str, meta: Dict[str, Any]) -> bool:
+    """Return whether a model should be offered in session/model selectors."""
+
+    if model_id in HIDDEN_MODELS:
+        return False
+    provider = str(meta.get("provider") or "").lower()
+    if provider != "openai-codex":
+        return True
+    return _is_openai_codex_oauth_model(meta) or _allow_openai_codex_catalog_models()
+
+
+def _is_openai_codex_oauth_model(meta: Dict[str, Any]) -> bool:
+    return str(meta.get("oauth_source") or "").lower() == OPENAI_CODEX_OAUTH_SOURCE
+
+
+def _allow_openai_codex_catalog_models() -> bool:
+    return os.getenv(OPENAI_CODEX_CATALOG_MODELS_ENV, "").strip().lower() in {"1", "true", "yes", "on"}
 
 
 def set_current_model(model_id: str) -> str:
@@ -186,7 +213,8 @@ def _load_current_model() -> str:
             parser.read(settings_file)
             current = parser.get("models", "current_model", fallback=None)
             if current:
-                if current in models_cfg:
+                current_meta = models_cfg.get(current)
+                if isinstance(current_meta, dict) and _is_user_visible_model(current, current_meta):
                     return current
                 logger.warning(
                     "Persisted current model '%s' is unavailable; falling back to '%s'", current, fallback_model_id
@@ -219,7 +247,9 @@ def _fallback_current_model_id(models_cfg: Dict[str, Any] | None = None) -> str:
     cfg = models_cfg or list_models()
     if DEFAULT_MODEL_ID in cfg:
         return DEFAULT_MODEL_ID
-    user_models = sorted(mid for mid in cfg if mid not in HIDDEN_MODELS)
+    user_models = sorted(
+        mid for mid, meta in cfg.items() if isinstance(meta, dict) and _is_user_visible_model(mid, meta)
+    )
     if user_models:
         return user_models[0]
     model_ids = sorted(cfg.keys())
@@ -295,6 +325,8 @@ def _load_catalog_models() -> Dict[str, Any]:
     models: dict[str, Any] = {}
     for provider, provider_entry in providers.items():
         if not isinstance(provider_entry, dict):
+            continue
+        if provider == "openai-codex" and not _allow_openai_codex_catalog_models():
             continue
         label = str(provider_entry.get("label") or provider)
         raw_models = provider_entry.get("models", [])
@@ -438,6 +470,7 @@ def _build_provider_model(model_id: str, model_entry: Dict[str, Any]) -> tuple[M
 
         from pydantic_ai.models.anthropic import AnthropicModel, AnthropicModelSettings  # type: ignore
         from pydantic_ai.providers.anthropic import AnthropicProvider  # type: ignore
+
         provider_obj = _provider_with_http_client(AnthropicProvider, "anthropic", api_key=key)
         settings = AnthropicModelSettings(anthropic_thinking={"type": "enabled", "budget_tokens": 512})
         return AnthropicModel(model_spec, provider=provider_obj), settings
@@ -453,6 +486,7 @@ def _build_provider_model(model_id: str, model_entry: Dict[str, Any]) -> tuple[M
 
         from pydantic_ai.models.cohere import CohereModel  # type: ignore
         from pydantic_ai.providers.cohere import CohereProvider  # type: ignore
+
         provider_obj = _provider_with_http_client(CohereProvider, "cohere", api_key=key)
         return CohereModel(str(model_spec), provider=provider_obj), None
     if provider == "deepseek":
@@ -484,6 +518,7 @@ def _build_provider_model(model_id: str, model_entry: Dict[str, Any]) -> tuple[M
 
         from pydantic_ai.models.mistral import MistralModel  # type: ignore
         from pydantic_ai.providers.mistral import MistralProvider  # type: ignore
+
         provider_obj = _provider_with_http_client(MistralProvider, "mistral", api_key=key)
         return MistralModel(model_spec, provider=provider_obj), None
     if provider == "cerebras":
@@ -491,6 +526,7 @@ def _build_provider_model(model_id: str, model_entry: Dict[str, Any]) -> tuple[M
 
         from pydantic_ai.models.cerebras import CerebrasModel  # type: ignore
         from pydantic_ai.providers.cerebras import CerebrasProvider  # type: ignore
+
         provider_obj = _provider_with_http_client(CerebrasProvider, "cerebras", api_key=key)
         return CerebrasModel(model_spec, provider=provider_obj), None
     if provider == "google":
@@ -498,6 +534,7 @@ def _build_provider_model(model_id: str, model_entry: Dict[str, Any]) -> tuple[M
 
         from pydantic_ai.models.google import GoogleModel, GoogleModelSettings  # type: ignore
         from pydantic_ai.providers.google import GoogleProvider  # type: ignore
+
         provider_obj = _provider_with_http_client(GoogleProvider, "google", api_key=key)
         settings = GoogleModelSettings(google_thinking_config={"include_thoughts": True})
         return GoogleModel(model_spec, provider=provider_obj), settings
@@ -514,6 +551,7 @@ def _build_provider_model(model_id: str, model_entry: Dict[str, Any]) -> tuple[M
 
         from pydantic_ai.models.groq import GroqModel  # type: ignore
         from pydantic_ai.providers.groq import GroqProvider  # type: ignore
+
         provider_obj = _provider_with_http_client(GroqProvider, "groq", api_key=key)
         return GroqModel(str(model_spec), provider=provider_obj), None
     if provider == "huggingface":
@@ -521,6 +559,7 @@ def _build_provider_model(model_id: str, model_entry: Dict[str, Any]) -> tuple[M
 
         from pydantic_ai.models.huggingface import HuggingFaceModel  # type: ignore
         from pydantic_ai.providers.huggingface import HuggingFaceProvider  # type: ignore
+
         provider_obj = _provider_with_http_client(HuggingFaceProvider, "huggingface", api_key=key)
         return HuggingFaceModel(str(model_spec), provider=provider_obj), None
     if provider == "moonshotai":
@@ -581,6 +620,7 @@ def _build_provider_model(model_id: str, model_entry: Dict[str, Any]) -> tuple[M
 
         from pydantic_ai.models.xai import XaiModel  # type: ignore
         from pydantic_ai.providers.xai import XaiProvider  # type: ignore
+
         provider_obj = _provider_with_http_client(XaiProvider, "xai", api_key=key)
         return XaiModel(str(model_spec), provider=provider_obj), None
     if provider == "ollama":
