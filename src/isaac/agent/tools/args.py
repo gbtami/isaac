@@ -1,8 +1,8 @@
-"""Pydantic argument models for ACP/pydantic-ai tools.
+"""Pydantic argument models for Isaac tool execution.
 
-These models serve two purposes:
-- Provide strong JSON schemas to pydantic-ai for tool call validation/retries.
-- Drive ACP tool capability descriptions without duplicating schema definitions.
+Pydantic AI derives provider-facing schemas from the wrapper signatures in
+``registration.py``. These models validate direct ACP tool-call blocks and keep
+``run_tool`` from calling handlers with malformed arguments.
 """
 
 from __future__ import annotations

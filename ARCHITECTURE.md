@@ -107,13 +107,13 @@ sequenceDiagram
 
 ## Tools
 
-Tools are split into registry, schema, execution, and capability/toolset assembly to keep
-protocol exposure and runtime execution independent and reusable. Agents attach
-Isaac tools through Pydantic AI capabilities or constructor `toolsets`; there is no
-post-construction registration path.
+Tools are split into registry metadata, pydantic argument models, execution,
+and capability/toolset assembly. Agents attach Isaac tools through Pydantic AI
+capabilities; there is no constructor-toolset lane for normal/session tools and
+no post-construction registration path.
 
 - Registry/metadata: `src/isaac/agent/tools/registry.py`
-- Schema generation: `src/isaac/agent/tools/schema.py`
+- Argument models for direct ACP calls: `src/isaac/agent/tools/args.py`
 - Execution/validation: `src/isaac/agent/tools/executor.py`
 - Capability/toolset assembly: `src/isaac/agent/tools/registration.py`
 

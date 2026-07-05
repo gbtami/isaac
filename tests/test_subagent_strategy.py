@@ -28,7 +28,7 @@ from isaac.agent.brain.plan_schema import PlanStep, PlanSteps
 from isaac.agent.brain import compaction as compaction_utils
 from isaac.agent.brain.session_state import SessionState
 from pydantic_ai.run import AgentRunResult, AgentRunResultEvent  # type: ignore
-from isaac.agent.tools import build_isaac_toolset
+from isaac.agent.tools import build_isaac_tools_capability
 from tests.utils import notify_process_event_stream_capabilities
 from isaac.agent.subagents.delegate_tools import (
     DelegateToolContext,
@@ -455,7 +455,8 @@ async def test_delegate_tool_carryover_acp_integration(monkeypatch, tmp_path):
         model = PromptAwareModel(call_tools=[])
         return PydanticAgent(
             model,
-            toolsets=[build_isaac_toolset(tool_names=delegate_mod._expand_tool_names(spec))],
+            toolsets=(),
+            capabilities=[build_isaac_tools_capability(tool_names=delegate_mod._expand_tool_names(spec))],
             system_prompt=spec.system_prompt or "test",
             instructions=spec.instructions,
             output_type=[spec.output_type or str, DeferredToolRequests],
@@ -481,7 +482,8 @@ async def test_delegate_tool_carryover_acp_integration(monkeypatch, tmp_path):
             custom_output_text="done",
         ),
         output_type=[str, DeferredToolRequests],
-        toolsets=[build_isaac_toolset()],
+        toolsets=(),
+        capabilities=[build_isaac_tools_capability()],
     )
     agent._prompt_handler.set_session_runner(session.session_id, runner_first)  # type: ignore[attr-defined]
 
@@ -527,7 +529,8 @@ async def test_delegate_tool_carryover_acp_integration(monkeypatch, tmp_path):
             custom_output_text="done",
         ),
         output_type=[str, DeferredToolRequests],
-        toolsets=[build_isaac_toolset()],
+        toolsets=(),
+        capabilities=[build_isaac_tools_capability()],
     )
     agent._prompt_handler.set_session_runner(session.session_id, runner_second)  # type: ignore[attr-defined]
 

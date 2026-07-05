@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from collections.abc import Iterable
+
 from isaac.agent.brain import agent_factory
 from isaac.agent.brain.prompt import SUBAGENT_INSTRUCTIONS, SYSTEM_PROMPT
 from isaac.agent.oauth.code_assist.prompt import code_assist_instructions
@@ -10,7 +12,8 @@ class _CapturingAgent:
         self.system_prompt = kwargs.get("system_prompt")
         self.instructions = kwargs.get("instructions")
         self.toolsets = kwargs.get("toolsets")
-        self.capabilities = list(kwargs.get("capabilities") or [])
+        capabilities = kwargs.get("capabilities") or ()
+        self.capabilities = list(capabilities if isinstance(capabilities, Iterable) else (capabilities,))
 
 
 def _build_model(*_: object, **__: object) -> tuple[object, None]:

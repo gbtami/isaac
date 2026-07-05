@@ -38,14 +38,14 @@ To test isaac with other ACP clients after code changes without bumping the vers
 
 ## Tooling (pydantic-ai)
 - Target Pydantic AI 2.x APIs. Prefer composable capabilities over ad-hoc constructor hooks or prompt-handler callbacks.
-- All tool functions must take `RunContext[...]` as the first argument. Attach Isaac tools through `build_isaac_tools_capability()` / Pydantic AI toolsets at agent construction time; do not use post-construction tool registration shims.
+- All tool functions must take `RunContext[...]` as the first argument. Attach Isaac tools through `build_isaac_tools_capability()` at agent construction time; do not use constructor `toolsets` for normal/session tools or post-construction tool registration shims.
 - `src/isaac/agent/capabilities.py` assembles Isaac-specific Pydantic AI capabilities using the public capability helpers such as `ReinjectSystemPrompt`, `ProcessHistory`, `PrepareTools`, `ProcessEventStream`, and `HandleDeferredToolCalls`. Add new cross-cutting behavior there first instead of growing `PromptHandler` or `stream_with_runner`.
 - Server-side system prompts are authoritative. Keep prompt reinjection on Pydantic AI's `ReinjectSystemPrompt(replace_existing=True)` path instead of preserving stale system prompt parts from ACP/UI history.
 - Provider-bound message-history cleanup should stay on the Pydantic AI `ProcessHistory` capability path, not in deprecated constructor hooks or client-specific prompt code.
 - ACP-provided MCP toolsets should be wrapped via `build_toolset_capabilities()` and passed as capabilities, not through a separate `Agent(toolsets=...)` construction path.
 - Transient follow-up hints such as recent files touched should be per-run Pydantic AI instructions/capabilities, not persisted chat-history mutations. ACP-facing tool/plan event projection should be attached through `ProcessEventStream` capabilities rather than `stream_with_runner` callbacks.
 - `src/isaac/agent/tools/registration.py` owns the Isaac tool wrapper functions, Pydantic AI `Tool` objects, and ACP-compatible metadata. Keep tool names and argument schemas stable unless intentionally changing the ACP-visible contract.
-- Required tool args are enforced in `run_tool` in `src/isaac/agent/tools/executor.py`; missing args return an error instead of calling the handler.
+- Required tool args are enforced through the pydantic argument models in `src/isaac/agent/tools/executor.py`; invalid direct ACP calls return an error, while invalid model tool calls raise Pydantic AI retry prompts.
 - Pydantic AI Harness is available through the optional `harness` extra for experiments. Keep high-impact behavior such as CodeMode opt-in until approval, sandboxing, and ACP UX are reviewed. Experimental Harness FileSystem/Shell tools must stay behind environment flags and use prefixed `harness_*` names so they do not change the public ACP tool contract.
 
 ## Code Structure (responsibilities)

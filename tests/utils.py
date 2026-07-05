@@ -9,7 +9,7 @@ from acp import RequestPermissionResponse
 from acp.agent.connection import AgentSideConnection
 from acp.schema import AllowedOutcome, AuthMethodAgent, EnvVarAuthMethod, TerminalAuthMethod
 from isaac.agent import ACPAgent
-from isaac.agent.tools import build_isaac_toolset
+from isaac.agent.tools import build_isaac_tools_capability
 from pydantic_ai import Agent as PydanticAgent  # type: ignore
 from pydantic_ai import DeferredToolRequests  # type: ignore
 from pydantic_ai.models.test import TestModel  # type: ignore
@@ -58,7 +58,8 @@ def make_function_agent(
     runner = PydanticAgent(
         TestModel(call_tools=[]),
         output_type=[str, DeferredToolRequests],
-        toolsets=[build_isaac_toolset()],
+        toolsets=(),
+        capabilities=[build_isaac_tools_capability()],
     )
     if not inspect.iscoroutinefunction(getattr(conn, "session_update", None)):
         conn.session_update = AsyncMock()
