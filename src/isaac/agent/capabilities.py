@@ -8,6 +8,7 @@ runtime policy stays at Pydantic AI's extension boundary.
 
 from __future__ import annotations
 
+from collections.abc import AsyncIterable, AsyncIterator
 import copy
 from dataclasses import is_dataclass, replace
 import inspect
@@ -20,6 +21,7 @@ from pydantic_ai.capabilities import (  # type: ignore
     HandleDeferredToolCalls,
     PrefixTools,
     PrepareTools,
+    ProcessEventStream,
     ProcessHistory,
     ReinjectSystemPrompt,
     Toolset as ToolsetCapability,
@@ -31,6 +33,7 @@ from isaac.agent.brain.recent_files import recent_files_context_text
 
 ModeGetter = Callable[[], str]
 ToolApprovalCallback = Callable[[str, str, dict[str, Any]], Awaitable[bool] | bool]
+StreamEventObserver = Callable[[Any], Awaitable[Any] | Any]
 
 
 def _copy_tool_definition(tool_def: ToolDefinition, **updates: Any) -> ToolDefinition:
@@ -107,6 +110,26 @@ async def build_acp_deferred_tool_results(
         approvals[tool_call_id] = True if allowed else ToolDenied("permission denied")
 
     return requests.build_results(approvals=approvals, metadata=getattr(requests, "metadata", None) or {})
+
+
+def build_event_stream_observer_capability(observer: StreamEventObserver) -> Any:
+    """Build a capability that observes Pydantic AI stream events.
+
+    ACP runtime concerns such as tool-call progress and plan updates should be
+    attached at Pydantic AI's event-stream boundary instead of threaded through
+    ``stream_with_runner`` as ad-hoc callbacks. The observer receives every
+    event and never changes the downstream stream.
+    """
+
+    async def observe_events(ctx: RunContext[Any], stream: AsyncIterable[Any]) -> AsyncIterator[Any]:
+        _ = ctx
+        async for event in stream:
+            maybe = observer(event)
+            if inspect.isawaitable(maybe):
+                await maybe
+            yield event
+
+    return ProcessEventStream(observe_events)
 
 
 def build_mode_capability(mode_getter: ModeGetter) -> Any:
@@ -242,6 +265,7 @@ __all__ = [
     "build_acp_deferred_tool_results",
     "build_acp_permission_capability",
     "build_base_capabilities",
+    "build_event_stream_observer_capability",
     "build_history_sanitizer_capability",
     "build_mode_capability",
     "build_optional_harness_capabilities",

@@ -14,7 +14,7 @@ from typing import Any, Awaitable, Callable
 
 from pydantic import BaseModel
 from pydantic_ai import Agent as PydanticAgent  # type: ignore
-from pydantic_ai import AgentRunResultEvent, DeferredToolRequests  # type: ignore
+from pydantic_ai import DeferredToolRequests  # type: ignore
 from pydantic_ai.exceptions import ModelRetry  # type: ignore
 from pydantic_ai.usage import UsageLimits  # type: ignore
 
@@ -356,16 +356,10 @@ async def _run_delegate_once(
         thought_buffer.append(chunk)
         await _flush_thought()
 
-    async def _capture(event: Any) -> bool:
+    async def _capture_result(output: Any) -> None:
         nonlocal structured
-        if spec.output_type is None:
-            return False
-        if isinstance(event, AgentRunResultEvent):
-            result = getattr(event, "result", None)
-            output = getattr(result, "output", None)
-            if isinstance(output, spec.output_type):
-                structured = output
-        return False
+        if spec.output_type is not None and isinstance(output, spec.output_type):
+            structured = output
 
     delegate_ctx = get_delegate_tool_context()
 
@@ -394,7 +388,7 @@ async def _run_delegate_once(
             _drop_text,
             _on_thought,
             cancel_event,
-            on_event=_capture,
+            on_result=_capture_result,
             log_context=log_context,
             request_tool_approval=_request_tool_approval,
             usage_limits=UsageLimits(

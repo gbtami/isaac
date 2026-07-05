@@ -69,13 +69,16 @@ Current capability assembly includes:
 - `build_history_sanitizer_capability()`: wraps Pydantic AI `ProcessHistory` so empty provider-bound text parts are stripped without losing message metadata.
 - `build_mode_capability()`: wraps Pydantic AI `PrepareTools` to map ACP session mode (`ask`/`yolo`) to tool visibility/approval semantics.
 - `build_acp_permission_capability()`: wraps Pydantic AI `HandleDeferredToolCalls` to resolve deferred approval requests through ACP permission prompts during a run.
+- `build_event_stream_observer_capability()`: wraps Pydantic AI `ProcessEventStream` so ACP tool-call progress, planner updates, tool-history summaries, and recent-file tracking observe each run at the Pydantic AI event-stream boundary instead of through `stream_with_runner` callbacks.
 - `build_recent_files_capability()`: contributes transient Pydantic AI instructions for ambiguous file follow-ups based on files touched by mutating tools, without appending those hints to persisted chat history.
 - `build_isaac_tools_capability()`: wraps Isaac's existing ACP-compatible coding tools in a Pydantic AI `Toolset` capability so normal agents get tools at construction time instead of via post-construction mutation.
 - `build_optional_harness_capabilities()`: opt-in bridge for Harness experiments. FileSystem/Shell are prefixed as `harness_*` tools and CodeMode remains explicit opt-in.
 
-The old prompt runner still owns ACP event projection while the modernization is
-in progress, but it now treats Pydantic AI `run_stream_events()` as an async
-context manager and passes per-run capabilities where available. System prompt handling and transient runtime hints are now part of the capability stack, so `stream_with_runner()` only converts history into Pydantic AI message objects and forwards per-run capabilities; it does not own system prompt or recent-file context policy.
+ACP event projection is now attached as a per-run `ProcessEventStream`
+capability. `stream_with_runner()` treats Pydantic AI `run_stream_events()` as
+an async context manager, converts history into Pydantic AI message objects,
+streams text/thinking/final outputs, and forwards per-run capabilities; it does
+not own system prompt, recent-file context, approval, or tool/plan event policy.
 
 Pydantic AI Harness is available through the optional `harness` extra for opt-in
 experiments. CodeMode is intentionally disabled by default and can be enabled with

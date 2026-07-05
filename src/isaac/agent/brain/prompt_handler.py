@@ -21,7 +21,7 @@ from isaac.agent.brain.recent_files import record_recent_file
 from isaac.agent.brain.session_ops import RunnerFactory, build_runner, respond_model_error, set_session_model
 from isaac.agent.brain.session_state import SessionState
 from isaac.agent.runner import stream_with_runner
-from isaac.agent.capabilities import build_recent_files_capability
+from isaac.agent.capabilities import build_event_stream_observer_capability, build_recent_files_capability
 from isaac.agent.subagents.delegate_tools import (
     DelegateToolContext,
     reset_delegate_tool_context,
@@ -137,8 +137,6 @@ class PromptHandler:
             compact_user_message_max_tokens=self._COMPACT_USER_MESSAGE_MAX_TOKENS,
         )
         history = trim_history(state.history, self._MAX_HISTORY_MESSAGES)
-        recent_files_capability = build_recent_files_capability(state.recent_files, self._RECENT_FILES_CONTEXT)
-        run_capabilities = [recent_files_capability] if recent_files_capability is not None else []
         plan_progress: dict[str, Any] | None = {"plan": None, "idx": 0}
         _push_thought = self._prompt_runner._make_thought_sender(session_id)  # type: ignore[attr-defined]
 
@@ -196,6 +194,11 @@ class PromptHandler:
             record_recent_file(state.recent_files, event, self._MAX_RECENT_FILES)
             return handled
 
+        run_capabilities = [build_event_stream_observer_capability(_on_event)]
+        recent_files_capability = build_recent_files_capability(state.recent_files, self._RECENT_FILES_CONTEXT)
+        if recent_files_capability is not None:
+            run_capabilities.append(recent_files_capability)
+
         raw_prompt_text = prompt_text
         prompt_text = self._prepare_prompt_text(state, raw_prompt_text)
         # Persist the original user intent (not provider-specific bootstrap text)
@@ -235,7 +238,6 @@ class PromptHandler:
                 cancel_event,
                 history=history,
                 capabilities=run_capabilities,
-                on_event=_on_event,
                 log_context="subagent",
                 request_tool_approval=_request_tool_approval,
                 usage_limits=UsageLimits(

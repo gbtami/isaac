@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import AsyncIterator, Sequence
 import inspect
 from unittest.mock import AsyncMock
 
@@ -13,7 +14,38 @@ from pydantic_ai import Agent as PydanticAgent  # type: ignore
 from pydantic_ai import DeferredToolRequests  # type: ignore
 from pydantic_ai.models.test import TestModel  # type: ignore
 
+from typing import Any
+
 AuthMethod = AuthMethodAgent | EnvVarAuthMethod | TerminalAuthMethod
+
+
+async def notify_process_event_stream_capabilities(events: Sequence[Any], capabilities: Sequence[Any] | None) -> None:
+    """Let fake runners notify Pydantic AI ProcessEventStream observers.
+
+    Real Pydantic AI agents execute these capabilities internally. A few tests use
+    tiny runner fakes that just yield events, so they explicitly notify observer
+    capabilities before replaying the same events downstream.
+    """
+
+    if not capabilities:
+        return
+
+    async def _events() -> AsyncIterator[Any]:
+        for event in events:
+            yield event
+
+    for capability in capabilities:
+        if type(capability).__name__ != "ProcessEventStream":
+            continue
+        handler = getattr(capability, "handler", None)
+        if handler is None:
+            continue
+        result = handler(None, _events())
+        if inspect.isasyncgen(result):
+            async for _ in result:
+                pass
+        elif inspect.isawaitable(result):
+            await result
 
 
 def make_function_agent(

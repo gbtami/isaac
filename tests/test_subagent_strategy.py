@@ -29,6 +29,7 @@ from isaac.agent.brain import compaction as compaction_utils
 from isaac.agent.brain.session_state import SessionState
 from pydantic_ai.run import AgentRunResult, AgentRunResultEvent  # type: ignore
 from isaac.agent.tools import build_isaac_toolset
+from tests.utils import notify_process_event_stream_capabilities
 from isaac.agent.subagents.delegate_tools import (
     DelegateToolContext,
     reset_delegate_tool_context,
@@ -50,18 +51,22 @@ class _FakeRunner:
 
         return _decorator
 
-    async def run_stream_events(self, prompt: str, message_history=None, **_: object):
+    async def run_stream_events(self, prompt: str, message_history=None, capabilities=None, **_: object):
+        _ = message_history
         self.prompts.append(prompt)
+        part = ToolCallPart(tool_name="planner", args={"task": prompt}, tool_call_id="tc1")
+        events = [
+            FunctionToolCallEvent(part=part),
+            FunctionToolResultEvent(
+                part=ToolReturnPart(tool_name="planner", content=self._plan, tool_call_id=part.tool_call_id)
+            ),
+            "done",
+        ]
+        await notify_process_event_stream_capabilities(events, capabilities)
 
         async def _gen():
-            part = ToolCallPart(tool_name="planner", args={"task": prompt}, tool_call_id="tc1")
-            call_event = FunctionToolCallEvent(part=part)
-            yield call_event
-            result_event = FunctionToolResultEvent(
-                part=ToolReturnPart(tool_name="planner", content=self._plan, tool_call_id=part.tool_call_id)
-            )
-            yield result_event
-            yield "done"
+            for event in events:
+                yield event
 
         return _gen()
 
@@ -265,23 +270,28 @@ async def test_subagent_records_tool_history(tmp_path, monkeypatch):
 
             return _decorator
 
-        async def run_stream_events(self, prompt: str, message_history=None, **_: object):
+        async def run_stream_events(self, prompt: str, message_history=None, capabilities=None, **_: object):
             _ = prompt, message_history
             part = ToolCallPart(
                 tool_name="run_command",
                 args={"command": "python main.py", "cwd": str(tmp_path)},
                 tool_call_id="tc_hist",
             )
+            result_part = ToolReturnPart(
+                tool_name="run_command",
+                content={"command": "python main.py", "cwd": str(tmp_path), "stdout": "ok"},
+                tool_call_id=part.tool_call_id,
+            )
+            events = [
+                FunctionToolCallEvent(part=part),
+                FunctionToolResultEvent(part=result_part),
+                AgentRunResultEvent(result=AgentRunResult("done")),
+            ]
+            await notify_process_event_stream_capabilities(events, capabilities)
 
             async def _gen():
-                yield FunctionToolCallEvent(part=part)
-                result_part = ToolReturnPart(
-                    tool_name="run_command",
-                    content={"command": "python main.py", "cwd": str(tmp_path), "stdout": "ok"},
-                    tool_call_id=part.tool_call_id,
-                )
-                yield FunctionToolResultEvent(part=result_part)
-                yield AgentRunResultEvent(result=AgentRunResult("done"))
+                for event in events:
+                    yield event
 
             return _gen()
 

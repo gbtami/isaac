@@ -1,4 +1,4 @@
-"""Shared runner utilities for pydantic-ai models and tool registration."""
+"""Shared runner utilities for pydantic-ai model streaming."""
 
 from __future__ import annotations
 
@@ -78,8 +78,8 @@ async def stream_with_runner(
     cancel_event: asyncio.Event | None = None,
     *,
     history: HistoryInput | None = None,
-    on_event: Callable[[Any], asyncio.Future | bool | None] | None = None,
     store_messages: Callable[[Any], None] | None = None,
+    on_result: Callable[[Any], asyncio.Future | Any] | None = None,
     log_context: str | None = None,
     request_tool_approval: Callable[[str, str, dict[str, Any]], asyncio.Future | bool] | None = None,
     capabilities: Sequence[Any] | None = None,
@@ -88,7 +88,9 @@ async def stream_with_runner(
 ) -> tuple[str | None, Any | None]:
     """Stream responses using the runner's streaming API.
 
-    `on_event` lets callers react to tool call events (used to emit ACP tool updates).
+    Runtime event projection belongs in Pydantic AI event-stream capabilities;
+    this helper only converts history, streams text/thinking chunks, and returns
+    the final model output.
     """
     with log_ctx(llm_context=log_context):
         log_event(
@@ -205,20 +207,6 @@ async def stream_with_runner(
                     if cancel_event.is_set():
                         return None, usage
 
-                    handled = False
-                    if on_event is not None:
-                        if asyncio.iscoroutinefunction(on_event):
-                            handled = bool(await on_event(event))
-                        else:
-                            maybe = on_event(event)
-                            if inspect.isawaitable(maybe):
-                                handled = bool(await maybe)
-                            else:
-                                handled = bool(maybe)
-
-                    if handled:
-                        continue
-
                     if isinstance(event, str):
                         output_parts.append(event)
                         if log_chunks_enabled():
@@ -285,6 +273,10 @@ async def stream_with_runner(
                     elif isinstance(event, AgentRunResultEvent):
                         result = event.result
                         full = result.output
+                        if on_result is not None:
+                            maybe_result = on_result(full)
+                            if inspect.isawaitable(maybe_result):
+                                await maybe_result
                         usage = getattr(result, "usage", None)
                         log_event(
                             logger,
