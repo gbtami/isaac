@@ -1,7 +1,8 @@
 from __future__ import annotations
 
 import pytest
-from pydantic_ai import messages as ai_messages  # type: ignore
+from pydantic_ai import Agent as PydanticAgent, messages as ai_messages  # type: ignore
+from pydantic_ai.models.test import TestModel  # type: ignore
 
 from isaac.agent.brain.history_processors import sanitize_message_history
 
@@ -63,13 +64,60 @@ async def test_sanitize_message_history_preserves_response_metadata() -> None:
     assert cleaned_response.parts[0].content == "answer"
 
 
-def test_history_sanitizer_is_exposed_as_pydantic_ai_capability() -> None:
-    from isaac.agent.capabilities import build_base_capabilities, build_history_sanitizer_capability
+def test_history_capabilities_are_exposed_as_pydantic_ai_capabilities() -> None:
+    from isaac.agent.capabilities import (
+        build_base_capabilities,
+        build_history_sanitizer_capability,
+        build_system_prompt_capability,
+    )
 
-    capability = build_history_sanitizer_capability()
+    assert type(build_system_prompt_capability()).__name__ == "ReinjectSystemPrompt"
+    assert type(build_history_sanitizer_capability()).__name__ == "ProcessHistory"
 
-    assert type(capability).__name__ == "ProcessHistory"
-    assert type(build_base_capabilities(lambda: "ask")[0]).__name__ == "ProcessHistory"
+    base_capabilities = build_base_capabilities(lambda: "ask")
+    names = [type(capability).__name__ for capability in base_capabilities]
+    assert names[:2] == ["ReinjectSystemPrompt", "ProcessHistory"]
+
+
+@pytest.mark.asyncio
+async def test_base_capabilities_reinject_current_system_prompt() -> None:
+    from isaac.agent.capabilities import build_base_capabilities
+
+    class CapturingTestModel(TestModel):
+        captured_messages: list[ai_messages.ModelMessage]
+
+        def _request(self, messages, model_settings, model_request_parameters):  # type: ignore[no-untyped-def]
+            self.captured_messages = list(messages)
+            return super()._request(messages, model_settings, model_request_parameters)
+
+    model = CapturingTestModel(custom_output_text="ok")
+    agent = PydanticAgent(
+        model,
+        system_prompt="CURRENT_SYSTEM_PROMPT",
+        capabilities=build_base_capabilities(lambda: "ask"),
+    )
+
+    await agent.run(
+        "new prompt",
+        message_history=[
+            ai_messages.ModelRequest(
+                parts=[
+                    ai_messages.SystemPromptPart(content="OLD_SYSTEM_PROMPT"),
+                    ai_messages.UserPromptPart(content="previous user"),
+                ]
+            )
+        ],
+    )
+
+    captured = model.captured_messages
+    system_parts = [
+        part
+        for message in captured
+        if isinstance(message, ai_messages.ModelRequest)
+        for part in message.parts
+        if isinstance(part, ai_messages.SystemPromptPart)
+    ]
+    assert [part.content for part in system_parts] == ["CURRENT_SYSTEM_PROMPT"]
 
 
 def test_optional_harness_capabilities_are_disabled_by_default(monkeypatch: pytest.MonkeyPatch) -> None:

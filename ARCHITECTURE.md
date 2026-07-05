@@ -65,6 +65,7 @@ Isaac-specific cross-cutting agent behavior should live in
 `src/isaac/agent/capabilities.py` before adding more prompt-handler state.
 Current capability assembly includes:
 
+- `build_system_prompt_capability()`: wraps Pydantic AI `ReinjectSystemPrompt(replace_existing=True)` so Isaac's server-side prompt is reinserted on every provider request and stale system prompt parts from ACP/UI history cannot override it.
 - `build_history_sanitizer_capability()`: wraps Pydantic AI `ProcessHistory` so empty provider-bound text parts are stripped without losing message metadata.
 - `build_mode_capability()`: wraps Pydantic AI `PrepareTools` to map ACP session mode (`ask`/`yolo`) to tool visibility/approval semantics.
 - `build_acp_permission_capability()`: wraps Pydantic AI `HandleDeferredToolCalls` to resolve deferred approval requests through ACP permission prompts during a run.
@@ -73,7 +74,7 @@ Current capability assembly includes:
 
 The old prompt runner still owns ACP event projection while the modernization is
 in progress, but it now treats Pydantic AI `run_stream_events()` as an async
-context manager and passes per-run capabilities where available.
+context manager and passes per-run capabilities where available. System prompt handling is now part of the base capability stack, so `stream_with_runner()` only converts history into Pydantic AI message objects; it does not own system prompt policy.
 
 Pydantic AI Harness is available through the optional `harness` extra for opt-in
 experiments. CodeMode is intentionally disabled by default and can be enabled with

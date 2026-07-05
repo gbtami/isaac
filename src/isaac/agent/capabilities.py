@@ -20,6 +20,7 @@ from pydantic_ai.capabilities import (  # type: ignore
     PrefixTools,
     PrepareTools,
     ProcessHistory,
+    ReinjectSystemPrompt,
     Toolset as ToolsetCapability,
 )
 from pydantic_ai.tools import ToolDefinition  # type: ignore
@@ -126,6 +127,18 @@ def build_acp_permission_capability(request_tool_approval: ToolApprovalCallback)
     return HandleDeferredToolCalls(handle_deferred)
 
 
+def build_system_prompt_capability() -> Any:
+    """Build the capability that keeps Isaac's server-side system prompt authoritative.
+
+    ACP clients and persisted UI history may omit system prompts entirely, or may
+    round-trip an older system prompt from before a session cwd/model switch.
+    Pydantic AI v2 ships this as a first-class capability, so Isaac no longer
+    needs to rely on the converted chat history carrying the correct prompt.
+    """
+
+    return ReinjectSystemPrompt(replace_existing=True)
+
+
 def build_history_sanitizer_capability() -> Any:
     """Build the capability that cleans provider-bound message history.
 
@@ -142,7 +155,11 @@ def build_history_sanitizer_capability() -> Any:
 def build_base_capabilities(mode_getter: ModeGetter) -> list[Any]:
     """Capabilities that belong on every Isaac coding agent."""
 
-    capabilities: list[Any] = [build_history_sanitizer_capability(), build_mode_capability(mode_getter)]
+    capabilities: list[Any] = [
+        build_system_prompt_capability(),
+        build_history_sanitizer_capability(),
+        build_mode_capability(mode_getter),
+    ]
     capabilities.extend(build_optional_harness_capabilities())
     return capabilities
 
@@ -209,4 +226,5 @@ __all__ = [
     "build_mode_capability",
     "build_optional_harness_capabilities",
     "build_prompt_capabilities",
+    "build_system_prompt_capability",
 ]
