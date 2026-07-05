@@ -16,16 +16,14 @@ from pydantic import BaseModel
 from pydantic_ai import Agent as PydanticAgent  # type: ignore
 from pydantic_ai import DeferredToolRequests  # type: ignore
 from pydantic_ai.exceptions import ModelRetry  # type: ignore
-from pydantic_ai.run import AgentRunResultEvent  # type: ignore
 from pydantic_ai.usage import UsageLimits  # type: ignore
 
 from acp.helpers import session_notification, text_block, update_agent_thought
 from isaac.agent.ai_types import AgentRunner
 from isaac.agent import models as model_registry
-from isaac.agent.brain.history_processors import sanitize_message_history
-from isaac.agent.brain.instrumentation import base_run_metadata, pydantic_ai_instrument_enabled
+from isaac.agent.brain.instrumentation import base_run_metadata
 from isaac.agent.brain.prompt import SYSTEM_PROMPT
-from isaac.agent.brain.tool_policies import build_prepare_tools_for_mode
+from isaac.agent.capabilities import build_base_capabilities
 from isaac.agent.models import load_models_config, load_runtime_env, _build_provider_model
 from isaac.agent.runner import stream_with_runner
 from isaac.log_utils import log_context as log_ctx, log_event
@@ -220,6 +218,20 @@ def _build_delegate_agent(
 
     model_obj, model_settings = _build_provider_model(model_id, model_entry)
     output_type = spec.output_type
+    from isaac.agent.tools import TOOL_HANDLERS, build_isaac_tools_capability
+
+    tool_names = _expand_tool_names(spec)
+    unknown = [name for name in tool_names if name not in TOOL_HANDLERS]
+    if unknown:
+        raise ValueError(f"Unknown delegate tool(s): {', '.join(sorted(unknown))}")
+
+    capabilities = build_base_capabilities(mode_getter or (lambda: "ask"))
+    capabilities.append(
+        build_isaac_tools_capability(
+            tool_names=tool_names,
+            capability_id=f"isaac-delegate-{spec.name}-tools",
+        )
+    )
     agent: AgentRunner = PydanticAgent(
         model_obj,
         output_type=[output_type or str, DeferredToolRequests],
@@ -227,19 +239,9 @@ def _build_delegate_agent(
         system_prompt=spec.system_prompt or SYSTEM_PROMPT,
         instructions=spec.instructions,
         model_settings=model_settings,
-        prepare_tools=build_prepare_tools_for_mode(mode_getter or (lambda: "ask")),
-        history_processors=(sanitize_message_history,),
-        instrument=pydantic_ai_instrument_enabled(),
+        capabilities=capabilities,
         metadata=base_run_metadata(component=f"isaac.delegate.{spec.name}", model_id=model_id),
     )
-
-    from isaac.agent.tools import TOOL_HANDLERS, register_tools
-
-    tool_names = _expand_tool_names(spec)
-    unknown = [name for name in tool_names if name not in TOOL_HANDLERS]
-    if unknown:
-        raise ValueError(f"Unknown delegate tool(s): {', '.join(sorted(unknown))}")
-    register_tools(agent, tool_names=tool_names)
 
     if output_type is not None and spec.summary_extractor is not None and spec.min_summary_chars > 0:
 
@@ -354,15 +356,10 @@ async def _run_delegate_once(
         thought_buffer.append(chunk)
         await _flush_thought()
 
-    async def _capture(event: Any) -> bool:
+    async def _capture_result(output: Any) -> None:
         nonlocal structured
-        if spec.output_type is None:
-            return False
-        if isinstance(event, AgentRunResultEvent):
-            output = getattr(event.result, "output", None)
-            if isinstance(output, spec.output_type):
-                structured = output
-        return False
+        if spec.output_type is not None and isinstance(output, spec.output_type):
+            structured = output
 
     delegate_ctx = get_delegate_tool_context()
 
@@ -391,7 +388,7 @@ async def _run_delegate_once(
             _drop_text,
             _on_thought,
             cancel_event,
-            on_event=_capture,
+            on_result=_capture_result,
             log_context=log_context,
             request_tool_approval=_request_tool_approval,
             usage_limits=UsageLimits(

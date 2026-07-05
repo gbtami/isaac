@@ -5,7 +5,9 @@ from __future__ import annotations
 import sys
 from typing import Any
 
-from acp.schema import AuthMethod
+from acp.schema import AuthMethodAgent, EnvVarAuthMethod, TerminalAuthMethod
+
+AuthMethod = AuthMethodAgent | EnvVarAuthMethod | TerminalAuthMethod
 
 
 def extract_auth_methods(init_resp: Any) -> list[AuthMethod | Any]:
@@ -69,6 +71,10 @@ def find_auth_method(auth_methods: list[AuthMethod | Any], method_id: str) -> Au
 
 def auth_method_type(auth_method: AuthMethod | Any) -> str:
     # ACP treats "agent" as the default type for backward compatibility.
+    if isinstance(auth_method, EnvVarAuthMethod):
+        return "env_var"
+    if isinstance(auth_method, TerminalAuthMethod):
+        return "terminal"
     payload_type = _payload_value(auth_method, "type")
     meta_type = _auth_method_meta(auth_method).get("type")
     value = str(payload_type or meta_type or "agent").strip().lower()
@@ -76,6 +82,13 @@ def auth_method_type(auth_method: AuthMethod | Any) -> str:
 
 
 def auth_method_env_var_name(auth_method: AuthMethod | Any) -> str | None:
+    for item in _auth_method_vars(auth_method):
+        if isinstance(item, dict):
+            name = str(item.get("name") or "").strip()
+        else:
+            name = str(getattr(item, "name", "") or "").strip()
+        if name:
+            return name
     value = _payload_value(auth_method, "varName", "var_name")
     if not value:
         meta = _auth_method_meta(auth_method)
@@ -121,6 +134,14 @@ def _payload_value(auth_method: AuthMethod | Any, *keys: str) -> Any:
         if value is not None:
             return value
     return None
+
+
+def _auth_method_vars(auth_method: AuthMethod | Any) -> list[Any]:
+    if isinstance(auth_method, dict):
+        raw = auth_method.get("vars")
+        return raw if isinstance(raw, list) else []
+    raw = getattr(auth_method, "vars", None)
+    return raw if isinstance(raw, list) else []
 
 
 def _auth_method_meta(auth_method: AuthMethod | Any) -> dict[str, Any]:

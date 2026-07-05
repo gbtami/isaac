@@ -13,8 +13,8 @@ from typing import Dict
 from acp import (
     CreateTerminalRequest,
     CreateTerminalResponse,
-    KillTerminalCommandRequest,
-    KillTerminalCommandResponse,
+    KillTerminalRequest as KillTerminalCommandRequest,
+    KillTerminalResponse as KillTerminalCommandResponse,
     ReleaseTerminalRequest,
     ReleaseTerminalResponse,
     TerminalOutputRequest,

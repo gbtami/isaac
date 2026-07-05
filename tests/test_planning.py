@@ -5,15 +5,7 @@ from unittest.mock import AsyncMock
 import pytest
 from pydantic_ai.messages import FunctionToolCallEvent, ToolCallPart  # type: ignore
 
-from isaac.agent.brain.plan_parser import parse_plan_from_text
 from isaac.agent.brain.prompt_runner import PromptEnv, PromptRunner
-
-
-def test_plan_parser_handles_steps_list_line():
-    update = parse_plan_from_text("steps=['first','second','third']")
-    assert update
-    contents = [getattr(e, "content", "") for e in update.entries]
-    assert contents == ["first", "second", "third"]
 
 
 @pytest.mark.asyncio
@@ -37,7 +29,6 @@ async def test_run_command_tool_start_includes_string_args():
     runner = PromptRunner(env)
     handler = runner._build_runner_event_handler(
         "s",
-        run_command_ctx_tokens={},
         plan_progress=None,
     )
 

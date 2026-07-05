@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any, Callable, TypeAlias
+from typing import Any, TypeAlias
 
 from pydantic_ai import Agent as PydanticAgent  # type: ignore
 from pydantic_ai import RunContext  # type: ignore
@@ -14,6 +14,4 @@ AgentRunner: TypeAlias = PydanticAgent[Any, Any]
 ToolContext: TypeAlias = RunContext[Any]
 ModelLike: TypeAlias = Model
 ModelSettingsLike: TypeAlias = ModelSettings | None
-ToolRegister: TypeAlias = Callable[[AgentRunner], None]
-
-__all__ = ["AgentRunner", "ToolContext", "ModelLike", "ModelSettingsLike", "ToolRegister"]
+__all__ = ["AgentRunner", "ToolContext", "ModelLike", "ModelSettingsLike"]

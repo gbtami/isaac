@@ -14,6 +14,7 @@ from acp.schema import AgentMessageChunk
 from tests.utils import make_function_agent
 from isaac.agent import models as model_registry
 from isaac.agent.agent import ACPAgent
+from isaac.agent.oauth.openai_codex import model as openai_codex_model
 from isaac.agent.slash import handle_slash_command
 
 
@@ -317,6 +318,101 @@ def test_current_model_falls_back_when_persisted_model_is_missing(monkeypatch: p
     assert "current_model = function:function" in settings_file.read_text(encoding="utf-8")
 
 
+def test_static_catalog_hides_openai_codex_models_by_default(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
+    catalog_file = tmp_path / "catalog.json"
+    catalog_file.write_text(
+        json.dumps(
+            {
+                "providers": {
+                    "openai-codex": {
+                        "label": "OpenAI Codex",
+                        "models": [{"id": "codex-mini-latest", "name": "Codex Mini"}],
+                    },
+                    "openai": {
+                        "label": "OpenAI",
+                        "models": [{"id": "gpt-4.1-mini", "name": "GPT-4.1 mini"}],
+                    },
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(model_registry, "MODELS_DEV_CATALOG_FILE", catalog_file)
+    monkeypatch.delenv(model_registry.OPENAI_CODEX_CATALOG_MODELS_ENV, raising=False)
+
+    models = model_registry.load_models_config()["models"]
+
+    assert "openai:gpt-4.1-mini" in models
+    assert "openai-codex:codex-mini-latest" not in models
+
+
+def test_openai_codex_oauth_models_are_filtered_to_current_chatgpt_codex_list(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+):
+    user_models_file = tmp_path / "xdg" / "isaac" / "models.json"
+    user_models_file.parent.mkdir(parents=True, exist_ok=True)
+    user_models_file.write_text(
+        json.dumps(
+            {
+                "models": {
+                    "openai-codex:gpt-5.5": {
+                        "provider": "openai-codex",
+                        "model": "gpt-5.5",
+                        "oauth_source": model_registry.OPENAI_CODEX_OAUTH_SOURCE,
+                    },
+                    "openai-codex:gpt-5.2-codex": {
+                        "provider": "openai-codex",
+                        "model": "gpt-5.2-codex",
+                        "oauth_source": model_registry.OPENAI_CODEX_OAUTH_SOURCE,
+                    },
+                    "openai-codex:legacy-catalog-model": {
+                        "provider": "openai-codex",
+                        "model": "legacy-catalog-model",
+                    },
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(model_registry, "USER_MODELS_FILE", user_models_file)
+    monkeypatch.delenv(model_registry.OPENAI_CODEX_CATALOG_MODELS_ENV, raising=False)
+
+    visible = model_registry.list_user_models()
+
+    assert "openai-codex:gpt-5.5" in visible
+    assert "openai-codex:gpt-5.2-codex" not in visible
+    assert "openai-codex:legacy-catalog-model" not in visible
+
+
+def test_current_model_falls_back_when_persisted_openai_codex_catalog_model_is_hidden(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+):
+    user_models_file = tmp_path / "xdg" / "isaac" / "models.json"
+    settings_file = user_models_file.parent / "isaac.ini"
+    user_models_file.parent.mkdir(parents=True, exist_ok=True)
+    user_models_file.write_text(
+        json.dumps(
+            {
+                "models": {
+                    "openai-codex:codex-mini-latest": {
+                        "provider": "openai-codex",
+                        "model": "codex-mini-latest",
+                    }
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    settings_file.write_text("[models]\ncurrent_model = openai-codex:codex-mini-latest\n", encoding="utf-8")
+    monkeypatch.setattr(model_registry, "USER_MODELS_FILE", user_models_file)
+    monkeypatch.delenv(model_registry.OPENAI_CODEX_CATALOG_MODELS_ENV, raising=False)
+
+    current = model_registry.current_model_id()
+
+    assert current == model_registry.DEFAULT_MODEL_ID
+    assert "current_model = function:function" in settings_file.read_text(encoding="utf-8")
+
+
 def test_set_current_model_raises_when_persistence_fails(monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setattr(
         model_registry,
@@ -327,6 +423,104 @@ def test_set_current_model_raises_when_persistence_fails(monkeypatch: pytest.Mon
 
     with pytest.raises(RuntimeError, match="persist"):
         model_registry.set_current_model(model_registry.DEFAULT_MODEL_ID)
+
+
+def test_openai_codex_model_sync_prunes_stale_oauth_models(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
+    models_file = tmp_path / "xdg" / "isaac" / "models.json"
+    models_file.parent.mkdir(parents=True, exist_ok=True)
+    models_file.write_text(
+        json.dumps(
+            {
+                "models": {
+                    "openai-codex:gpt-5.1-codex-mini": {
+                        "provider": "openai-codex",
+                        "model": "gpt-5.1-codex-mini",
+                        "oauth_source": openai_codex_model.OPENAI_CODEX_OAUTH_SOURCE,
+                    },
+                    "openai-codex:manual": {
+                        "provider": "openai-codex",
+                        "model": "manual",
+                    },
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(openai_codex_model, "MODELS_FILE", models_file)
+
+    added = openai_codex_model.add_openai_codex_models(["gpt-5.5", "gpt-5.5", "gpt-5.2"])
+    stored = json.loads(models_file.read_text(encoding="utf-8"))["models"]
+
+    assert added == 1
+    assert "openai-codex:gpt-5.5" in stored
+    assert "openai-codex:gpt-5.2" not in stored
+    assert "openai-codex:gpt-5.1-codex-mini" not in stored
+    assert "openai-codex:manual" in stored
+
+
+def test_openai_codex_model_filter_normalizes_and_drops_deprecated_models() -> None:
+    assert openai_codex_model.normalize_codex_model_name("openai/gpt-5.4") == "gpt-5.4"
+    assert openai_codex_model.normalize_codex_model_name("openai-codex:gpt-5.5") == "gpt-5.5"
+    assert openai_codex_model.is_supported_chatgpt_codex_model("gpt-5.5")
+    assert openai_codex_model.is_supported_chatgpt_codex_model("gpt-5.3-codex-spark")
+    assert not openai_codex_model.is_supported_chatgpt_codex_model("gpt-5.2-codex")
+    assert not openai_codex_model.is_supported_chatgpt_codex_model("codex-mini-latest")
+
+
+def test_models_dev_catalog_snapshot_has_no_static_openai_codex_provider() -> None:
+    catalog = json.loads(model_registry.MODELS_DEV_CATALOG_FILE.read_text(encoding="utf-8"))
+
+    assert "openai-codex" not in catalog.get("providers", {})
+
+
+def test_openai_codex_defaults_are_advertised_without_oauth_sync(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    catalog_file = tmp_path / "models_dev_catalog.json"
+    catalog_file.write_text(json.dumps({"providers": {}}), encoding="utf-8")
+    monkeypatch.setattr(model_registry, "MODELS_DEV_CATALOG_FILE", catalog_file)
+    monkeypatch.setattr(model_registry, "MODELS_DEV_SNAPSHOT_FILE", tmp_path / "models_dev_api.json")
+    monkeypatch.setattr(model_registry, "LOCAL_MODELS_FILE", tmp_path / "missing-local-models.json")
+    monkeypatch.setattr(model_registry, "USER_MODELS_FILE", tmp_path / "missing-user-models.json")
+
+    models = model_registry.list_user_models()
+
+    assert "openai-codex:gpt-5.5" in models
+    assert "openai-codex:gpt-5.4" in models
+    assert "openai-codex:gpt-5.4-mini" in models
+    assert "openai-codex:gpt-5.2-codex" not in models
+
+
+def test_openai_codex_defaults_repair_existing_local_entry_for_selector(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    catalog_file = tmp_path / "models_dev_catalog.json"
+    catalog_file.write_text(json.dumps({"providers": {}}), encoding="utf-8")
+    user_models_file = tmp_path / "models.json"
+    user_models_file.write_text(
+        json.dumps(
+            {
+                "models": {
+                    "openai-codex:gpt-5.4-mini": {
+                        "provider": "openai-codex",
+                        "model": "gpt-5.4-mini",
+                        "description": "custom description",
+                    }
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(model_registry, "MODELS_DEV_CATALOG_FILE", catalog_file)
+    monkeypatch.setattr(model_registry, "MODELS_DEV_SNAPSHOT_FILE", tmp_path / "models_dev_api.json")
+    monkeypatch.setattr(model_registry, "LOCAL_MODELS_FILE", tmp_path / "missing-local-models.json")
+    monkeypatch.setattr(model_registry, "USER_MODELS_FILE", user_models_file)
+
+    models = model_registry.list_user_models()
+
+    entry = models["openai-codex:gpt-5.4-mini"]
+    assert entry["oauth_source"] == model_registry.OPENAI_CODEX_OAUTH_SOURCE
+    assert entry["description"] == "custom description"
 
 
 def test_anthropic_thinking_enabled_by_default(monkeypatch: pytest.MonkeyPatch):

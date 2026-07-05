@@ -83,10 +83,6 @@ TOOL_DESCRIPTIONS: dict[str, str] = {
     **DELEGATE_TOOL_DESCRIPTIONS,
 }
 
-TOOL_REQUIRED_ARGS: dict[str, list[str]] = {
-    name: list(model.model_json_schema().get("required", []))  # type: ignore[attr-defined]
-    for name, model in TOOL_ARG_MODELS.items()
-}
 
 _FULL_TOOL_ORDER = tuple(TOOL_HANDLERS.keys())
 _READ_ONLY_TOOL_ORDER = tuple(name for name in _FULL_TOOL_ORDER if name in READ_ONLY_TOOLS)
@@ -100,7 +96,6 @@ __all__ = [
     "TOOL_HANDLERS",
     "TOOL_ARG_MODELS",
     "TOOL_DESCRIPTIONS",
-    "TOOL_REQUIRED_ARGS",
     "_FULL_TOOL_ORDER",
     "_READ_ONLY_TOOL_ORDER",
     "ToolHandler",

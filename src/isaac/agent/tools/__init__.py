@@ -3,7 +3,10 @@
 from __future__ import annotations
 
 from isaac.agent.tools.executor import run_tool
-from isaac.agent.tools.registration import register_readonly_tools, register_tools
+from isaac.agent.tools.registration import (
+    build_isaac_toolset,
+    build_isaac_tools_capability,
+)
 from isaac.agent.tools.registry import (
     DEFAULT_FETCH_MAX_BYTES,
     DEFAULT_FETCH_TIMEOUT,
@@ -13,10 +16,8 @@ from isaac.agent.tools.registry import (
     TOOL_ARG_MODELS,
     TOOL_DESCRIPTIONS,
     TOOL_HANDLERS,
-    TOOL_REQUIRED_ARGS,
     ToolHandler,
 )
-from isaac.agent.tools.schema import Tool, ToolParameter, get_tools
 
 __all__ = [
     "DEFAULT_FETCH_MAX_BYTES",
@@ -27,12 +28,8 @@ __all__ = [
     "TOOL_ARG_MODELS",
     "TOOL_DESCRIPTIONS",
     "TOOL_HANDLERS",
-    "TOOL_REQUIRED_ARGS",
-    "Tool",
     "ToolHandler",
-    "ToolParameter",
-    "get_tools",
-    "register_readonly_tools",
-    "register_tools",
+    "build_isaac_toolset",
+    "build_isaac_tools_capability",
     "run_tool",
 ]

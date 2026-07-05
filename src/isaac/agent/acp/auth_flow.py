@@ -7,7 +7,7 @@ import os
 import sys
 
 from acp import AuthenticateResponse, RequestError
-from acp.schema import AuthMethod
+from acp.schema import AuthMethodAgent, EnvVarAuthMethod, TerminalAuthMethod
 
 from isaac.agent.acp.auth_methods import auth_method_env_var_name, auth_method_payload, auth_method_type
 from isaac.agent.oauth.code_assist import begin_code_assist_oauth, finalize_code_assist_login
@@ -32,6 +32,9 @@ def _emit_oauth_notice(provider: str, auth_url: str, opened: bool) -> None:
 
 def has_code_assist_tokens() -> bool:
     return load_code_assist_tokens() is not None
+
+
+AuthMethod = AuthMethodAgent | EnvVarAuthMethod | TerminalAuthMethod
 
 
 async def authenticate_method(method: AuthMethod, *, method_id: str) -> AuthenticateResponse:

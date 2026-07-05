@@ -15,6 +15,7 @@ from pydantic_ai.run import AgentRunResultEvent  # type: ignore
 from isaac.agent.agent import ACPAgent
 from isaac.agent import models as model_registry
 from isaac.agent.acp.history import build_chat_history
+from tests.utils import event_stream_context
 
 
 def _make_user_chunk(session_id: str, text: str) -> SessionNotification:
@@ -83,6 +84,7 @@ async def test_session_config_options_include_mode_and_model(monkeypatch, tmp_pa
     assert session.config_options
     assert _config_current_value(session.config_options, "mode") == "ask"
     assert _config_current_value(session.config_options, "model") == fn_model_id
+    assert "openai-codex:gpt-5.4-mini" in _config_values(session.config_options, "model")
 
     target_id = "function:user-function"
     resp = await agent.set_config_option(
@@ -155,7 +157,7 @@ class _RecordingRunner:
         self.stream_messages: list[dict[str, str]] | None = None
         self._new_messages: list[dict[str, str]] = []
 
-    async def run_stream_events(
+    def run_stream_events(
         self,
         prompt_text: str,
         messages: list[object] | None = None,
@@ -169,19 +171,16 @@ class _RecordingRunner:
         history.append({"role": "assistant", "content": self.output})
         self._new_messages = history
 
-        async def _gen():
-            class _Result:
-                def __init__(self, output: str, msgs: list[dict[str, str]]):
-                    self.output = output
-                    self._msgs = msgs
-                    self.usage = None
+        class _Result:
+            def __init__(self, output: str, msgs: list[dict[str, str]]):
+                self.output = output
+                self._msgs = msgs
+                self.usage = None
 
-                def new_messages(self) -> list[dict[str, str]]:
-                    return list(self._msgs)
+            def new_messages(self) -> list[dict[str, str]]:
+                return list(self._msgs)
 
-            yield AgentRunResultEvent(result=_Result(self.output, self._new_messages))
-
-        return _gen()
+        return event_stream_context([AgentRunResultEvent(result=_Result(self.output, self._new_messages))])
 
     def new_messages(self) -> list[dict[str, str]]:
         return list(self._new_messages)
@@ -216,6 +215,20 @@ def _config_current_value(config_options: list[object], option_id: str) -> str |
     return None
 
 
+def _config_values(config_options: list[object], option_id: str) -> set[str]:
+    for option in config_options:
+        root = getattr(option, "root", option)
+        if getattr(root, "id", None) != option_id:
+            continue
+        values = set()
+        for select_option in getattr(root, "options", []) or []:
+            value = getattr(select_option, "value", None)
+            if isinstance(value, str):
+                values.add(value)
+        return values
+    return set()
+
+
 @pytest.mark.asyncio
 async def test_history_preserved_across_prompts(monkeypatch, tmp_path: Path):
     monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "xdg"))
@@ -226,7 +239,7 @@ async def test_history_preserved_across_prompts(monkeypatch, tmp_path: Path):
     executor = _RecordingRunner("done")
     from isaac.agent.brain import session_ops
 
-    def _build(_model_id: str, _register: object, toolsets=None, **kwargs: object) -> object:
+    def _build(_model_id: str, *, toolsets=None, **kwargs: object) -> object:
         _ = toolsets
         return executor
 

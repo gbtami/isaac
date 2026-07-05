@@ -19,12 +19,60 @@ OPENAI_CODEX_ORIGINATOR = os.getenv("ISAAC_OPENAI_OAUTH_ORIGINATOR", "isaac")
 OPENAI_CODEX_CLIENT_VERSION = os.getenv("ISAAC_OPENAI_OAUTH_CLIENT_VERSION", "0.72.0")
 
 DEFAULT_CODEX_MODELS = [
-    "gpt-5.2",
-    "gpt-5.2-codex",
+    "gpt-5.5",
+    "gpt-5.4",
+    "gpt-5.4-mini",
 ]
+# ChatGPT-login Codex models are not the same as OpenAI API models. Keep this
+# allow-list deliberately small and update it with the Codex CLI/docs instead of
+# trusting the generic models.dev OpenAI provider catalog. Spark is account-gated,
+# so it is only useful when returned by live discovery, but accepting it here also
+# lets a manual user config work for eligible accounts.
+OPTIONAL_CODEX_MODELS = [
+    "gpt-5.3-codex-spark",
+]
+OPENAI_CODEX_OAUTH_SOURCE = "openai-codex-oauth"
 
 CONFIG_DIR = config_dir()
 MODELS_FILE = CONFIG_DIR / "models.json"
+
+
+def normalize_codex_model_name(model: object) -> str | None:
+    """Return the ChatGPT-Codex model slug, or None for an invalid value."""
+
+    name = str(model or "").strip()
+    if not name:
+        return None
+    if name.startswith("openai-codex:"):
+        name = name.split(":", 1)[1]
+    if name.startswith("openai/"):
+        name = name.split("/", 1)[1]
+    return name.strip() or None
+
+
+def is_supported_chatgpt_codex_model(model: object) -> bool:
+    """Return whether a model should be offered for ChatGPT-login Codex OAuth."""
+
+    name = normalize_codex_model_name(model)
+    if not name:
+        return False
+    return name in {*DEFAULT_CODEX_MODELS, *OPTIONAL_CODEX_MODELS}
+
+
+def _filter_chatgpt_codex_models(models: list[str]) -> list[str]:
+    """Normalize, de-duplicate, and drop deprecated/API-only Codex models."""
+
+    filtered: list[str] = []
+    seen: set[str] = set()
+    for raw_model in models:
+        name = normalize_codex_model_name(raw_model)
+        if not name or name in seen:
+            continue
+        if not is_supported_chatgpt_codex_model(name):
+            continue
+        filtered.append(name)
+        seen.add(name)
+    return filtered
 
 
 @dataclass(frozen=True)
@@ -78,7 +126,7 @@ async def fetch_codex_models(
     client_version: str = OPENAI_CODEX_CLIENT_VERSION,
 ) -> tuple[list[str], bool]:
     if not access_token or not account_id:
-        return DEFAULT_CODEX_MODELS, True
+        return list(DEFAULT_CODEX_MODELS), True
 
     models_url = f"{base_url.rstrip('/')}/models"
     headers = {
@@ -103,35 +151,57 @@ async def fetch_codex_models(
                     model_id = entry.get("slug") or entry.get("id") or entry.get("name")
                     if model_id:
                         models.append(str(model_id))
-                if models:
-                    return list(dict.fromkeys(models)), False
+                filtered = _filter_chatgpt_codex_models(models)
+                if filtered:
+                    return filtered, False
     except Exception:
         pass
 
-    return DEFAULT_CODEX_MODELS, True
+    return list(DEFAULT_CODEX_MODELS), True
 
 
 def add_openai_codex_models(models: list[str]) -> int:
+    """Upsert the live Codex OAuth model list and prune stale synced entries."""
+
     config = _load_models_config()
     models_config = config.setdefault("models", {})
     added = 0
+    changed = False
 
-    for model_name in models:
-        name = str(model_name).strip()
-        if not name:
+    live_names = _filter_chatgpt_codex_models(models)
+    live_ids = {f"openai-codex:{name}" for name in live_names}
+
+    for model_id, meta in list(models_config.items()):
+        if not isinstance(meta, dict):
             continue
+        if str(meta.get("provider") or "").lower() != "openai-codex":
+            continue
+        if str(meta.get("oauth_source") or "").lower() != OPENAI_CODEX_OAUTH_SOURCE:
+            continue
+        if model_id not in live_ids:
+            del models_config[model_id]
+            changed = True
+
+    for name in live_names:
         model_id = f"openai-codex:{name}"
-        if model_id in models_config:
-            continue
-        models_config[model_id] = {
+        model_entry = {
             "provider": "openai-codex",
             "model": name,
             "description": f"OpenAI Codex {name} (OAuth, ChatGPT login)",
-            "oauth_source": "openai-codex-oauth",
+            "oauth_source": OPENAI_CODEX_OAUTH_SOURCE,
         }
-        added += 1
+        existing = models_config.get(model_id)
+        if not isinstance(existing, dict):
+            models_config[model_id] = model_entry
+            added += 1
+            changed = True
+            continue
+        merged = {**existing, **model_entry}
+        if merged != existing:
+            models_config[model_id] = merged
+            changed = True
 
-    if added:
+    if changed:
         _save_models_config(config)
     return added
 
@@ -140,7 +210,7 @@ async def sync_openai_codex_models(tokens: OAuthTokenSet) -> OpenAICodexModelSyn
     try:
         account_id = tokens.account_id or extract_account_id(None, tokens.access_token)
         if not account_id:
-            models = DEFAULT_CODEX_MODELS
+            models = list(DEFAULT_CODEX_MODELS)
             used_fallback = True
         else:
             models, used_fallback = await fetch_codex_models(

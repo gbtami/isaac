@@ -1,24 +1,19 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import AsyncIterator
-
 import pytest
 from pydantic_ai.messages import PartDeltaEvent, PartEndEvent, ThinkingPart, ThinkingPartDelta
 
 from isaac.agent.runner import stream_with_runner
+from tests.utils import event_stream_context
 
 
 class _FakeRunner:
     def __init__(self, events: list[object]) -> None:
         self._events = events
 
-    def run_stream_events(self, *_: object, **__: object) -> AsyncIterator[object]:
-        async def _gen() -> AsyncIterator[object]:
-            for e in self._events:
-                yield e
-
-        return _gen()
+    def run_stream_events(self, *_: object, **__: object):
+        return event_stream_context(self._events)
 
 
 @pytest.mark.asyncio

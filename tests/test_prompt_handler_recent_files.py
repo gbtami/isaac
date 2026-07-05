@@ -20,9 +20,11 @@ async def test_prompt_handler_injects_recent_files_context(monkeypatch):
         _prompt: str,
         *_: object,
         history=None,
+        capabilities=None,
         **__: object,
     ):
         captured["history"] = history
+        captured["capabilities"] = capabilities
         return "ok", None
 
     monkeypatch.setattr("isaac.agent.brain.prompt_handler.stream_with_runner", fake_stream_with_runner)
@@ -41,7 +43,7 @@ async def test_prompt_handler_injects_recent_files_context(monkeypatch):
         request_run_permission=AsyncMock(return_value=True),
         set_usage=lambda *_: None,
     )
-    handler = PromptHandler(env, register_tools=lambda *_: None)
+    handler = PromptHandler(env)
     handler._sessions["s"] = SessionState(
         runner=object(),
         model_id="m",
@@ -53,8 +55,18 @@ async def test_prompt_handler_injects_recent_files_context(monkeypatch):
 
     history = captured.get("history")
     assert isinstance(history, list)
-    assert any(
+    assert not any(
         msg.get("role") == "system" and "Recent files touched" in str(msg.get("content"))
         for msg in history
         if isinstance(msg, dict)
     )
+    capabilities = captured.get("capabilities")
+    assert isinstance(capabilities, list)
+    recent_capability = next(
+        (capability for capability in capabilities if getattr(capability, "id", "") == "isaac-recent-files"),
+        None,
+    )
+    assert recent_capability is not None
+    instructions = getattr(recent_capability, "get_instructions")()
+    assert instructions is not None
+    assert "alpha.py, beta.py" in str(instructions)

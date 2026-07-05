@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import AsyncIterator
 from typing import Any
 from unittest.mock import AsyncMock
 
@@ -12,6 +11,7 @@ from pydantic_ai.messages import PartDeltaEvent, TextPartDelta  # type: ignore
 from pydantic_ai.run import AgentRunResultEvent  # type: ignore
 
 from isaac.agent.runner import stream_with_runner
+from tests.utils import event_stream_context
 from isaac.agent.brain.prompt_runner import PromptEnv, PromptRunner
 from isaac.agent.brain.tool_events import tool_history_summary
 
@@ -23,13 +23,9 @@ class _CapturingRunner:
     def system_prompt(self) -> str:
         return "NEW_SYSTEM_PROMPT"
 
-    def run_stream_events(self, *_: Any, message_history: Any = None, **__: Any) -> AsyncIterator[Any]:
+    def run_stream_events(self, *_: Any, message_history: Any = None, **__: Any):
         self.captured_history = message_history
-
-        async def _gen() -> AsyncIterator[Any]:
-            yield "ok"
-
-        return _gen()
+        return event_stream_context(["ok"])
 
 
 def _flatten_history(messages: list[Any]) -> list[dict[str, str]]:
@@ -108,7 +104,7 @@ async def test_tool_kinds_in_updates():
             set_usage=lambda *_: None,
         )
     )
-    handler = env._build_runner_event_handler("s1", {}, None)
+    handler = env._build_runner_event_handler("s1")
     event = FunctionToolCallEvent(
         part=ToolCallPart(tool_name="list_files", args={"directory": "/tmp"}, tool_call_id="tc1")
     )
@@ -120,23 +116,23 @@ async def test_tool_kinds_in_updates():
 @pytest.mark.asyncio
 async def test_stream_with_runner_suppresses_duplicate_final_output() -> None:
     class _DuplicateStreamRunner:
-        async def run_stream_events(self, *_: Any, **__: Any):
-            async def _gen() -> AsyncIterator[Any]:
-                # Duplicate chunk followed by the same final output.
-                yield PartDeltaEvent(index=0, delta=TextPartDelta(content_delta="hello"))
-                yield PartDeltaEvent(index=0, delta=TextPartDelta(content_delta="hello"))
+        def run_stream_events(self, *_: Any, **__: Any):
+            class _Result:
+                output = "hello"
+                usage = None
 
-                class _Result:
-                    output = "hello"
-                    usage = None
+                @staticmethod
+                def new_messages() -> list[Any]:
+                    return []
 
-                    @staticmethod
-                    def new_messages() -> list[Any]:
-                        return []
-
-                yield AgentRunResultEvent(result=_Result())
-
-            return _gen()
+            return event_stream_context(
+                [
+                    # Duplicate chunk followed by the same final output.
+                    PartDeltaEvent(index=0, delta=TextPartDelta(content_delta="hello")),
+                    PartDeltaEvent(index=0, delta=TextPartDelta(content_delta="hello")),
+                    AgentRunResultEvent(result=_Result()),
+                ]
+            )
 
     seen: list[str] = []
 

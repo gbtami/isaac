@@ -5,11 +5,10 @@ from __future__ import annotations
 import asyncio
 import logging
 from typing import Any, Dict
-from pydantic_ai.messages import FunctionToolResultEvent  # type: ignore
+from pydantic_ai import FunctionToolResultEvent  # type: ignore
 from pydantic_ai.usage import UsageLimits  # type: ignore
 
 from isaac.agent import models as model_registry
-from isaac.agent.ai_types import ToolRegister
 from isaac.agent.brain.prompt import SUBAGENT_INSTRUCTIONS, SYSTEM_PROMPT
 from isaac.agent.history_types import ChatMessage
 from isaac.agent.brain.plan_helpers import plan_from_planner_result
@@ -18,16 +17,16 @@ from isaac.agent.brain.prompt_result import PromptResult
 from isaac.agent.brain.history_utils import extract_usage_total, trim_history
 from isaac.agent.brain.compaction import maybe_compact_history
 from isaac.agent.brain.instrumentation import base_run_metadata
-from isaac.agent.brain.recent_files import inject_recent_files_context, record_recent_file
+from isaac.agent.brain.recent_files import record_recent_file
 from isaac.agent.brain.session_ops import RunnerFactory, build_runner, respond_model_error, set_session_model
 from isaac.agent.brain.session_state import SessionState
 from isaac.agent.runner import stream_with_runner
+from isaac.agent.capabilities import build_event_stream_observer_capability, build_recent_files_capability
 from isaac.agent.subagents.delegate_tools import (
     DelegateToolContext,
     reset_delegate_tool_context,
     set_delegate_tool_context,
 )
-from isaac.agent.tools import register_tools as default_register_tools
 from isaac.agent.usage import normalize_usage
 from isaac.agent.oauth.code_assist.prompt import compose_code_assist_user_prompt
 from isaac.log_utils import log_context as log_ctx, log_event
@@ -50,11 +49,9 @@ class PromptHandler:
         self,
         env: PromptEnv,
         *,
-        register_tools: ToolRegister | None = None,
         runner_factory: RunnerFactory | None = None,
     ) -> None:
         self.env = env
-        self._register_tools = register_tools or default_register_tools
         self._runner_factory = runner_factory
         self._prompt_runner = PromptRunner(env)
         self._sessions: Dict[str, SessionState] = {}
@@ -77,7 +74,6 @@ class PromptHandler:
             env=self.env,
             session_id=session_id,
             state=state,
-            register_tools=self._register_tools,
             toolsets=toolsets,
             system_prompt=system_prompt,
             runner_factory=self._runner_factory,
@@ -95,7 +91,6 @@ class PromptHandler:
             session_id=session_id,
             state=state,
             model_id=model_id,
-            register_tools=self._register_tools,
             toolsets=toolsets,
             system_prompt=system_prompt,
             runner_factory=self._runner_factory,
@@ -119,7 +114,6 @@ class PromptHandler:
                 env=self.env,
                 session_id=session_id,
                 state=state,
-                register_tools=self._register_tools,
                 toolsets=None,
                 runner_factory=self._runner_factory,
             )
@@ -143,7 +137,6 @@ class PromptHandler:
             compact_user_message_max_tokens=self._COMPACT_USER_MESSAGE_MAX_TOKENS,
         )
         history = trim_history(state.history, self._MAX_HISTORY_MESSAGES)
-        context_history = inject_recent_files_context(history, state.recent_files, self._RECENT_FILES_CONTEXT)
         plan_progress: dict[str, Any] | None = {"plan": None, "idx": 0}
         _push_thought = self._prompt_runner._make_thought_sender(session_id)  # type: ignore[attr-defined]
 
@@ -162,7 +155,7 @@ class PromptHandler:
         async def _maybe_capture_plan(event: Any) -> None:
             if not isinstance(event, FunctionToolResultEvent):
                 return
-            result_part = event.result
+            result_part = getattr(event, "result", None) or getattr(event, "part", None)
             tool_name = getattr(result_part, "tool_name", None) or ""
             if tool_name != "planner":
                 return
@@ -176,14 +169,14 @@ class PromptHandler:
 
         base_handler = self._prompt_runner._build_runner_event_handler(  # type: ignore[attr-defined]
             session_id,
-            plan_progress,
+            plan_progress=plan_progress,
             record_history=_record_history,
         )
 
         async def _on_event(event: Any) -> bool:
+            result_part = getattr(event, "result", None) or getattr(event, "part", None)
             is_planner_result = (
-                isinstance(event, FunctionToolResultEvent)
-                and getattr(getattr(event, "result", None), "tool_name", "") == "planner"
+                isinstance(event, FunctionToolResultEvent) and getattr(result_part, "tool_name", "") == "planner"
             )
             if is_planner_result and plan_progress is not None:
                 saved_plan = plan_progress.get("plan")
@@ -200,6 +193,11 @@ class PromptHandler:
             handled = await base_handler(event)
             record_recent_file(state.recent_files, event, self._MAX_RECENT_FILES)
             return handled
+
+        run_capabilities = [build_event_stream_observer_capability(_on_event)]
+        recent_files_capability = build_recent_files_capability(state.recent_files, self._RECENT_FILES_CONTEXT)
+        if recent_files_capability is not None:
+            run_capabilities.append(recent_files_capability)
 
         raw_prompt_text = prompt_text
         prompt_text = self._prepare_prompt_text(state, raw_prompt_text)
@@ -238,8 +236,8 @@ class PromptHandler:
                 _drop_chunk,
                 _push_thought,
                 cancel_event,
-                history=context_history,
-                on_event=_on_event,
+                history=history,
+                capabilities=run_capabilities,
                 log_context="subagent",
                 request_tool_approval=_request_tool_approval,
                 usage_limits=UsageLimits(

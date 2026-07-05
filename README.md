@@ -19,6 +19,12 @@ Isaac is an ACP-compliant coding agent and reference CLI client.
 pip install isaac-acp
 ```
 
+Optional Harness experiments are not installed by default:
+
+```bash
+pip install "isaac-acp[harness]"
+```
+
 ## Quickstart
 
 Run the agent:
@@ -52,8 +58,11 @@ Common variables:
 
 ## Features
 
-- ACP 0.8 session config options for mode/model selection
+- ACP 0.10 session config options for mode/model selection
+- Pydantic AI 2.x capability-based agent assembly
 - Prompt turns, tool calls, filesystem and terminal ACP flows
+- ACP-backed approval flow for `run_command` with an experimental Pydantic AI capability bridge
+- Optional Pydantic AI Harness CodeMode experiments via `ISAAC_HARNESS_CODE_MODE=1` and the `harness` extra
 - Interactive client slash commands (`/mode`, `/model`, `/status`, `/usage`)
 - MCP server config forwarding from the client to the agent
 
@@ -67,3 +76,23 @@ uv run mypy src tests
 uv run pytest
 uv build --wheel --sdist
 ```
+
+Development note: `uv sync` installs the default `dev` dependency group, so local check commands such as `uv run pytest`, `uv run ruff check .`, and `uv run mypy` work after a normal sync. The `test` extra is kept for pip/CI compatibility.
+
+### Optional Harness experiments
+
+Install the optional Harness extra when experimenting with Pydantic AI Harness integrations:
+
+```bash
+uv sync --extra harness
+```
+
+Optional Harness tools are disabled by default. FileSystem and Shell experiments are exposed with prefixed `harness_*` tool names so they do not replace Isaac's ACP-compatible tools:
+
+```bash
+ISAAC_HARNESS_FILESYSTEM=1 uv run isaac
+ISAAC_HARNESS_SHELL=1 uv run isaac
+ISAAC_HARNESS_CODE_MODE=1 uv run isaac
+```
+
+Review approval and sandbox behavior before using Harness tools with mutating operations.

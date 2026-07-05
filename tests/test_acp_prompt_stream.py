@@ -1,15 +1,15 @@
 from __future__ import annotations
 
-from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pytest
 from acp import text_block
 from acp.schema import AgentMessageChunk, AgentPlanUpdate, ToolCallProgress, ToolCallStart
-from pydantic_ai.messages import FunctionToolCallEvent, FunctionToolResultEvent, ToolCallPart  # type: ignore
+from pydantic_ai.messages import FunctionToolCallEvent, FunctionToolResultEvent, ToolCallPart, ToolReturnPart  # type: ignore
 
 from isaac.agent import ACPAgent
 from isaac.agent.brain.plan_schema import PlanStep, PlanSteps
+from tests.utils import event_stream_context
 
 
 class _StreamRunner:
@@ -22,18 +22,17 @@ class _StreamRunner:
 
         return _decorator
 
-    async def run_stream_events(self, prompt: str, message_history=None):
-        _ = prompt, message_history
-
-        async def _gen():
-            part = ToolCallPart(tool_name="planner", args={"task": prompt}, tool_call_id="tc1")
-            yield FunctionToolCallEvent(part=part)
-            yield FunctionToolResultEvent(
-                result=SimpleNamespace(tool_name="planner", content=self._plan, tool_call_id=part.tool_call_id)
-            )
-            yield "done"
-
-        return _gen()
+    def run_stream_events(self, prompt: str, message_history=None, capabilities=None, **_: object):
+        _ = message_history
+        part = ToolCallPart(tool_name="planner", args={"task": prompt}, tool_call_id="tc1")
+        events = [
+            FunctionToolCallEvent(part=part),
+            FunctionToolResultEvent(
+                part=ToolReturnPart(tool_name="planner", content=self._plan, tool_call_id=part.tool_call_id)
+            ),
+            "done",
+        ]
+        return event_stream_context(events, capabilities)
 
 
 def _extract_updates(calls: list[object]) -> list[object]:
@@ -67,7 +66,7 @@ async def test_acp_prompt_update_sequence(monkeypatch, tmp_path) -> None:
 
     from isaac.agent.brain import session_ops
 
-    def _build(_model_id: str, _register: object, toolsets=None, **kwargs: object):
+    def _build(_model_id: str, *, toolsets=None, **kwargs: object):
         _ = toolsets, kwargs
         return runner
 

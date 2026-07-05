@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 from typing import Any, Callable
 
-from isaac.agent.ai_types import AgentRunner, ToolRegister
+from isaac.agent.ai_types import AgentRunner
 from isaac.agent.brain.prompt_runner import PromptEnv
 
 from isaac.agent import models as model_registry
@@ -30,7 +30,6 @@ async def set_session_model(
     session_id: str,
     state: SessionState,
     model_id: str,
-    register_tools: ToolRegister,
     toolsets: list[Any],
     system_prompt: str | None = None,
     runner_factory: RunnerFactory | None = None,
@@ -61,7 +60,6 @@ async def set_session_model(
         factory = runner_factory or create_subagent_for_model
         executor = factory(
             model_id,
-            register_tools,
             toolsets=toolsets,
             system_prompt=system_prompt,
             session_mode_getter=lambda: env.session_modes.get(session_id, "ask"),
@@ -85,7 +83,6 @@ async def build_runner(
     env: PromptEnv,
     session_id: str,
     state: SessionState,
-    register_tools: ToolRegister,
     toolsets: list[Any] | None = None,
     system_prompt: str | None = None,
     runner_factory: RunnerFactory | None = None,
@@ -96,7 +93,6 @@ async def build_runner(
         factory = runner_factory or create_subagent_for_model
         executor = factory(
             model_registry.current_model_id(),
-            register_tools,
             toolsets=toolsets,
             system_prompt=system_prompt,
             session_mode_getter=lambda: env.session_modes.get(session_id, "ask"),

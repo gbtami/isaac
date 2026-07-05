@@ -1,18 +1,17 @@
 [project]
 name = "isaac-acp"
-version = "0.3.1"
+version = "0.4.0"
 description = "ACP-compliant coding agent and reference client."
 readme = "README.md"
 license = { text = "MIT" }
 authors = [{ name = "Isaac Contributors" }]
-requires-python = ">=3.10"
+requires-python = ">=3.11"
 keywords = ["acp", "agent-client-protocol", "agent", "cli", "repl"]
 classifiers = [
     "Development Status :: 3 - Alpha",
     "Environment :: Console",
     "Intended Audience :: Developers",
     "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
@@ -23,14 +22,14 @@ classifiers = [
     "Typing :: Typed",
 ]
 dependencies = [
-    "agent-client-protocol==0.8.1",
-    "pydantic-ai==1.64.0",
+    "agent-client-protocol>=0.10.1,<0.11.0",
+    "pydantic-ai>=2.5.0,<3.0.0",
     "aiocache==0.12.3",
     "prompt-toolkit==3.0.52",
     "python-dotenv==1.2.2",
     "platformdirs==4.9.2",
     "pathspec==1.0.4",
-    "rich==14.3.3",
+    "rich==15.0.0",
     "logfire>=4.16.0",
 ]
 
@@ -48,7 +47,18 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project.optional-dependencies]
+harness = [
+    "pydantic-ai-harness[code-mode]>=0.5.0,<0.6.0",
+]
 test = [
+    "ruff==0.15.4",
+    "pytest==9.0.2",
+    "pytest-asyncio==1.3.0",
+    "mypy==1.19.1",
+]
+
+[dependency-groups]
+dev = [
     "ruff==0.15.4",
     "pytest==9.0.2",
     "pytest-asyncio==1.3.0",
@@ -65,7 +75,7 @@ packages = ["src/isaac"]
 pythonpath = ["src"]
 
 [tool.mypy]
-python_version = "3.10"
+python_version = "3.11"
 ignore_missing_imports = true
 disallow_untyped_defs = false
 warn_unused_ignores = false

@@ -7,7 +7,6 @@ from typing import Any
 from isaac.agent.ai_types import ToolContext
 
 from isaac.agent.brain.plan_schema import PlanSteps
-from isaac.agent.brain.plan_parser import parse_plan_from_text
 from isaac.agent.subagents.args import PlannerArgs
 from isaac.agent.subagents.delegate_tools import DelegateToolSpec, register_delegate_tool, run_delegate_tool
 
@@ -80,14 +79,13 @@ async def planner(
     )
     if result.get("error"):
         return result
-    content = result.get("content")
-    if isinstance(content, PlanSteps):
+    if isinstance(result.get("content"), PlanSteps):
         return result
-    if isinstance(content, str):
-        parsed = parse_plan_from_text(content)
-        if parsed is not None:
-            return {"content": parsed, "error": None}
-    return result
+    return {
+        **result,
+        "content": "",
+        "error": result.get("error") or "Planner delegate returned non-structured output.",
+    }
 
 
 register_delegate_tool(PLANNER_TOOL_SPEC, handler=planner, arg_model=PlannerArgs)

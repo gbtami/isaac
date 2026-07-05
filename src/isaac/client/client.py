@@ -16,7 +16,14 @@ from typing import Any, Callable, Iterable
 import asyncio.subprocess as aio_subprocess
 from acp import PROTOCOL_VERSION, RequestError
 from acp.core import connect_to_agent
-from acp.schema import AuthMethod, ClientCapabilities, FileSystemCapability, Implementation
+from acp.schema import (
+    AuthMethodAgent,
+    EnvVarAuthMethod,
+    TerminalAuthMethod,
+    ClientCapabilities,
+    FileSystemCapabilities,
+    Implementation,
+)
 
 from isaac.acp_runtime import ACP_STDIO_BUFFER_LIMIT_BYTES
 from isaac.client.acp_client import ACPClient, apply_session_config_options
@@ -33,6 +40,8 @@ from isaac.client.mcp_config import load_mcp_config
 from isaac.client.repl import interactive_loop
 from isaac.client.session_state import SessionUIState
 from isaac.log_utils import build_log_config, configure_logging, log_event
+
+AuthMethod = AuthMethodAgent | EnvVarAuthMethod | TerminalAuthMethod
 
 logger = logging.getLogger(__name__)
 
@@ -157,10 +166,10 @@ async def _start_runtime_connection(
     init_resp = await conn.initialize(
         protocol_version=PROTOCOL_VERSION,
         client_capabilities=ClientCapabilities(
-            fs=FileSystemCapability(read_text_file=False, write_text_file=False),
+            fs=FileSystemCapabilities(read_text_file=False, write_text_file=False),
             terminal=True,
         ),
-        client_info=Implementation(name="example-client", title="Example Client", version="0.3.1"),
+        client_info=Implementation(name="example-client", title="Example Client", version="0.4.0"),
     )
     if init_resp.protocol_version != PROTOCOL_VERSION:
         await _shutdown_runtime_connection(_RuntimeConnection(proc=proc, conn=conn, auth_methods=[]))

@@ -7,7 +7,8 @@ from dataclasses import dataclass
 import logging
 from typing import Any, Awaitable, Callable, Dict
 
-from pydantic_ai.messages import FunctionToolCallEvent, FunctionToolResultEvent, RetryPromptPart
+from pydantic_ai import FunctionToolCallEvent, FunctionToolResultEvent  # type: ignore
+from pydantic_ai.messages import RetryPromptPart
 from isaac.agent.history_types import ChatMessage
 from isaac.agent.brain.events import ToolCallFinish, ToolCallStart
 from isaac.agent.brain.tool_events import should_record_tool_history, tool_history_summary, tool_kind
@@ -59,42 +60,42 @@ class PromptRunner:
     def _build_runner_event_handler(
         self,
         session_id: str,
-        run_command_ctx_tokens: Dict[str, Any] | None = None,
         plan_progress: dict[str, Any] | None = None,
         record_history: Callable[[ChatMessage], None] | None = None,
     ) -> Callable[[Any], Awaitable[bool]]:
         tool_call_inputs: Dict[str, Dict[str, Any]] = {}
         started_tool_calls: set[str] = set()
-        _ = run_command_ctx_tokens
 
         async def _handle_runner_event(event: Any) -> bool:
             if isinstance(event, FunctionToolCallEvent):
                 tool_name = getattr(event.part, "tool_name", None) or ""
                 raw_args = getattr(event.part, "args", None)
+                tool_call_id = str(getattr(event, "tool_call_id", "") or getattr(event.part, "tool_call_id", "") or "")
                 args = coerce_tool_args(raw_args)
                 log_event(
                     logger,
                     "tool.call.requested",
                     level=logging.DEBUG,
                     tool=tool_name,
-                    tool_call_id=event.tool_call_id,
+                    tool_call_id=tool_call_id,
                     args=args,
                 )
                 start = ToolCallStart(
-                    tool_call_id=event.tool_call_id,
+                    tool_call_id=tool_call_id,
                     tool_name=tool_name,
                     kind=tool_kind(tool_name),
                     raw_input={"tool": tool_name, **args},
                 )
-                if event.tool_call_id not in started_tool_calls:
+                if tool_call_id not in started_tool_calls:
                     await self.env.send_tool_start(session_id, start)
-                    started_tool_calls.add(event.tool_call_id)
-                tool_call_inputs[event.tool_call_id] = args
+                    started_tool_calls.add(tool_call_id)
+                tool_call_inputs[tool_call_id] = args
                 return True
 
             if isinstance(event, FunctionToolResultEvent):
-                call_input = tool_call_inputs.pop(event.tool_call_id, {})
-                result_part = event.result
+                result_part = getattr(event, "result", None) or getattr(event, "part", None)
+                tool_call_id = str(getattr(event, "tool_call_id", "") or getattr(result_part, "tool_call_id", "") or "")
+                call_input = tool_call_inputs.pop(tool_call_id, {})
                 tool_name = getattr(result_part, "tool_name", None) or ""
                 content = getattr(result_part, "content", None)
                 raw_output: dict[str, Any] = {}
@@ -120,7 +121,7 @@ class PromptRunner:
                 new_text = raw_output.get("new_text")
                 old_text = raw_output.get("old_text")
                 finish = ToolCallFinish(
-                    tool_call_id=event.tool_call_id,
+                    tool_call_id=tool_call_id,
                     tool_name=tool_name,
                     status=status,
                     raw_output=raw_output,
