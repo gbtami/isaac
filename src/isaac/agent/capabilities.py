@@ -8,7 +8,7 @@ runtime policy stays at Pydantic AI's extension boundary.
 
 from __future__ import annotations
 
-from collections.abc import AsyncIterable, AsyncIterator
+from collections.abc import AsyncIterable, AsyncIterator, Iterable
 import copy
 from dataclasses import is_dataclass, replace
 import inspect
@@ -195,6 +195,18 @@ def build_recent_files_capability(recent_files: list[str], context_count: int) -
     )
 
 
+def build_toolset_capabilities(toolsets: Iterable[Any] | None) -> list[Any]:
+    """Wrap externally supplied toolsets as Pydantic AI capabilities.
+
+    ACP session setup can attach MCP toolsets. Keeping them on the capability
+    path means every tool source goes through the same Pydantic AI extension
+    boundary; the Agent constructor no longer needs a separate ``toolsets``
+    lane for session-specific tools.
+    """
+
+    return [ToolsetCapability(toolset) for toolset in toolsets or ()]
+
+
 def build_base_capabilities(mode_getter: ModeGetter) -> list[Any]:
     """Capabilities that belong on every Isaac coding agent."""
 
@@ -272,4 +284,5 @@ __all__ = [
     "build_recent_files_capability",
     "build_prompt_capabilities",
     "build_system_prompt_capability",
+    "build_toolset_capabilities",
 ]

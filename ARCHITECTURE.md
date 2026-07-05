@@ -72,6 +72,7 @@ Current capability assembly includes:
 - `build_event_stream_observer_capability()`: wraps Pydantic AI `ProcessEventStream` so ACP tool-call progress, planner updates, tool-history summaries, and recent-file tracking observe each run at the Pydantic AI event-stream boundary instead of through `stream_with_runner` callbacks.
 - `build_recent_files_capability()`: contributes transient Pydantic AI instructions for ambiguous file follow-ups based on files touched by mutating tools, without appending those hints to persisted chat history.
 - `build_isaac_tools_capability()`: wraps Isaac's existing ACP-compatible coding tools in a Pydantic AI `Toolset` capability so normal agents get tools at construction time instead of via post-construction mutation.
+- `build_toolset_capabilities()`: wraps ACP-provided MCP toolsets as capabilities too, so session-specific tools no longer use a separate `Agent(toolsets=...)` lane.
 - `build_optional_harness_capabilities()`: opt-in bridge for Harness experiments. FileSystem/Shell are prefixed as `harness_*` tools and CodeMode remains explicit opt-in.
 
 ACP event projection is now attached as a per-run `ProcessEventStream`

@@ -108,7 +108,7 @@ async def test_tool_kinds_in_updates():
             set_usage=lambda *_: None,
         )
     )
-    handler = env._build_runner_event_handler("s1", {}, None)
+    handler = env._build_runner_event_handler("s1")
     event = FunctionToolCallEvent(
         part=ToolCallPart(tool_name="list_files", args={"directory": "/tmp"}, tool_call_id="tc1")
     )

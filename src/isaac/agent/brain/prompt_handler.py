@@ -169,7 +169,7 @@ class PromptHandler:
 
         base_handler = self._prompt_runner._build_runner_event_handler(  # type: ignore[attr-defined]
             session_id,
-            plan_progress,
+            plan_progress=plan_progress,
             record_history=_record_history,
         )
 

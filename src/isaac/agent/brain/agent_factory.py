@@ -10,7 +10,7 @@ from pydantic_ai import DeferredToolRequests  # type: ignore
 from isaac.agent.ai_types import AgentRunner, ModelLike, ModelSettingsLike
 from isaac.agent.brain.instrumentation import base_run_metadata
 from isaac.agent.brain.prompt import SUBAGENT_INSTRUCTIONS, SYSTEM_PROMPT
-from isaac.agent.capabilities import build_base_capabilities
+from isaac.agent.capabilities import build_base_capabilities, build_toolset_capabilities
 from isaac.agent.tools import build_isaac_tools_capability
 from isaac.agent.oauth.code_assist.prompt import code_assist_instructions
 from isaac.agent.models import load_models_config, load_runtime_env, _build_provider_model
@@ -45,11 +45,11 @@ def create_subagent_for_model(
     mode_getter = session_mode_getter or (lambda: "ask")
     capabilities = build_base_capabilities(mode_getter)
     capabilities.append(build_isaac_tools_capability())
-    effective_toolsets = list(toolsets or ())
+    capabilities.extend(build_toolset_capabilities(toolsets))
     runner: AgentRunner = PydanticAgent(
         model_obj,
         output_type=[str, DeferredToolRequests],
-        toolsets=effective_toolsets,
+        toolsets=(),
         system_prompt=effective_system_prompt,
         instructions=instructions,
         model_settings=model_settings,

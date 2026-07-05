@@ -60,13 +60,11 @@ class PromptRunner:
     def _build_runner_event_handler(
         self,
         session_id: str,
-        run_command_ctx_tokens: Dict[str, Any] | None = None,
         plan_progress: dict[str, Any] | None = None,
         record_history: Callable[[ChatMessage], None] | None = None,
     ) -> Callable[[Any], Awaitable[bool]]:
         tool_call_inputs: Dict[str, Dict[str, Any]] = {}
         started_tool_calls: set[str] = set()
-        _ = run_command_ctx_tokens
 
         async def _handle_runner_event(event: Any) -> bool:
             if isinstance(event, FunctionToolCallEvent):

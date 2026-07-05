@@ -37,7 +37,6 @@ async def test_run_command_tool_start_includes_string_args():
     runner = PromptRunner(env)
     handler = runner._build_runner_event_handler(
         "s",
-        run_command_ctx_tokens={},
         plan_progress=None,
     )
 

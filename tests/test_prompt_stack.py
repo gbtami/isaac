@@ -9,6 +9,8 @@ class _CapturingAgent:
     def __init__(self, *_: object, **kwargs: object) -> None:
         self.system_prompt = kwargs.get("system_prompt")
         self.instructions = kwargs.get("instructions")
+        self.toolsets = kwargs.get("toolsets")
+        self.capabilities = list(kwargs.get("capabilities") or [])
 
 
 def _build_model(*_: object, **__: object) -> tuple[object, None]:
@@ -54,6 +56,30 @@ def test_openai_codex_uses_standard_isaac_prompt_stack(monkeypatch) -> None:
 
     assert runner.system_prompt == SYSTEM_PROMPT
     assert runner.instructions == SUBAGENT_INSTRUCTIONS
+
+
+def test_mcp_toolsets_use_capability_path(monkeypatch) -> None:
+    monkeypatch.setattr(agent_factory, "PydanticAgent", _CapturingAgent)
+    monkeypatch.setattr(agent_factory, "load_runtime_env", lambda: None)
+    monkeypatch.setattr(
+        agent_factory,
+        "load_models_config",
+        lambda: {
+            "models": {
+                "openai-codex:gpt-5.3-codex": {
+                    "provider": "openai-codex",
+                    "model": "gpt-5.3-codex",
+                }
+            }
+        },
+    )
+    monkeypatch.setattr(agent_factory, "_build_provider_model", _build_model)
+    mcp_toolset = object()
+
+    runner = agent_factory.create_subagent_for_model("openai-codex:gpt-5.3-codex", toolsets=[mcp_toolset])
+
+    assert runner.toolsets == ()
+    assert any(getattr(capability, "toolset", None) is mcp_toolset for capability in runner.capabilities)
 
 
 def test_code_assist_still_uses_provider_specific_prompt_stack(monkeypatch) -> None:
