@@ -45,7 +45,9 @@ class ProviderMapping:
 
 PROVIDER_MAPPINGS: tuple[ProviderMapping, ...] = (
     ProviderMapping("openai", "openai", "OpenAI", excluded_substring="codex"),
-    ProviderMapping("openai-codex", "openai", "OpenAI Codex (OAuth)", preferred_substring="codex"),
+    # Do not derive ChatGPT-login Codex models from the generic OpenAI API
+    # catalog. The Codex OAuth backend has its own account-specific model
+    # discovery and a separate current/deprecated model policy.
     ProviderMapping("azure", "azure", "Azure OpenAI"),
     ProviderMapping("alibaba", "alibaba", "Alibaba"),
     ProviderMapping("bedrock", "amazon-bedrock", "Amazon Bedrock"),

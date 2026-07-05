@@ -7,10 +7,10 @@ overrides from `models.json`. Supports switching models/providers at runtime
 
 from __future__ import annotations
 
+import configparser
 import inspect
 import json
 import logging
-import configparser
 import os
 import re
 from pathlib import Path
@@ -21,7 +21,6 @@ from dotenv import load_dotenv
 from pydantic_ai.models import Model  # type: ignore
 from pydantic_ai.settings import ModelSettings  # type: ignore
 
-
 from isaac.agent.oauth.code_assist import CodeAssistModel
 from isaac.agent.oauth.code_assist.storage import load_tokens as load_code_assist_tokens
 from isaac.agent.oauth.openai_codex import (
@@ -30,6 +29,7 @@ from isaac.agent.oauth.openai_codex import (
     openai_auth_request_hook,
 )
 from isaac.agent.oauth.openai_codex.client import OpenAICodexAsyncClient
+from isaac.agent.oauth.openai_codex.model import is_supported_chatgpt_codex_model
 from isaac.paths import config_dir
 
 logger = logging.getLogger(__name__)
@@ -185,7 +185,9 @@ def _is_user_visible_model(model_id: str, meta: Dict[str, Any]) -> bool:
 
 
 def _is_openai_codex_oauth_model(meta: Dict[str, Any]) -> bool:
-    return str(meta.get("oauth_source") or "").lower() == OPENAI_CODEX_OAUTH_SOURCE
+    if str(meta.get("oauth_source") or "").lower() != OPENAI_CODEX_OAUTH_SOURCE:
+        return False
+    return is_supported_chatgpt_codex_model(meta.get("model"))
 
 
 def _allow_openai_codex_catalog_models() -> bool:

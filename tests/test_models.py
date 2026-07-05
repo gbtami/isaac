@@ -346,13 +346,20 @@ def test_static_catalog_hides_openai_codex_models_by_default(monkeypatch: pytest
     assert "openai-codex:codex-mini-latest" not in models
 
 
-def test_openai_codex_oauth_models_remain_user_visible(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
+def test_openai_codex_oauth_models_are_filtered_to_current_chatgpt_codex_list(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+):
     user_models_file = tmp_path / "xdg" / "isaac" / "models.json"
     user_models_file.parent.mkdir(parents=True, exist_ok=True)
     user_models_file.write_text(
         json.dumps(
             {
                 "models": {
+                    "openai-codex:gpt-5.5": {
+                        "provider": "openai-codex",
+                        "model": "gpt-5.5",
+                        "oauth_source": model_registry.OPENAI_CODEX_OAUTH_SOURCE,
+                    },
                     "openai-codex:gpt-5.2-codex": {
                         "provider": "openai-codex",
                         "model": "gpt-5.2-codex",
@@ -372,7 +379,8 @@ def test_openai_codex_oauth_models_remain_user_visible(monkeypatch: pytest.Monke
 
     visible = model_registry.list_user_models()
 
-    assert "openai-codex:gpt-5.2-codex" in visible
+    assert "openai-codex:gpt-5.5" in visible
+    assert "openai-codex:gpt-5.2-codex" not in visible
     assert "openai-codex:legacy-catalog-model" not in visible
 
 
@@ -440,13 +448,29 @@ def test_openai_codex_model_sync_prunes_stale_oauth_models(monkeypatch: pytest.M
     )
     monkeypatch.setattr(openai_codex_model, "MODELS_FILE", models_file)
 
-    added = openai_codex_model.add_openai_codex_models(["gpt-5.2", "gpt-5.2"])
+    added = openai_codex_model.add_openai_codex_models(["gpt-5.5", "gpt-5.5", "gpt-5.2"])
     stored = json.loads(models_file.read_text(encoding="utf-8"))["models"]
 
     assert added == 1
-    assert "openai-codex:gpt-5.2" in stored
+    assert "openai-codex:gpt-5.5" in stored
+    assert "openai-codex:gpt-5.2" not in stored
     assert "openai-codex:gpt-5.1-codex-mini" not in stored
     assert "openai-codex:manual" in stored
+
+
+def test_openai_codex_model_filter_normalizes_and_drops_deprecated_models() -> None:
+    assert openai_codex_model.normalize_codex_model_name("openai/gpt-5.4") == "gpt-5.4"
+    assert openai_codex_model.normalize_codex_model_name("openai-codex:gpt-5.5") == "gpt-5.5"
+    assert openai_codex_model.is_supported_chatgpt_codex_model("gpt-5.5")
+    assert openai_codex_model.is_supported_chatgpt_codex_model("gpt-5.3-codex-spark")
+    assert not openai_codex_model.is_supported_chatgpt_codex_model("gpt-5.2-codex")
+    assert not openai_codex_model.is_supported_chatgpt_codex_model("codex-mini-latest")
+
+
+def test_models_dev_catalog_snapshot_has_no_static_openai_codex_provider() -> None:
+    catalog = json.loads(model_registry.MODELS_DEV_CATALOG_FILE.read_text(encoding="utf-8"))
+
+    assert "openai-codex" not in catalog.get("providers", {})
 
 
 def test_anthropic_thinking_enabled_by_default(monkeypatch: pytest.MonkeyPatch):
