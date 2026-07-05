@@ -77,3 +77,23 @@ async def test_stream_with_runner_passes_approval_as_per_run_capability() -> Non
     capabilities = runner.kwargs.get("capabilities")
     assert capabilities
     assert any(type(capability).__name__ == "HandleDeferredToolCalls" for capability in capabilities)
+
+
+@pytest.mark.asyncio
+async def test_stream_with_runner_preserves_caller_capabilities() -> None:
+    runner = _ContextManagerRunner(["ok"])
+    marker = object()
+
+    async def on_text(_: str) -> None:
+        return None
+
+    await stream_with_runner(
+        runner,
+        "prompt",
+        on_text,
+        cancel_event=asyncio.Event(),
+        capabilities=[marker],
+    )
+
+    assert runner.kwargs is not None
+    assert runner.kwargs.get("capabilities") == [marker]

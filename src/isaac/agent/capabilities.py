@@ -16,6 +16,7 @@ from typing import Any, Awaitable, Callable
 
 from pydantic_ai import DeferredToolRequests, DeferredToolResults, RunContext, ToolDenied  # type: ignore
 from pydantic_ai.capabilities import (  # type: ignore
+    Capability,
     HandleDeferredToolCalls,
     PrefixTools,
     PrepareTools,
@@ -26,6 +27,7 @@ from pydantic_ai.capabilities import (  # type: ignore
 from pydantic_ai.tools import ToolDefinition  # type: ignore
 
 from isaac.agent.brain.history_processors import sanitize_message_history
+from isaac.agent.brain.recent_files import recent_files_context_text
 
 ModeGetter = Callable[[], str]
 ToolApprovalCallback = Callable[[str, str, dict[str, Any]], Awaitable[bool] | bool]
@@ -152,6 +154,25 @@ def build_history_sanitizer_capability() -> Any:
     return ProcessHistory(sanitize_message_history)
 
 
+def build_recent_files_capability(recent_files: list[str], context_count: int) -> Any | None:
+    """Build a per-run instruction capability for ambiguous file follow-ups.
+
+    Isaac tracks files touched by mutating tools so short follow-up prompts like
+    "open it again" or "fix that file" can be grounded. Pydantic AI v2 lets us
+    express this as transient run instructions, so prompt handling no longer has
+    to mutate the persisted chat history just to provide runtime context.
+    """
+
+    message = recent_files_context_text(recent_files, context_count)
+    if message is None:
+        return None
+    return Capability(
+        instructions=message,
+        id="isaac-recent-files",
+        description="Transient context about files touched earlier in this session.",
+    )
+
+
 def build_base_capabilities(mode_getter: ModeGetter) -> list[Any]:
     """Capabilities that belong on every Isaac coding agent."""
 
@@ -225,6 +246,7 @@ __all__ = [
     "build_history_sanitizer_capability",
     "build_mode_capability",
     "build_optional_harness_capabilities",
+    "build_recent_files_capability",
     "build_prompt_capabilities",
     "build_system_prompt_capability",
 ]

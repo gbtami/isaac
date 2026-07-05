@@ -38,17 +38,33 @@ def record_recent_file(recent_files: list[str], event: Any, max_recent: int) -> 
         del recent_files[:-max_recent]
 
 
-def inject_recent_files_context(
-    history: list[ChatMessage], recent_files: list[str], context_count: int
-) -> list[ChatMessage]:
-    """Add recent file hints to the model context for ambiguous follow-ups."""
+def recent_files_context_text(recent_files: list[str], context_count: int) -> str | None:
+    """Return the runtime hint used for ambiguous file follow-ups."""
 
     if not recent_files:
-        return list(history)
+        return None
     recent = recent_files[-context_count:]
-    message = (
+    if not recent:
+        return None
+    return (
         "Recent files touched (most recent last): "
         f"{', '.join(recent)}.\n"
         "If the user refers to an unspecified file, assume they mean the most recent file above."
     )
+
+
+def inject_recent_files_context(
+    history: list[ChatMessage], recent_files: list[str], context_count: int
+) -> list[ChatMessage]:
+    """Add recent file hints to the model context for ambiguous follow-ups.
+
+    This helper is retained for compatibility with older tests and embeddings.
+    Normal prompt handling now contributes this hint as a per-run Pydantic AI
+    capability instead of mutating the chat history sent through ACP/session
+    persistence.
+    """
+
+    message = recent_files_context_text(recent_files, context_count)
+    if message is None:
+        return list(history)
     return [*history, {"role": "system", "content": message}]

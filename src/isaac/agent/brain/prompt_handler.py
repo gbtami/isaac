@@ -21,10 +21,11 @@ from isaac.agent.brain.prompt_result import PromptResult
 from isaac.agent.brain.history_utils import extract_usage_total, trim_history
 from isaac.agent.brain.compaction import maybe_compact_history
 from isaac.agent.brain.instrumentation import base_run_metadata
-from isaac.agent.brain.recent_files import inject_recent_files_context, record_recent_file
+from isaac.agent.brain.recent_files import record_recent_file
 from isaac.agent.brain.session_ops import RunnerFactory, build_runner, respond_model_error, set_session_model
 from isaac.agent.brain.session_state import SessionState
 from isaac.agent.runner import stream_with_runner
+from isaac.agent.capabilities import build_recent_files_capability
 from isaac.agent.subagents.delegate_tools import (
     DelegateToolContext,
     reset_delegate_tool_context,
@@ -146,7 +147,8 @@ class PromptHandler:
             compact_user_message_max_tokens=self._COMPACT_USER_MESSAGE_MAX_TOKENS,
         )
         history = trim_history(state.history, self._MAX_HISTORY_MESSAGES)
-        context_history = inject_recent_files_context(history, state.recent_files, self._RECENT_FILES_CONTEXT)
+        recent_files_capability = build_recent_files_capability(state.recent_files, self._RECENT_FILES_CONTEXT)
+        run_capabilities = [recent_files_capability] if recent_files_capability is not None else []
         plan_progress: dict[str, Any] | None = {"plan": None, "idx": 0}
         _push_thought = self._prompt_runner._make_thought_sender(session_id)  # type: ignore[attr-defined]
 
@@ -242,7 +244,8 @@ class PromptHandler:
                 _drop_chunk,
                 _push_thought,
                 cancel_event,
-                history=context_history,
+                history=history,
+                capabilities=run_capabilities,
                 on_event=_on_event,
                 log_context="subagent",
                 request_tool_approval=_request_tool_approval,

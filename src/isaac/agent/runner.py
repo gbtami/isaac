@@ -86,6 +86,7 @@ async def stream_with_runner(
     store_messages: Callable[[Any], None] | None = None,
     log_context: str | None = None,
     request_tool_approval: Callable[[str, str, dict[str, Any]], asyncio.Future | bool] | None = None,
+    capabilities: Sequence[Any] | None = None,
     usage_limits: Any | None = None,
     metadata: dict[str, Any] | None = None,
 ) -> tuple[str | None, Any | None]:
@@ -152,7 +153,7 @@ async def stream_with_runner(
             kwargs["usage_limits"] = usage_limits
         if metadata is not None:
             kwargs["metadata"] = metadata
-        prompt_capabilities = build_prompt_capabilities(request_tool_approval)
+        prompt_capabilities = [*(capabilities or ()), *build_prompt_capabilities(request_tool_approval)]
         if prompt_capabilities:
             kwargs["capabilities"] = prompt_capabilities
         try:
