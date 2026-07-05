@@ -8,7 +8,7 @@ from collections.abc import AsyncIterator
 import inspect
 import json
 import logging
-from typing import Any, Callable, Protocol, Sequence
+from typing import Any, AsyncContextManager, Callable, Protocol, Sequence
 
 import httpx
 from pydantic_ai import DeferredToolRequests, DeferredToolResults  # type: ignore
@@ -32,7 +32,7 @@ HISTORY_LOG_MAX = 8000
 
 
 class StreamRunner(Protocol):
-    """Protocol for pydantic-ai runners that stream events."""
+    """Protocol for Pydantic AI v2 runners that stream events."""
 
     def run_stream_events(
         self,
@@ -41,33 +41,9 @@ class StreamRunner(Protocol):
         message_history: Sequence[ai_messages.ModelMessage] | None = None,
         deferred_tool_results: DeferredToolResults | None = None,
         capabilities: Sequence[Any] | None = None,
-    ) -> Any: ...
-
-
-@contextlib.asynccontextmanager
-async def _stream_events_context(stream_source: Any) -> AsyncIterator[Any]:
-    """Return an async iterator from a Pydantic AI stream context.
-
-    Pydantic AI v2 returns an async context manager from ``run_stream_events``.
-    Some unit-test runners return a plain async iterator, so this helper keeps
-    ``stream_with_runner`` focused on event projection rather than fixture shape.
-    """
-
-    if inspect.isawaitable(stream_source):
-        stream_source = await stream_source
-
-    if hasattr(stream_source, "__aenter__") and hasattr(stream_source, "__aexit__"):
-        async with stream_source as stream:
-            yield stream
-        return
-
-    try:
-        yield stream_source
-    finally:
-        closer = getattr(stream_source, "aclose", None)
-        if callable(closer):
-            with contextlib.suppress(Exception):
-                await closer()
+        usage_limits: Any | None = None,
+        metadata: dict[str, Any] | None = None,
+    ) -> AsyncContextManager[AsyncIterator[Any]]: ...
 
 
 async def stream_with_runner(
@@ -202,7 +178,7 @@ async def stream_with_runner(
             deferred_tool_results = None
 
             continue_after_approval = False
-            async with _stream_events_context(event_source) as event_iter:
+            async with event_source as event_iter:
                 async for event in event_iter:
                     if cancel_event.is_set():
                         return None, usage

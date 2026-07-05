@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import AsyncIterator, Sequence
+import contextlib
 import inspect
 from unittest.mock import AsyncMock
 
@@ -17,6 +18,22 @@ from pydantic_ai.models.test import TestModel  # type: ignore
 from typing import Any
 
 AuthMethod = AuthMethodAgent | EnvVarAuthMethod | TerminalAuthMethod
+
+
+def event_stream_context(events: Sequence[Any], capabilities: Sequence[Any] | None = None):
+    """Return a Pydantic AI v2-style async stream context for fake runners."""
+
+    @contextlib.asynccontextmanager
+    async def _context() -> AsyncIterator[AsyncIterator[Any]]:
+        await notify_process_event_stream_capabilities(events, capabilities)
+
+        async def _events() -> AsyncIterator[Any]:
+            for event in events:
+                yield event
+
+        yield _events()
+
+    return _context()
 
 
 async def notify_process_event_stream_capabilities(events: Sequence[Any], capabilities: Sequence[Any] | None) -> None:
@@ -85,7 +102,7 @@ def make_error_agent(conn: AgentSideConnection) -> ACPAgent:
     """Agent whose runner fails to simulate provider errors."""
 
     class ErrorRunner:
-        async def run_stream_events(  # pragma: no cover - simple stub
+        def run_stream_events(  # pragma: no cover - simple stub
             self, prompt: str, *, message_history=None, **_: object
         ):
             raise RuntimeError("rate limited")
@@ -97,7 +114,7 @@ def make_timeout_agent(conn: AgentSideConnection) -> ACPAgent:
     """Agent whose runner fails to simulate provider timeouts."""
 
     class TimeoutRunner:
-        async def run_stream_events(  # pragma: no cover - simple stub
+        def run_stream_events(  # pragma: no cover - simple stub
             self, prompt: str, *, message_history=None, **_: object
         ):
             request = httpx.Request("GET", "https://example.com")

@@ -15,6 +15,7 @@ from pydantic_ai.run import AgentRunResultEvent  # type: ignore
 from isaac.agent.agent import ACPAgent
 from isaac.agent import models as model_registry
 from isaac.agent.acp.history import build_chat_history
+from tests.utils import event_stream_context
 
 
 def _make_user_chunk(session_id: str, text: str) -> SessionNotification:
@@ -156,7 +157,7 @@ class _RecordingRunner:
         self.stream_messages: list[dict[str, str]] | None = None
         self._new_messages: list[dict[str, str]] = []
 
-    async def run_stream_events(
+    def run_stream_events(
         self,
         prompt_text: str,
         messages: list[object] | None = None,
@@ -170,19 +171,16 @@ class _RecordingRunner:
         history.append({"role": "assistant", "content": self.output})
         self._new_messages = history
 
-        async def _gen():
-            class _Result:
-                def __init__(self, output: str, msgs: list[dict[str, str]]):
-                    self.output = output
-                    self._msgs = msgs
-                    self.usage = None
+        class _Result:
+            def __init__(self, output: str, msgs: list[dict[str, str]]):
+                self.output = output
+                self._msgs = msgs
+                self.usage = None
 
-                def new_messages(self) -> list[dict[str, str]]:
-                    return list(self._msgs)
+            def new_messages(self) -> list[dict[str, str]]:
+                return list(self._msgs)
 
-            yield AgentRunResultEvent(result=_Result(self.output, self._new_messages))
-
-        return _gen()
+        return event_stream_context([AgentRunResultEvent(result=_Result(self.output, self._new_messages))])
 
     def new_messages(self) -> list[dict[str, str]]:
         return list(self._new_messages)

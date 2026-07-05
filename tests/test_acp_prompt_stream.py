@@ -9,7 +9,7 @@ from pydantic_ai.messages import FunctionToolCallEvent, FunctionToolResultEvent,
 
 from isaac.agent import ACPAgent
 from isaac.agent.brain.plan_schema import PlanStep, PlanSteps
-from tests.utils import notify_process_event_stream_capabilities
+from tests.utils import event_stream_context
 
 
 class _StreamRunner:
@@ -22,7 +22,7 @@ class _StreamRunner:
 
         return _decorator
 
-    async def run_stream_events(self, prompt: str, message_history=None, capabilities=None, **_: object):
+    def run_stream_events(self, prompt: str, message_history=None, capabilities=None, **_: object):
         _ = message_history
         part = ToolCallPart(tool_name="planner", args={"task": prompt}, tool_call_id="tc1")
         events = [
@@ -32,13 +32,7 @@ class _StreamRunner:
             ),
             "done",
         ]
-        await notify_process_event_stream_capabilities(events, capabilities)
-
-        async def _gen():
-            for event in events:
-                yield event
-
-        return _gen()
+        return event_stream_context(events, capabilities)
 
 
 def _extract_updates(calls: list[object]) -> list[object]:

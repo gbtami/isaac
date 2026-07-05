@@ -29,7 +29,7 @@ from isaac.agent.brain import compaction as compaction_utils
 from isaac.agent.brain.session_state import SessionState
 from pydantic_ai.run import AgentRunResult, AgentRunResultEvent  # type: ignore
 from isaac.agent.tools import build_isaac_tools_capability
-from tests.utils import notify_process_event_stream_capabilities
+from tests.utils import event_stream_context
 from isaac.agent.subagents.delegate_tools import (
     DelegateToolContext,
     reset_delegate_tool_context,
@@ -51,7 +51,7 @@ class _FakeRunner:
 
         return _decorator
 
-    async def run_stream_events(self, prompt: str, message_history=None, capabilities=None, **_: object):
+    def run_stream_events(self, prompt: str, message_history=None, capabilities=None, **_: object):
         _ = message_history
         self.prompts.append(prompt)
         part = ToolCallPart(tool_name="planner", args={"task": prompt}, tool_call_id="tc1")
@@ -62,13 +62,7 @@ class _FakeRunner:
             ),
             "done",
         ]
-        await notify_process_event_stream_capabilities(events, capabilities)
-
-        async def _gen():
-            for event in events:
-                yield event
-
-        return _gen()
+        return event_stream_context(events, capabilities)
 
     def set_plan(self, plan: PlanSteps) -> None:
         self._plan = plan
@@ -182,10 +176,7 @@ async def test_delegate_tool_isolation_default(monkeypatch, tool_name: str):
 
     class RunnerStub:
         def run_stream_events(self, *_: Any, **__: Any):
-            async def _gen():
-                yield "ok"
-
-            return _gen()
+            return event_stream_context(["ok"])
 
     monkeypatch.setattr("isaac.agent.subagents.delegate_tools.stream_with_runner", fake_stream_with_runner)
     monkeypatch.setattr(
@@ -277,7 +268,7 @@ async def test_subagent_records_tool_history(tmp_path, monkeypatch):
 
             return _decorator
 
-        async def run_stream_events(self, prompt: str, message_history=None, capabilities=None, **_: object):
+        def run_stream_events(self, prompt: str, message_history=None, capabilities=None, **_: object):
             _ = prompt, message_history
             part = ToolCallPart(
                 tool_name="run_command",
@@ -294,13 +285,7 @@ async def test_subagent_records_tool_history(tmp_path, monkeypatch):
                 FunctionToolResultEvent(part=result_part),
                 AgentRunResultEvent(result=AgentRunResult("done")),
             ]
-            await notify_process_event_stream_capabilities(events, capabilities)
-
-            async def _gen():
-                for event in events:
-                    yield event
-
-            return _gen()
+            return event_stream_context(events, capabilities)
 
     runner = CommandRunner()
 
@@ -343,10 +328,7 @@ async def test_delegate_tool_carryover_summary(monkeypatch):
 
     class RunnerStub:
         def run_stream_events(self, *_: Any, **__: Any):
-            async def _gen():
-                yield "ok"
-
-            return _gen()
+            return event_stream_context(["ok"])
 
     monkeypatch.setattr("isaac.agent.subagents.delegate_tools.stream_with_runner", fake_stream_with_runner)
     monkeypatch.setattr(

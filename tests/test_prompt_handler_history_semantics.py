@@ -8,19 +8,16 @@ import pytest
 from isaac.agent.brain.prompt_handler import PromptHandler
 from isaac.agent.brain.prompt_runner import PromptEnv
 from isaac.agent.brain.session_state import SessionState
+from tests.utils import event_stream_context
 
 
 class _CapturingRunner:
     def __init__(self) -> None:
         self.prompt_texts: list[str] = []
 
-    async def run_stream_events(self, prompt_text: str, **_: object):
+    def run_stream_events(self, prompt_text: str, **_: object):
         self.prompt_texts.append(prompt_text)
-
-        async def _gen():
-            yield "ok"
-
-        return _gen()
+        return event_stream_context(["ok"])
 
 
 def _make_env() -> PromptEnv:
