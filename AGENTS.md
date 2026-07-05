@@ -38,9 +38,9 @@ To test isaac with other ACP clients after code changes without bumping the vers
 
 ## Tooling (pydantic-ai)
 - Target Pydantic AI 2.x APIs. Prefer composable capabilities over ad-hoc constructor hooks or prompt-handler callbacks.
-- All tool functions must take `RunContext[...]` as the first argument; registration uses the public `Agent.tool` decorator (no private attributes).
+- All tool functions must take `RunContext[...]` as the first argument. Production agents should attach Isaac tools through `build_isaac_tools_capability()` / Pydantic AI toolsets; the public `register_tools()` helper is a compatibility shim for tests and custom runner factories.
 - `src/isaac/agent/capabilities.py` assembles Isaac-specific Pydantic AI capabilities using the public capability helpers such as `PrepareTools` and `HandleDeferredToolCalls`. Add new cross-cutting behavior there first instead of growing `PromptHandler` or `stream_with_runner`.
-- `register_tools` in `src/isaac/agent/tools/registration.py` binds `ctx` automatically and centralizes tool registration.
+- `src/isaac/agent/tools/registration.py` owns the Isaac tool wrapper functions, Pydantic AI `Tool` objects, and ACP-compatible metadata. Keep tool names and argument schemas stable unless intentionally changing the ACP-visible contract.
 - Required tool args are enforced in `run_tool` in `src/isaac/agent/tools/executor.py`; missing args return an error instead of calling the handler.
 - Pydantic AI Harness is available through the optional `harness` extra for experiments. Keep high-impact behavior such as CodeMode opt-in until approval, sandboxing, and ACP UX are reviewed.
 

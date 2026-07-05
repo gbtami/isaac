@@ -67,6 +67,7 @@ Current capability assembly includes:
 
 - `build_mode_capability()`: wraps Pydantic AI `PrepareTools` to map ACP session mode (`ask`/`yolo`) to tool visibility/approval semantics.
 - `build_acp_permission_capability()`: wraps Pydantic AI `HandleDeferredToolCalls` to resolve deferred approval requests through ACP permission prompts during a run.
+- `build_isaac_tools_capability()`: wraps Isaac's existing ACP-compatible coding tools in a Pydantic AI `Toolset` capability so normal agents get tools at construction time instead of via post-construction mutation.
 
 The old prompt runner still owns ACP event projection while the modernization is
 in progress, but it now treats Pydantic AI `run_stream_events()` as an async
@@ -98,13 +99,15 @@ sequenceDiagram
 
 ## Tools
 
-Tools are split into registry, schema, execution, and registration to keep
-protocol exposure and runtime execution independent and reusable.
+Tools are split into registry, schema, execution, and capability/toolset assembly to keep
+protocol exposure and runtime execution independent and reusable. Production agents attach
+Isaac tools through Pydantic AI capabilities; `register_tools()` remains as a compatibility
+shim for tests and custom runner factories.
 
 - Registry/metadata: `src/isaac/agent/tools/registry.py`
 - Schema generation: `src/isaac/agent/tools/schema.py`
 - Execution/validation: `src/isaac/agent/tools/executor.py`
-- Agent registration: `src/isaac/agent/tools/registration.py`
+- Capability/toolset assembly plus legacy compatibility registration: `src/isaac/agent/tools/registration.py`
 
 ## Delegate Subagents
 

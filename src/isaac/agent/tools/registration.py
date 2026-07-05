@@ -1,9 +1,12 @@
-"""Register tool handlers with pydantic-ai agents."""
+"""Register Isaac tool handlers with pydantic-ai agents and toolsets."""
 
 from __future__ import annotations
 
 import logging
 from typing import Any, Awaitable, Callable, Iterable
+
+from pydantic_ai import FunctionToolset, Tool  # type: ignore
+from pydantic_ai.capabilities import Toolset as ToolsetCapability  # type: ignore
 
 from isaac.agent.ai_types import AgentRunner, ToolContext
 
@@ -14,16 +17,21 @@ from isaac.agent.tools.registry import (
     DEFAULT_FETCH_TIMEOUT,
     DEFAULT_TOOL_TIMEOUT_S,
     RUN_COMMAND_TIMEOUT_S,
+    TOOL_DESCRIPTIONS,
     _FULL_TOOL_ORDER,
     _READ_ONLY_TOOL_ORDER,
 )
 from isaac.log_utils import log_event
 
+_MUTATING_TOOLS = {"run_command", "edit_file", "apply_patch"}
+
 
 def register_readonly_tools(agent: AgentRunner, *, tool_names: Iterable[str] | None = None) -> None:
     """Register read-only tool wrappers on the given agent.
 
-    The planner delegate uses a restricted toolset so it cannot mutate state.
+    This remains as a compatibility shim for tests and custom runner factories.
+    Normal Isaac agents should prefer ``build_isaac_tools_capability`` so tools
+    are attached during agent construction instead of mutating the agent later.
     """
     tools = _READ_ONLY_TOOL_ORDER if tool_names is None else tuple(tool_names)
     _register_toolset(agent, tools=tools, logger=None)
@@ -32,20 +40,84 @@ def register_readonly_tools(agent: AgentRunner, *, tool_names: Iterable[str] | N
 def register_tools(agent: AgentRunner, *, tool_names: Iterable[str] | None = None) -> None:
     """Register the toolset on the given agent.
 
-    The full toolset includes filesystem, command, and delegate tools.
+    This legacy helper is intentionally retained for direct tests, custom runner
+    factories, and compatibility with older embedding code. The production agent
+    factory now uses ``build_isaac_tools_capability`` instead.
     """
     tools = _FULL_TOOL_ORDER if tool_names is None else tuple(tool_names)
     _register_toolset(agent, tools=tools, logger=logging.getLogger(__name__))
 
 
-def _register_toolset(
-    agent: AgentRunner,
+def is_default_tool_register(register: object) -> bool:
+    """Return whether ``register`` is Isaac's standard full-tool registrar."""
+
+    return register is register_tools
+
+
+def build_isaac_toolset(
     *,
-    tools: tuple[str, ...],
-    logger: logging.Logger | None,
-) -> None:
-    """Register a tool list on a pydantic-ai agent with per-tool timeouts."""
+    tool_names: Iterable[str] | None = None,
+    logger: logging.Logger | None = None,
+    toolset_id: str = "isaac-core-tools",
+) -> FunctionToolset[Any]:
+    """Build Isaac's ACP-compatible Pydantic AI function toolset.
+
+    Tool names, argument schemas, timeouts, approval requirements, and metadata
+    intentionally match the older ``register_tools()`` path so ACP clients and
+    existing tests see the same public contract while the agent runtime moves to
+    Pydantic AI v2 toolsets/capabilities.
+    """
+
+    tools = _FULL_TOOL_ORDER if tool_names is None else tuple(tool_names)
     registrar = _ToolRegistrar(logger)
+    toolset: FunctionToolset[Any] = FunctionToolset(id=toolset_id)
+    for name in tools:
+        func, timeout = _tool_function(registrar, name)
+        toolset.add_tool(_build_tool(name=name, func=func, timeout=timeout))
+    return toolset
+
+
+def build_isaac_tools_capability(
+    *,
+    tool_names: Iterable[str] | None = None,
+    logger: logging.Logger | None = None,
+    capability_id: str = "isaac-core-tools",
+) -> Any:
+    """Build the capability that contributes Isaac's core coding tools."""
+
+    return ToolsetCapability(
+        build_isaac_toolset(
+            tool_names=tool_names,
+            logger=logger,
+            toolset_id=capability_id,
+        )
+    )
+
+
+def _build_tool(name: str, func: Callable[..., Awaitable[Any]], timeout: float | None) -> Tool[Any]:
+    """Create a Pydantic AI Tool preserving Isaac's old per-tool metadata."""
+
+    is_delegate = name in DELEGATE_TOOL_TIMEOUTS
+    metadata = {
+        "tool_group": "delegate" if is_delegate else "core",
+        "mutates_state": name in _MUTATING_TOOLS,
+    }
+    return Tool(
+        func,
+        takes_ctx=True,
+        name=name,
+        description=TOOL_DESCRIPTIONS.get(name),
+        timeout=timeout,
+        strict=True,
+        sequential=(name in _MUTATING_TOOLS) or is_delegate,
+        requires_approval=name == "run_command",
+        metadata=metadata,
+    )
+
+
+def _tool_function(registrar: "_ToolRegistrar", name: str) -> tuple[Callable[..., Awaitable[Any]], float | None]:
+    """Resolve a tool wrapper and timeout by public Isaac tool name."""
+
     tool_map: dict[str, tuple[Callable[..., Awaitable[Any]], float | None]] = {
         "list_files": (registrar.list_files_tool, DEFAULT_TOOL_TIMEOUT_S),
         "read_file": (registrar.read_file_tool, DEFAULT_TOOL_TIMEOUT_S),
@@ -56,23 +128,32 @@ def _register_toolset(
         "code_search": (registrar.code_search_tool, DEFAULT_TOOL_TIMEOUT_S),
         "fetch_url": (registrar.fetch_url_tool, DEFAULT_FETCH_TIMEOUT),
     }
-    for name, timeout in DELEGATE_TOOL_TIMEOUTS.items():
-        tool_map[name] = (registrar.delegate_tool(name), timeout)
-    mutating_tools = {"run_command", "edit_file", "apply_patch"}
+    for delegate_name, timeout in DELEGATE_TOOL_TIMEOUTS.items():
+        tool_map[delegate_name] = (registrar.delegate_tool(delegate_name), timeout)
+    return tool_map[name]
+
+
+def _register_toolset(
+    agent: AgentRunner,
+    *,
+    tools: tuple[str, ...],
+    logger: logging.Logger | None,
+) -> None:
+    """Register a tool list on a pydantic-ai agent with per-tool timeouts."""
+    registrar = _ToolRegistrar(logger)
     for name in tools:
-        func, timeout = tool_map[name]
-        requires_approval = name == "run_command"
+        func, timeout = _tool_function(registrar, name)
         is_delegate = name in DELEGATE_TOOL_TIMEOUTS
         metadata = {
             "tool_group": "delegate" if is_delegate else "core",
-            "mutates_state": name in mutating_tools,
+            "mutates_state": name in _MUTATING_TOOLS,
         }
         agent.tool(
             name=name,
             timeout=timeout,
             strict=True,
-            sequential=(name in mutating_tools) or is_delegate,
-            requires_approval=requires_approval,
+            sequential=(name in _MUTATING_TOOLS) or is_delegate,
+            requires_approval=(name == "run_command"),
             metadata=metadata,
         )(func)  # type: ignore[misc]
 

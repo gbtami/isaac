@@ -222,6 +222,20 @@ def _build_delegate_agent(
 
     model_obj, model_settings = _build_provider_model(model_id, model_entry)
     output_type = spec.output_type
+    from isaac.agent.tools import TOOL_HANDLERS, build_isaac_tools_capability
+
+    tool_names = _expand_tool_names(spec)
+    unknown = [name for name in tool_names if name not in TOOL_HANDLERS]
+    if unknown:
+        raise ValueError(f"Unknown delegate tool(s): {', '.join(sorted(unknown))}")
+
+    capabilities = build_base_capabilities(mode_getter or (lambda: "ask"))
+    capabilities.append(
+        build_isaac_tools_capability(
+            tool_names=tool_names,
+            capability_id=f"isaac-delegate-{spec.name}-tools",
+        )
+    )
     agent: AgentRunner = PydanticAgent(
         model_obj,
         output_type=[output_type or str, DeferredToolRequests],
@@ -229,17 +243,9 @@ def _build_delegate_agent(
         system_prompt=spec.system_prompt or SYSTEM_PROMPT,
         instructions=spec.instructions,
         model_settings=model_settings,
-        capabilities=build_base_capabilities(mode_getter or (lambda: "ask")),
+        capabilities=capabilities,
         metadata=base_run_metadata(component=f"isaac.delegate.{spec.name}", model_id=model_id),
     )
-
-    from isaac.agent.tools import TOOL_HANDLERS, register_tools
-
-    tool_names = _expand_tool_names(spec)
-    unknown = [name for name in tool_names if name not in TOOL_HANDLERS]
-    if unknown:
-        raise ValueError(f"Unknown delegate tool(s): {', '.join(sorted(unknown))}")
-    register_tools(agent, tool_names=tool_names)
 
     if output_type is not None and spec.summary_extractor is not None and spec.min_summary_chars > 0:
 

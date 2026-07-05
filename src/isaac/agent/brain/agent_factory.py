@@ -11,6 +11,7 @@ from isaac.agent.ai_types import AgentRunner, ModelLike, ModelSettingsLike, Tool
 from isaac.agent.brain.instrumentation import base_run_metadata
 from isaac.agent.brain.prompt import SUBAGENT_INSTRUCTIONS, SYSTEM_PROMPT
 from isaac.agent.capabilities import build_base_capabilities
+from isaac.agent.tools import build_isaac_tools_capability, is_default_tool_register
 from isaac.agent.oauth.code_assist.prompt import code_assist_instructions
 from isaac.agent.models import load_models_config, load_runtime_env, _build_provider_model
 
@@ -43,15 +44,20 @@ def create_subagent_for_model(
         effective_system_prompt = ""
 
     mode_getter = session_mode_getter or (lambda: "ask")
+    capabilities = build_base_capabilities(mode_getter)
+    effective_toolsets = list(toolsets or ())
+    if is_default_tool_register(register_tools):
+        capabilities.append(build_isaac_tools_capability())
     runner: AgentRunner = PydanticAgent(
         model_obj,
         output_type=[str, DeferredToolRequests],
-        toolsets=toolsets or (),
+        toolsets=effective_toolsets,
         system_prompt=effective_system_prompt,
         instructions=instructions,
         model_settings=model_settings,
-        capabilities=build_base_capabilities(mode_getter),
+        capabilities=capabilities,
         metadata=base_run_metadata(component="isaac.agent.main", model_id=model_id),
     )
-    register_tools(runner)
+    if not is_default_tool_register(register_tools):
+        register_tools(runner)
     return runner
