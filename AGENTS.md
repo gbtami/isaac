@@ -7,34 +7,34 @@ isaac ships both an ACP agent and an ACP client. The agent (`isaac.agent`) imple
 - **protocol**: Agent Client Protocol https://agentclientprotocol.com/
 
 ## Protocol Compliance (must follow ACP)
-- Both the agent and client must strictly follow the ACP specification so they interoperate with any other ACP-compliant client/agent. Do not introduce behavior that assumes a proprietary peer. The codebase tracks ACP Python SDK `0.10.x`, so use the official `acp.schema`, `acp.helpers`, `acp.agent` / `acp.client`, and `run_agent` / process-spawn helpers where possible. Prefer SDK contrib helpers for session/tool/permission bookkeeping when they remove local state-machine code.
+- Both the agent and client must strictly follow the ACP specification so they interoperate with any other ACP-compliant client/agent. Do not introduce behavior that assumes a proprietary peer. The codebase tracks ACP Python SDK `0.11.x`, so use the official `acp.schema`, `acp.helpers`, `acp.agent` / `acp.client`, and `run_agent` / process-spawn helpers where possible. Prefer SDK contrib helpers for session/tool/permission bookkeeping when they remove local state-machine code.
 - Keep initialization/version negotiation aligned with `PROTOCOL_VERSION`, honor advertised capabilities, and preserve ACP-defined session, prompt, tool call, file system, terminal, and session config option flows.
 - Mode/model selection must use ACP Session Config Options (`config_options`, `config_option_update`, `session/set_config_option`) rather than custom ext methods.
 
 ## Components and Entrypoints
-- Agent: `uv run isaac` or `python -m isaac` starts the ACP agent server defined in `isaac.agent`.
+- Agent: `uv run isaac` starts the ACP agent server defined in `isaac.agent`.
 - Client: `uv run python -m isaac.client uv run isaac` launches the ACP client REPL against the agent; the client can also be pointed at any other ACP agent binary.
 
 ## Project Setup
 This project uses `uv` for environment and project management.
-- Install dependencies: `uv pip install -e .`
+- Install dependencies: `uv sync`
 - Refresh offline models.dev snapshot + generated model catalog: `uv run python scripts/update_models_dev_catalog.py --top-per-provider 25`
 
 ## Cross-client Testing (install to user site)
 To test isaac with other ACP clients after code changes without bumping the version install isaac to your user site and run it from there:
-- Install: delete older wheels first (`rm -f dist/isaac_acp-*.whl`), then `uv build --wheel`, then `python -m pip install --user --no-deps --force-reinstall dist/isaac_acp-*.whl` to ensure the wildcard matches only the newly built wheel.
+- Install: delete older wheels first (`rm -f dist/isaac_acp-*.whl`), then `uv build --wheel`, then `uv tool install --force --reinstall dist/isaac_acp-*.whl` to ensure the wildcard matches only the newly built wheel.
 - Run with another client: `cd ~/toad && uv run toad acp "isaac" --project-dir ~/playground`
 
 ## Environment variables
 - isaac loads environment variables from a shared `.env` in the platform config dir (`platformdirs`; Linux example: `~/.config/isaac/.env`). Place provider keys (e.g., `OPENROUTER_API_KEY`) there to use any cwd.
-- `ISAAC_ACP_STDIO_BUFFER_LIMIT_BYTES` optionally overrides ACP stdio pipe buffer limits for both `uv run isaac` and `python -m isaac.client ...` (defaults to `52428800` / 50MB).
+- `ISAAC_ACP_STDIO_BUFFER_LIMIT_BYTES` optionally overrides ACP stdio pipe buffer limits for both `uv run isaac` and `uv run python -m isaac.client ...` (defaults to `52428800` / 50MB).
 
 ## Required Checks (run every change)
 - Format: `uv run ruff format .`
 - Lint: `uv run ruff check .`
 - Types: `uv run mypy src tests`
 - Tests: `uv run pytest`
-- Package install check: delete older wheels first (`rm -f dist/isaac_acp-*.whl`), then `uv build --wheel`, then `python -m pip install --user --no-deps --force-reinstall dist/isaac_acp-*.whl`
+- Package install check: delete older wheels first (`rm -f dist/isaac_acp-*.whl`), then `uv build --wheel`, then `uv tool install --force --reinstall dist/isaac_acp-*.whl`
 
 ## Tooling (pydantic-ai)
 - Target Pydantic AI 2.x APIs. Prefer composable capabilities over ad-hoc constructor hooks or prompt-handler callbacks.

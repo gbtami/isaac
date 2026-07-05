@@ -15,14 +15,16 @@ Isaac is an ACP-compliant coding agent and reference CLI client.
 > Since Newton discovered gravity, everything's been going downhill.
 ## Installation
 
+Install Isaac as a `uv` tool:
+
 ```bash
-pip install isaac-acp
+uv tool install isaac-acp
 ```
 
 Optional Harness experiments are not installed by default:
 
 ```bash
-pip install "isaac-acp[harness]"
+uv tool install "isaac-acp[harness]" --force
 ```
 
 ## Quickstart
@@ -33,10 +35,10 @@ Run the agent:
 isaac
 ```
 
-Run the bundled client against the bundled agent:
+Run the bundled client against the bundled agent without creating a project checkout:
 
 ```bash
-python -m isaac.client isaac
+uv tool run --from isaac-acp python -m isaac.client isaac
 ```
 
 Or when developing from source:
@@ -58,7 +60,7 @@ Common variables:
 
 ## Features
 
-- ACP 0.10 session config options for mode/model selection
+- ACP 0.11 session config options for mode/model selection
 - Pydantic AI 2.x capability-based agent assembly
 - Prompt turns, tool calls, filesystem and terminal ACP flows
 - ACP-backed approval flow for `run_command` with an experimental Pydantic AI capability bridge
@@ -69,7 +71,7 @@ Common variables:
 ## Development
 
 ```bash
-uv pip install -e .
+uv sync
 uv run ruff format .
 uv run ruff check .
 uv run mypy src tests
@@ -77,7 +79,7 @@ uv run pytest
 uv build --wheel --sdist
 ```
 
-Development note: `uv sync` installs the default `dev` dependency group, so local check commands such as `uv run pytest`, `uv run ruff check .`, and `uv run mypy` work after a normal sync. The `test` extra is kept for pip/CI compatibility.
+Development note: `uv sync` installs the default `dev` dependency group, so local check commands such as `uv run pytest`, `uv run ruff check .`, and `uv run mypy` work after a normal sync. The `test` extra is kept for packaging and CI compatibility.
 
 ### Optional Harness experiments
 
