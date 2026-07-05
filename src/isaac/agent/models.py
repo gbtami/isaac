@@ -29,7 +29,7 @@ from isaac.agent.oauth.openai_codex import (
     openai_auth_request_hook,
 )
 from isaac.agent.oauth.openai_codex.client import OpenAICodexAsyncClient
-from isaac.agent.oauth.openai_codex.model import is_supported_chatgpt_codex_model
+from isaac.agent.oauth.openai_codex.model import DEFAULT_CODEX_MODELS, is_supported_chatgpt_codex_model
 from isaac.paths import config_dir
 
 logger = logging.getLogger(__name__)
@@ -107,6 +107,8 @@ def load_models_config() -> Dict[str, Any]:
         except Exception:
             logger.warning("Failed to load user models.json, ignoring")
 
+    _ensure_openai_codex_default_models(models)
+
     # Ensure function model stays safe for testing (no auto tool calls)
     fn_model = models.get(FUNCTION_MODEL_ID, {})
     fn_model["provider"] = "function"
@@ -171,6 +173,35 @@ def list_user_models() -> Dict[str, Any]:
     """Return models suitable for end users (hides internal/testing models)."""
 
     return {mid: meta for mid, meta in list_models().items() if _is_user_visible_model(mid, meta)}
+
+
+def _ensure_openai_codex_default_models(models: Dict[str, Any]) -> None:
+    """Advertise current ChatGPT-Codex defaults through ACP config options.
+
+    These entries are virtual defaults, not generated from the static models.dev
+    API catalog. They make the model selector work for any ACP client before a
+    live `/login openai` sync has written account-specific models to
+    ``models.json``. The real request path still requires OAuth tokens.
+    """
+
+    for name in DEFAULT_CODEX_MODELS:
+        model_id = f"openai-codex:{name}"
+        default_entry = {
+            "provider": "openai-codex",
+            "model": name,
+            "description": f"OpenAI Codex {name} (ChatGPT login)",
+            "oauth_source": OPENAI_CODEX_OAUTH_SOURCE,
+            "dynamic_default": True,
+        }
+        existing = models.get(model_id)
+        if not isinstance(existing, dict):
+            models[model_id] = default_entry
+            continue
+        existing.setdefault("description", default_entry["description"])
+        existing["provider"] = "openai-codex"
+        existing["model"] = name
+        existing["oauth_source"] = OPENAI_CODEX_OAUTH_SOURCE
+        existing.setdefault("dynamic_default", True)
 
 
 def _is_user_visible_model(model_id: str, meta: Dict[str, Any]) -> bool:

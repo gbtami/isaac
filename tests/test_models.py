@@ -473,6 +473,56 @@ def test_models_dev_catalog_snapshot_has_no_static_openai_codex_provider() -> No
     assert "openai-codex" not in catalog.get("providers", {})
 
 
+def test_openai_codex_defaults_are_advertised_without_oauth_sync(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    catalog_file = tmp_path / "models_dev_catalog.json"
+    catalog_file.write_text(json.dumps({"providers": {}}), encoding="utf-8")
+    monkeypatch.setattr(model_registry, "MODELS_DEV_CATALOG_FILE", catalog_file)
+    monkeypatch.setattr(model_registry, "MODELS_DEV_SNAPSHOT_FILE", tmp_path / "models_dev_api.json")
+    monkeypatch.setattr(model_registry, "LOCAL_MODELS_FILE", tmp_path / "missing-local-models.json")
+    monkeypatch.setattr(model_registry, "USER_MODELS_FILE", tmp_path / "missing-user-models.json")
+
+    models = model_registry.list_user_models()
+
+    assert "openai-codex:gpt-5.5" in models
+    assert "openai-codex:gpt-5.4" in models
+    assert "openai-codex:gpt-5.4-mini" in models
+    assert "openai-codex:gpt-5.2-codex" not in models
+
+
+def test_openai_codex_defaults_repair_existing_local_entry_for_selector(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    catalog_file = tmp_path / "models_dev_catalog.json"
+    catalog_file.write_text(json.dumps({"providers": {}}), encoding="utf-8")
+    user_models_file = tmp_path / "models.json"
+    user_models_file.write_text(
+        json.dumps(
+            {
+                "models": {
+                    "openai-codex:gpt-5.4-mini": {
+                        "provider": "openai-codex",
+                        "model": "gpt-5.4-mini",
+                        "description": "custom description",
+                    }
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(model_registry, "MODELS_DEV_CATALOG_FILE", catalog_file)
+    monkeypatch.setattr(model_registry, "MODELS_DEV_SNAPSHOT_FILE", tmp_path / "models_dev_api.json")
+    monkeypatch.setattr(model_registry, "LOCAL_MODELS_FILE", tmp_path / "missing-local-models.json")
+    monkeypatch.setattr(model_registry, "USER_MODELS_FILE", user_models_file)
+
+    models = model_registry.list_user_models()
+
+    entry = models["openai-codex:gpt-5.4-mini"]
+    assert entry["oauth_source"] == model_registry.OPENAI_CODEX_OAUTH_SOURCE
+    assert entry["description"] == "custom description"
+
+
 def test_anthropic_thinking_enabled_by_default(monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setenv("ANTHROPIC_API_KEY", "test")
     _model, settings = model_registry._build_provider_model(  # type: ignore[attr-defined]

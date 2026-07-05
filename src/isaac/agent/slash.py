@@ -248,6 +248,7 @@ async def _handle_login(agent: Any, session_id: str, _command: str, argument: st
                 if sync.used_fallback:
                     lines.append("Used fallback model list; rerun /login openai to retry discovery.")
             lines.append("Use /models to view the updated list.")
+            await _send_config_options_update(agent, session_id)
             message = "\n".join(lines)
             return session_notification(session_id, update_agent_message(text_block(message)))
 
@@ -307,6 +308,19 @@ def _handle_logout(_agent: Any, session_id: str, _command: str, argument: str) -
         session_id,
         update_agent_message(text_block("Usage: /logout <openai|code-assist|all>")),
     )
+
+
+async def _send_config_options_update(agent: Any, session_id: str) -> None:
+    """Notify ACP clients that advertised config options may have changed."""
+
+    sender = getattr(agent, "_send_update", None)
+    builder = getattr(agent, "_config_options_update", None)
+    if not callable(sender) or not callable(builder):
+        return
+    try:
+        await sender(builder(session_id))
+    except Exception:
+        return
 
 
 async def _send_oauth_notice(

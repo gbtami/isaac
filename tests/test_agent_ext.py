@@ -83,6 +83,7 @@ async def test_session_config_options_include_mode_and_model(monkeypatch, tmp_pa
     assert session.config_options
     assert _config_current_value(session.config_options, "mode") == "ask"
     assert _config_current_value(session.config_options, "model") == fn_model_id
+    assert "openai-codex:gpt-5.4-mini" in _config_values(session.config_options, "model")
 
     target_id = "function:user-function"
     resp = await agent.set_config_option(
@@ -214,6 +215,20 @@ def _config_current_value(config_options: list[object], option_id: str) -> str |
             if isinstance(value, str):
                 return value
     return None
+
+
+def _config_values(config_options: list[object], option_id: str) -> set[str]:
+    for option in config_options:
+        root = getattr(option, "root", option)
+        if getattr(root, "id", None) != option_id:
+            continue
+        values = set()
+        for select_option in getattr(root, "options", []) or []:
+            value = getattr(select_option, "value", None)
+            if isinstance(value, str):
+                values.add(value)
+        return values
+    return set()
 
 
 @pytest.mark.asyncio
