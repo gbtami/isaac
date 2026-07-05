@@ -36,6 +36,7 @@ class SessionUIState:
     refresh_ui: Callable[[], None] | None = None
     select_option: OptionSelector | None = None
     thinking_status: "ThinkingStatus | None" = None
+    acp_snapshot: object | None = None
 
     def notify_changed(self) -> None:
         """Ask the UI to redraw when status fields change."""

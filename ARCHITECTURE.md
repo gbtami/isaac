@@ -15,6 +15,7 @@ any ACP-compliant peer.
 - `src/isaac/agent/` ACP agent implementation and runtime services.
 - `src/isaac/agent/acp/` ACP endpoint handlers split by domain.
 - `src/isaac/agent/brain/` prompt handling, planning, and model wiring.
+- `src/isaac/agent/capabilities.py` Isaac-specific Pydantic AI 2.x capabilities.
 - `src/isaac/agent/tools/` tool registry, schema, execution, registration.
 - `src/isaac/agent/subagents/` delegate agents exposed as tools.
 - `src/isaac/client/` ACP client REPL example (no shared runtime with agent).
@@ -37,6 +38,7 @@ flowchart TD
   ACPAgent --> Ext[ExtensionsMixin]
 
   Prompt --> Brain[PromptHandler]
+  Brain --> Caps[Pydantic AI capabilities]
   Tools --> ToolExec[tool_execution]
   Sess --> Store[SessionStore]
   Sess --> MCP[mcp_support]
@@ -55,6 +57,24 @@ flowchart TD
 - `src/isaac/agent/acp/terminal.py` terminal endpoints.
 - `src/isaac/agent/acp/updates.py` session update persistence and replay.
 - `src/isaac/agent/acp/extensions.py` extension request/notification hooks (no model-selection ext methods).
+
+
+## Pydantic AI 2.x Capability Boundary
+
+Isaac-specific cross-cutting agent behavior should live in
+`src/isaac/agent/capabilities.py` before adding more prompt-handler state.
+Current capabilities include:
+
+- `ToolModeCapability`: maps ACP session mode (`ask`/`yolo`) to Pydantic AI tool visibility/approval semantics.
+- `ACPPermissionCapability`: resolves Pydantic AI deferred approval requests through ACP permission prompts during a run.
+
+The old prompt runner still owns ACP event projection while the modernization is
+in progress, but it now treats Pydantic AI `run_stream_events()` as an async
+context manager and passes per-run capabilities where available.
+
+Pydantic AI Harness is available for opt-in experiments. CodeMode is intentionally
+disabled by default and can be enabled with `ISAAC_HARNESS_CODE_MODE=1` once the
+approval/sandbox UX has been reviewed for the target ACP client.
 
 ## Prompt Handling Flow
 
@@ -99,3 +119,9 @@ They run in fresh contexts by default (no shared conversation history).
 The client lives entirely under `src/isaac/client/` and uses ACP stdio transport
 to connect to any compliant agent, not just isaac. The agent likewise does not
 depend on any client-specific behaviors and only uses ACP-defined flows.
+
+The reference client now opportunistically feeds raw `SessionNotification`
+objects into ACP SDK `SessionAccumulator` when that contrib helper is available.
+The existing terminal renderer still handles updates directly, but the
+accumulated snapshot gives future UI/status work a canonical ACP state source
+without replacing the rendering path in one risky step.

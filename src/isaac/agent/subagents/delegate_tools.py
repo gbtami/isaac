@@ -16,7 +16,10 @@ from pydantic import BaseModel
 from pydantic_ai import Agent as PydanticAgent  # type: ignore
 from pydantic_ai import DeferredToolRequests  # type: ignore
 from pydantic_ai.exceptions import ModelRetry  # type: ignore
-from pydantic_ai.run import AgentRunResultEvent  # type: ignore
+try:
+    from pydantic_ai import AgentRunResultEvent  # type: ignore
+except ImportError:  # pragma: no cover - older pydantic-ai compatibility
+    from pydantic_ai.run import AgentRunResultEvent  # type: ignore
 from pydantic_ai.usage import UsageLimits  # type: ignore
 
 from acp.helpers import session_notification, text_block, update_agent_thought
@@ -25,7 +28,7 @@ from isaac.agent import models as model_registry
 from isaac.agent.brain.history_processors import sanitize_message_history
 from isaac.agent.brain.instrumentation import base_run_metadata, pydantic_ai_instrument_enabled
 from isaac.agent.brain.prompt import SYSTEM_PROMPT
-from isaac.agent.brain.tool_policies import build_prepare_tools_for_mode
+from isaac.agent.capabilities import build_base_capabilities
 from isaac.agent.models import load_models_config, load_runtime_env, _build_provider_model
 from isaac.agent.runner import stream_with_runner
 from isaac.log_utils import log_context as log_ctx, log_event
@@ -227,7 +230,7 @@ def _build_delegate_agent(
         system_prompt=spec.system_prompt or SYSTEM_PROMPT,
         instructions=spec.instructions,
         model_settings=model_settings,
-        prepare_tools=build_prepare_tools_for_mode(mode_getter or (lambda: "ask")),
+        capabilities=build_base_capabilities(mode_getter or (lambda: "ask")),
         history_processors=(sanitize_message_history,),
         instrument=pydantic_ai_instrument_enabled(),
         metadata=base_run_metadata(component=f"isaac.delegate.{spec.name}", model_id=model_id),
@@ -359,7 +362,8 @@ async def _run_delegate_once(
         if spec.output_type is None:
             return False
         if isinstance(event, AgentRunResultEvent):
-            output = getattr(event.result, "output", None)
+            result = getattr(event, "result", None)
+            output = getattr(result, "output", None)
             if isinstance(output, spec.output_type):
                 structured = output
         return False

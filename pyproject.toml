@@ -1,18 +1,17 @@
 [project]
 name = "isaac-acp"
-version = "0.3.1"
+version = "0.4.0"
 description = "ACP-compliant coding agent and reference client."
 readme = "README.md"
 license = { text = "MIT" }
 authors = [{ name = "Isaac Contributors" }]
-requires-python = ">=3.10"
+requires-python = ">=3.11"
 keywords = ["acp", "agent-client-protocol", "agent", "cli", "repl"]
 classifiers = [
     "Development Status :: 3 - Alpha",
     "Environment :: Console",
     "Intended Audience :: Developers",
     "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
@@ -23,8 +22,9 @@ classifiers = [
     "Typing :: Typed",
 ]
 dependencies = [
-    "agent-client-protocol==0.8.1",
-    "pydantic-ai==1.64.0",
+    "agent-client-protocol>=0.10.1,<0.11.0",
+    "pydantic-ai>=2.5.0,<3.0.0",
+    "pydantic-ai-harness[code-mode]>=0.5.0,<0.6.0",
     "aiocache==0.12.3",
     "prompt-toolkit==3.0.52",
     "python-dotenv==1.2.2",

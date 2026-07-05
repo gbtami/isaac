@@ -7,7 +7,10 @@ from typing import Any
 
 from isaac.agent.history_types import ChatMessage
 
-from pydantic_ai.messages import FunctionToolResultEvent  # type: ignore
+try:
+    from pydantic_ai import FunctionToolResultEvent  # type: ignore
+except ImportError:  # pragma: no cover - older pydantic-ai compatibility
+    from pydantic_ai.messages import FunctionToolResultEvent  # type: ignore
 
 
 def record_recent_file(recent_files: list[str], event: Any, max_recent: int) -> None:
@@ -15,7 +18,7 @@ def record_recent_file(recent_files: list[str], event: Any, max_recent: int) -> 
 
     if not isinstance(event, FunctionToolResultEvent):
         return
-    result_part = event.result
+    result_part = getattr(event, "result", None) or getattr(event, "part", None)
     tool_name = getattr(result_part, "tool_name", None) or ""
     if tool_name not in {"edit_file", "apply_patch"}:
         return

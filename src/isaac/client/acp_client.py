@@ -48,6 +48,11 @@ from acp.schema import (
 )
 from dotenv import set_key
 
+try:
+    from acp.contrib.session_state import SessionAccumulator  # type: ignore
+except Exception:  # pragma: no cover - optional ACP contrib helper
+    SessionAccumulator = None  # type: ignore[assignment]
+
 from isaac.client.auth import (
     auth_method_env_var_name,
     auth_method_link,
@@ -188,6 +193,7 @@ class ACPClient(Client):
         self._last_prompt = ""
         self._state = state
         self._terminal_manager = ClientTerminalManager()
+        self._session_accumulator = SessionAccumulator() if SessionAccumulator is not None else None
         self._logger = logger
 
     async def request_permission(
@@ -289,6 +295,13 @@ class ACPClient(Client):
     async def session_update(self, session_id: str, update: SessionNotification | Any, **_: Any) -> None:
         if self._state.thinking_status is not None:
             self._state.thinking_status.stop()
+        if self._session_accumulator is not None and isinstance(update, SessionNotification):
+            try:
+                self._session_accumulator.apply(update)
+                snapshot = self._session_accumulator.snapshot()
+                self._state.acp_snapshot = snapshot
+            except Exception:
+                self._state.acp_snapshot = None
         update_obj = update if not isinstance(update, SessionNotification) else update.update
         update = update_obj or update
         if isinstance(update, CurrentModeUpdate):

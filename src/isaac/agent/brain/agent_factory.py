@@ -11,7 +11,7 @@ from isaac.agent.ai_types import AgentRunner, ModelLike, ModelSettingsLike, Tool
 from isaac.agent.brain.history_processors import sanitize_message_history
 from isaac.agent.brain.instrumentation import base_run_metadata, pydantic_ai_instrument_enabled
 from isaac.agent.brain.prompt import SUBAGENT_INSTRUCTIONS, SYSTEM_PROMPT
-from isaac.agent.brain.tool_policies import build_prepare_tools_for_mode
+from isaac.agent.capabilities import build_base_capabilities
 from isaac.agent.oauth.code_assist.prompt import code_assist_instructions
 from isaac.agent.models import load_models_config, load_runtime_env, _build_provider_model
 
@@ -51,7 +51,7 @@ def create_subagent_for_model(
         system_prompt=effective_system_prompt,
         instructions=instructions,
         model_settings=model_settings,
-        prepare_tools=build_prepare_tools_for_mode(mode_getter),
+        capabilities=build_base_capabilities(mode_getter),
         history_processors=(sanitize_message_history,),
         instrument=pydantic_ai_instrument_enabled(),
         metadata=base_run_metadata(component="isaac.agent.main", model_id=model_id),

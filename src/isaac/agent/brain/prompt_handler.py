@@ -5,7 +5,10 @@ from __future__ import annotations
 import asyncio
 import logging
 from typing import Any, Dict
-from pydantic_ai.messages import FunctionToolResultEvent  # type: ignore
+try:
+    from pydantic_ai import FunctionToolResultEvent  # type: ignore
+except ImportError:  # pragma: no cover - older pydantic-ai compatibility
+    from pydantic_ai.messages import FunctionToolResultEvent  # type: ignore
 from pydantic_ai.usage import UsageLimits  # type: ignore
 
 from isaac.agent import models as model_registry
@@ -162,7 +165,7 @@ class PromptHandler:
         async def _maybe_capture_plan(event: Any) -> None:
             if not isinstance(event, FunctionToolResultEvent):
                 return
-            result_part = event.result
+            result_part = getattr(event, "result", None) or getattr(event, "part", None)
             tool_name = getattr(result_part, "tool_name", None) or ""
             if tool_name != "planner":
                 return

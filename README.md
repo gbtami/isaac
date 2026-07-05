@@ -52,8 +52,11 @@ Common variables:
 
 ## Features
 
-- ACP 0.8 session config options for mode/model selection
+- ACP 0.10 session config options for mode/model selection
+- Pydantic AI 2.x capability-based agent assembly
 - Prompt turns, tool calls, filesystem and terminal ACP flows
+- ACP-backed approval flow for `run_command` with an experimental Pydantic AI capability bridge
+- Optional Pydantic AI Harness CodeMode experiments via `ISAAC_HARNESS_CODE_MODE=1`
 - Interactive client slash commands (`/mode`, `/model`, `/status`, `/usage`)
 - MCP server config forwarding from the client to the agent
 
