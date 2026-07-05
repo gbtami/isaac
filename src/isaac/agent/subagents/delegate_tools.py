@@ -14,12 +14,8 @@ from typing import Any, Awaitable, Callable
 
 from pydantic import BaseModel
 from pydantic_ai import Agent as PydanticAgent  # type: ignore
-from pydantic_ai import DeferredToolRequests  # type: ignore
+from pydantic_ai import AgentRunResultEvent, DeferredToolRequests  # type: ignore
 from pydantic_ai.exceptions import ModelRetry  # type: ignore
-try:
-    from pydantic_ai import AgentRunResultEvent  # type: ignore
-except ImportError:  # pragma: no cover - older pydantic-ai compatibility
-    from pydantic_ai.run import AgentRunResultEvent  # type: ignore
 from pydantic_ai.usage import UsageLimits  # type: ignore
 
 from acp.helpers import session_notification, text_block, update_agent_thought

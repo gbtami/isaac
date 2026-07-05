@@ -1,4 +1,4 @@
-"""Register Isaac tool handlers with pydantic-ai agents and toolsets."""
+"""Build Isaac tool handlers as Pydantic AI toolsets and capabilities."""
 
 from __future__ import annotations
 
@@ -8,7 +8,7 @@ from typing import Any, Awaitable, Callable, Iterable
 from pydantic_ai import FunctionToolset, Tool  # type: ignore
 from pydantic_ai.capabilities import Toolset as ToolsetCapability  # type: ignore
 
-from isaac.agent.ai_types import AgentRunner, ToolContext
+from isaac.agent.ai_types import ToolContext
 
 from isaac.agent.subagents import DELEGATE_TOOL_TIMEOUTS
 from isaac.agent.tools.executor import run_tool
@@ -19,39 +19,10 @@ from isaac.agent.tools.registry import (
     RUN_COMMAND_TIMEOUT_S,
     TOOL_DESCRIPTIONS,
     _FULL_TOOL_ORDER,
-    _READ_ONLY_TOOL_ORDER,
 )
 from isaac.log_utils import log_event
 
 _MUTATING_TOOLS = {"run_command", "edit_file", "apply_patch"}
-
-
-def register_readonly_tools(agent: AgentRunner, *, tool_names: Iterable[str] | None = None) -> None:
-    """Register read-only tool wrappers on the given agent.
-
-    This remains as a compatibility shim for tests and custom runner factories.
-    Normal Isaac agents should prefer ``build_isaac_tools_capability`` so tools
-    are attached during agent construction instead of mutating the agent later.
-    """
-    tools = _READ_ONLY_TOOL_ORDER if tool_names is None else tuple(tool_names)
-    _register_toolset(agent, tools=tools, logger=None)
-
-
-def register_tools(agent: AgentRunner, *, tool_names: Iterable[str] | None = None) -> None:
-    """Register the toolset on the given agent.
-
-    This legacy helper is intentionally retained for direct tests, custom runner
-    factories, and compatibility with older embedding code. The production agent
-    factory now uses ``build_isaac_tools_capability`` instead.
-    """
-    tools = _FULL_TOOL_ORDER if tool_names is None else tuple(tool_names)
-    _register_toolset(agent, tools=tools, logger=logging.getLogger(__name__))
-
-
-def is_default_tool_register(register: object) -> bool:
-    """Return whether ``register`` is Isaac's standard full-tool registrar."""
-
-    return register is register_tools
 
 
 def build_isaac_toolset(
@@ -63,9 +34,7 @@ def build_isaac_toolset(
     """Build Isaac's ACP-compatible Pydantic AI function toolset.
 
     Tool names, argument schemas, timeouts, approval requirements, and metadata
-    intentionally match the older ``register_tools()`` path so ACP clients and
-    existing tests see the same public contract while the agent runtime moves to
-    Pydantic AI v2 toolsets/capabilities.
+    define the ACP-visible Isaac coding tool contract.
     """
 
     tools = _FULL_TOOL_ORDER if tool_names is None else tuple(tool_names)
@@ -95,7 +64,7 @@ def build_isaac_tools_capability(
 
 
 def _build_tool(name: str, func: Callable[..., Awaitable[Any]], timeout: float | None) -> Tool[Any]:
-    """Create a Pydantic AI Tool preserving Isaac's old per-tool metadata."""
+    """Create a Pydantic AI Tool preserving Isaac's ACP-visible metadata."""
 
     is_delegate = name in DELEGATE_TOOL_TIMEOUTS
     metadata = {
@@ -131,31 +100,6 @@ def _tool_function(registrar: "_ToolRegistrar", name: str) -> tuple[Callable[...
     for delegate_name, timeout in DELEGATE_TOOL_TIMEOUTS.items():
         tool_map[delegate_name] = (registrar.delegate_tool(delegate_name), timeout)
     return tool_map[name]
-
-
-def _register_toolset(
-    agent: AgentRunner,
-    *,
-    tools: tuple[str, ...],
-    logger: logging.Logger | None,
-) -> None:
-    """Register a tool list on a pydantic-ai agent with per-tool timeouts."""
-    registrar = _ToolRegistrar(logger)
-    for name in tools:
-        func, timeout = _tool_function(registrar, name)
-        is_delegate = name in DELEGATE_TOOL_TIMEOUTS
-        metadata = {
-            "tool_group": "delegate" if is_delegate else "core",
-            "mutates_state": name in _MUTATING_TOOLS,
-        }
-        agent.tool(
-            name=name,
-            timeout=timeout,
-            strict=True,
-            sequential=(name in _MUTATING_TOOLS) or is_delegate,
-            requires_approval=(name == "run_command"),
-            metadata=metadata,
-        )(func)  # type: ignore[misc]
 
 
 class _ToolRegistrar:

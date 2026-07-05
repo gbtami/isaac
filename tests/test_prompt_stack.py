@@ -50,10 +50,7 @@ def test_openai_codex_uses_standard_isaac_prompt_stack(monkeypatch) -> None:
     )
     monkeypatch.setattr(agent_factory, "_build_provider_model", _build_model)
 
-    runner = agent_factory.create_subagent_for_model(
-        "openai-codex:gpt-5.3-codex",
-        register_tools=lambda _runner: None,
-    )
+    runner = agent_factory.create_subagent_for_model("openai-codex:gpt-5.3-codex")
 
     assert runner.system_prompt == SYSTEM_PROMPT
     assert runner.instructions == SUBAGENT_INSTRUCTIONS
@@ -76,10 +73,7 @@ def test_code_assist_still_uses_provider_specific_prompt_stack(monkeypatch) -> N
     )
     monkeypatch.setattr(agent_factory, "_build_provider_model", _build_model)
 
-    runner = agent_factory.create_subagent_for_model(
-        "code-assist:gemini",
-        register_tools=lambda _runner: None,
-    )
+    runner = agent_factory.create_subagent_for_model("code-assist:gemini")
 
     assert runner.system_prompt == ""
     assert runner.instructions == code_assist_instructions()

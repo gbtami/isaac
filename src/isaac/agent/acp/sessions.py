@@ -182,7 +182,6 @@ class SessionLifecycleMixin:
         _ = (cwd, session_id, mcp_servers)
         raise RequestError.method_not_found("session/resume")
 
-
     async def close_session(self, session_id: str, **_: Any) -> CloseSessionResponse | None:
         """Close a session and discard in-memory session state."""
         with log_context(session_id=session_id):

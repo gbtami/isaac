@@ -15,7 +15,6 @@ from isaac.agent.brain.prompt_result import PromptResult
 from isaac.agent.plan_shortcuts import build_plan_shortcut_notification, parse_plan_shortcut
 from isaac.agent.prompt_utils import extract_prompt_text
 from isaac.agent.slash import handle_slash_command
-from isaac.agent.tools import register_tools
 from isaac.log_utils import log_context, log_event
 
 logger = logging.getLogger(__name__)
@@ -38,7 +37,6 @@ class PromptMixin:
         )
         return PromptHandler(
             env=env,
-            register_tools=register_tools,
             runner_factory=getattr(self, "_runner_factory", None),
         )
 

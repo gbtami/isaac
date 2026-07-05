@@ -8,7 +8,7 @@ from acp import RequestPermissionResponse
 from acp.agent.connection import AgentSideConnection
 from acp.schema import AllowedOutcome, AuthMethodAgent, EnvVarAuthMethod, TerminalAuthMethod
 from isaac.agent import ACPAgent
-from isaac.agent.tools import register_tools
+from isaac.agent.tools import build_isaac_toolset
 from pydantic_ai import Agent as PydanticAgent  # type: ignore
 from pydantic_ai import DeferredToolRequests  # type: ignore
 from pydantic_ai.models.test import TestModel  # type: ignore
@@ -23,8 +23,11 @@ def make_function_agent(
 ) -> ACPAgent:
     """Helper to build ACPAgent with a deterministic in-process model."""
 
-    runner = PydanticAgent(TestModel(call_tools=[]), output_type=[str, DeferredToolRequests])
-    register_tools(runner)
+    runner = PydanticAgent(
+        TestModel(call_tools=[]),
+        output_type=[str, DeferredToolRequests],
+        toolsets=[build_isaac_toolset()],
+    )
     if not inspect.iscoroutinefunction(getattr(conn, "session_update", None)):
         conn.session_update = AsyncMock()
 
@@ -50,7 +53,7 @@ def make_error_agent(conn: AgentSideConnection) -> ACPAgent:
 
     class ErrorRunner:
         async def run_stream_events(  # pragma: no cover - simple stub
-            self, prompt: str, *, message_history=None
+            self, prompt: str, *, message_history=None, **_: object
         ):
             raise RuntimeError("rate limited")
 
@@ -62,7 +65,7 @@ def make_timeout_agent(conn: AgentSideConnection) -> ACPAgent:
 
     class TimeoutRunner:
         async def run_stream_events(  # pragma: no cover - simple stub
-            self, prompt: str, *, message_history=None
+            self, prompt: str, *, message_history=None, **_: object
         ):
             request = httpx.Request("GET", "https://example.com")
             raise httpx.ReadTimeout("Request timed out.", request=request)

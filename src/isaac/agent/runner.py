@@ -21,10 +21,7 @@ from pydantic_ai.messages import (  # type: ignore
     TextPartDelta,
     ThinkingPartDelta,
 )
-try:
-    from pydantic_ai import AgentRunResultEvent  # type: ignore
-except ImportError:  # pragma: no cover - older pydantic-ai compatibility
-    from pydantic_ai.run import AgentRunResultEvent  # type: ignore
+from pydantic_ai import AgentRunResultEvent  # type: ignore
 from isaac.agent.capabilities import build_acp_deferred_tool_results, build_prompt_capabilities
 from isaac.agent.history_types import ChatMessage, HistoryInput
 from isaac.log_utils import log_chunks_enabled, log_context as log_ctx, log_event
@@ -49,12 +46,11 @@ class StreamRunner(Protocol):
 
 @contextlib.asynccontextmanager
 async def _stream_events_context(stream_source: Any) -> AsyncIterator[Any]:
-    """Normalize Pydantic AI v1/v2 streaming return shapes.
+    """Return an async iterator from a Pydantic AI stream context.
 
-    Pydantic AI v2 returns an async context manager from ``run_stream_events``;
-    older tests and earlier releases used an async iterator directly, sometimes
-    wrapped in a coroutine. Keeping this normalizer local lets the rest of Isaac
-    consume one ``async for`` shape while the project migrates.
+    Pydantic AI v2 returns an async context manager from ``run_stream_events``.
+    Some unit-test runners return a plain async iterator, so this helper keeps
+    ``stream_with_runner`` focused on event projection rather than fixture shape.
     """
 
     if inspect.isawaitable(stream_source):
@@ -156,15 +152,7 @@ async def stream_with_runner(
         prompt_capabilities = [*(capabilities or ()), *build_prompt_capabilities(request_tool_approval)]
         if prompt_capabilities:
             kwargs["capabilities"] = prompt_capabilities
-        try:
-            return runner.run_stream_events(prompt, **kwargs)
-        except TypeError:
-            # Compatibility path for test doubles and older pydantic-ai releases.
-            kwargs.pop("metadata", None)
-            kwargs.pop("usage_limits", None)
-            kwargs.pop("deferred_tool_results", None)
-            kwargs.pop("capabilities", None)
-            return runner.run_stream_events(prompt, **kwargs)
+        return runner.run_stream_events(prompt, **kwargs)
 
     safe_history: list[ai_messages.ModelMessage] | None = None
     deferred_tool_results: DeferredToolResults | None = None
@@ -318,9 +306,9 @@ async def stream_with_runner(
                         except Exception:
                             msgs = []
                         if isinstance(full, DeferredToolRequests):
-                            # Fallback for older pydantic-ai versions or runners that
-                            # do not support per-run capabilities. The v2 path should
-                            # normally be handled inside the per-run ACP permission capability.
+                            # Safety net for runners that surface deferred approvals
+                            # directly instead of resolving them through the ACP
+                            # permission capability before the final result event.
                             deferred_tool_results = await _resolve_deferred_tool_results(full)
                             if safe_history:
                                 safe_history = [*safe_history, *msgs]

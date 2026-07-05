@@ -241,7 +241,7 @@ async def test_history_preserved_across_prompts(monkeypatch, tmp_path: Path):
     executor = _RecordingRunner("done")
     from isaac.agent.brain import session_ops
 
-    def _build(_model_id: str, _register: object, toolsets=None, **kwargs: object) -> object:
+    def _build(_model_id: str, *, toolsets=None, **kwargs: object) -> object:
         _ = toolsets
         return executor
 

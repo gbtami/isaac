@@ -43,7 +43,7 @@ async def test_prompt_handler_injects_recent_files_context(monkeypatch):
         request_run_permission=AsyncMock(return_value=True),
         set_usage=lambda *_: None,
     )
-    handler = PromptHandler(env, register_tools=lambda *_: None)
+    handler = PromptHandler(env)
     handler._sessions["s"] = SessionState(
         runner=object(),
         model_id="m",

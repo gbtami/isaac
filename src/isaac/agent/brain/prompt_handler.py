@@ -5,14 +5,10 @@ from __future__ import annotations
 import asyncio
 import logging
 from typing import Any, Dict
-try:
-    from pydantic_ai import FunctionToolResultEvent  # type: ignore
-except ImportError:  # pragma: no cover - older pydantic-ai compatibility
-    from pydantic_ai.messages import FunctionToolResultEvent  # type: ignore
+from pydantic_ai import FunctionToolResultEvent  # type: ignore
 from pydantic_ai.usage import UsageLimits  # type: ignore
 
 from isaac.agent import models as model_registry
-from isaac.agent.ai_types import ToolRegister
 from isaac.agent.brain.prompt import SUBAGENT_INSTRUCTIONS, SYSTEM_PROMPT
 from isaac.agent.history_types import ChatMessage
 from isaac.agent.brain.plan_helpers import plan_from_planner_result
@@ -31,7 +27,6 @@ from isaac.agent.subagents.delegate_tools import (
     reset_delegate_tool_context,
     set_delegate_tool_context,
 )
-from isaac.agent.tools import register_tools as default_register_tools
 from isaac.agent.usage import normalize_usage
 from isaac.agent.oauth.code_assist.prompt import compose_code_assist_user_prompt
 from isaac.log_utils import log_context as log_ctx, log_event
@@ -54,11 +49,9 @@ class PromptHandler:
         self,
         env: PromptEnv,
         *,
-        register_tools: ToolRegister | None = None,
         runner_factory: RunnerFactory | None = None,
     ) -> None:
         self.env = env
-        self._register_tools = register_tools or default_register_tools
         self._runner_factory = runner_factory
         self._prompt_runner = PromptRunner(env)
         self._sessions: Dict[str, SessionState] = {}
@@ -81,7 +74,6 @@ class PromptHandler:
             env=self.env,
             session_id=session_id,
             state=state,
-            register_tools=self._register_tools,
             toolsets=toolsets,
             system_prompt=system_prompt,
             runner_factory=self._runner_factory,
@@ -99,7 +91,6 @@ class PromptHandler:
             session_id=session_id,
             state=state,
             model_id=model_id,
-            register_tools=self._register_tools,
             toolsets=toolsets,
             system_prompt=system_prompt,
             runner_factory=self._runner_factory,
@@ -123,7 +114,6 @@ class PromptHandler:
                 env=self.env,
                 session_id=session_id,
                 state=state,
-                register_tools=self._register_tools,
                 toolsets=None,
                 runner_factory=self._runner_factory,
             )
@@ -188,8 +178,7 @@ class PromptHandler:
         async def _on_event(event: Any) -> bool:
             result_part = getattr(event, "result", None) or getattr(event, "part", None)
             is_planner_result = (
-                isinstance(event, FunctionToolResultEvent)
-                and getattr(result_part, "tool_name", "") == "planner"
+                isinstance(event, FunctionToolResultEvent) and getattr(result_part, "tool_name", "") == "planner"
             )
             if is_planner_result and plan_progress is not None:
                 saved_plan = plan_progress.get("plan")

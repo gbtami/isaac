@@ -21,7 +21,7 @@ class _StreamRunner:
 
         return _decorator
 
-    async def run_stream_events(self, prompt: str, message_history=None):
+    async def run_stream_events(self, prompt: str, message_history=None, **_: object):
         _ = prompt, message_history
 
         async def _gen():
@@ -66,7 +66,7 @@ async def test_acp_prompt_update_sequence(monkeypatch, tmp_path) -> None:
 
     from isaac.agent.brain import session_ops
 
-    def _build(_model_id: str, _register: object, toolsets=None, **kwargs: object):
+    def _build(_model_id: str, *, toolsets=None, **kwargs: object):
         _ = toolsets, kwargs
         return runner
 

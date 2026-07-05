@@ -9,7 +9,7 @@ from acp.schema import AllowedOutcome
 from unittest.mock import AsyncMock
 
 from isaac.agent.tools.fetch_url import fetch_url
-from isaac.agent.tools import get_tools, register_tools
+from isaac.agent.tools import build_isaac_toolset, get_tools
 from isaac.agent.tools.apply_patch import apply_patch
 from isaac.agent.tools.code_search import code_search
 from isaac.agent.tools.edit_file import edit_file
@@ -173,11 +173,14 @@ async def test_model_tool_call_requests_permission(monkeypatch: pytest.MonkeyPat
     monkeypatch.setitem(TOOL_HANDLERS, "run_command", fake_run_command)
 
     model = TestModel(call_tools=["run_command"], custom_output_text="done")
-    ai_runner = PydanticAgent(model, output_type=[str, DeferredToolRequests])
-    register_tools(ai_runner)
+    ai_runner = PydanticAgent(
+        model,
+        output_type=[str, DeferredToolRequests],
+        toolsets=[build_isaac_toolset()],
+    )
     from isaac.agent.brain import session_ops
 
-    def _build(_model_id: str, _register: object, toolsets=None, **kwargs: object) -> object:
+    def _build(_model_id: str, *, toolsets=None, **kwargs: object) -> object:
         _ = toolsets
         return ai_runner
 
@@ -214,11 +217,14 @@ async def test_model_run_command_denied_blocks_execution(monkeypatch: pytest.Mon
     monkeypatch.setitem(TOOL_HANDLERS, "run_command", fake_run_command)
 
     model = TestModel(call_tools=["run_command"], custom_output_text="done")
-    ai_runner = PydanticAgent(model, output_type=[str, DeferredToolRequests])
-    register_tools(ai_runner)
+    ai_runner = PydanticAgent(
+        model,
+        output_type=[str, DeferredToolRequests],
+        toolsets=[build_isaac_toolset()],
+    )
     from isaac.agent.brain import session_ops
 
-    def _build(_model_id: str, _register: object, toolsets=None, **kwargs: object) -> object:
+    def _build(_model_id: str, *, toolsets=None, **kwargs: object) -> object:
         _ = toolsets
         return ai_runner
 

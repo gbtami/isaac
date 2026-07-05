@@ -2,8 +2,8 @@
 
 The goal of this module is to keep Isaac-specific behaviour at Pydantic AI's
 extension boundary instead of threading ad-hoc callbacks through every runner.
-Capabilities are deliberately assembled as small, composable built-ins so we can
-replace more of the legacy prompt-handler glue incrementally.
+Capabilities are deliberately assembled as small, composable built-ins so ACP
+runtime policy stays at Pydantic AI's extension boundary.
 """
 
 from __future__ import annotations
@@ -87,10 +87,9 @@ async def build_acp_deferred_tool_results(
 ) -> DeferredToolResults | None:
     """Resolve Pydantic AI deferred approval requests through Isaac's ACP policy.
 
-    This helper is shared by the modern inline capability path and the legacy
-    fallback path in ``stream_with_runner``. Keeping one implementation avoids
-    diverging approval semantics while the old deferred-output resume loop is
-    still present for compatibility with test doubles and older runners.
+    This helper is shared by the inline capability path and the direct
+    deferred-output safety path in ``stream_with_runner`` so approval semantics
+    stay identical whichever event shape a runner emits.
     """
 
     approvals_in = list(getattr(requests, "approvals", []) or [])

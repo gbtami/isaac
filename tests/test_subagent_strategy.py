@@ -28,7 +28,7 @@ from isaac.agent.brain.plan_schema import PlanStep, PlanSteps
 from isaac.agent.brain import compaction as compaction_utils
 from isaac.agent.brain.session_state import SessionState
 from pydantic_ai.run import AgentRunResult, AgentRunResultEvent  # type: ignore
-from isaac.agent.tools import register_tools
+from isaac.agent.tools import build_isaac_toolset
 from isaac.agent.subagents.delegate_tools import (
     DelegateToolContext,
     reset_delegate_tool_context,
@@ -50,7 +50,7 @@ class _FakeRunner:
 
         return _decorator
 
-    async def run_stream_events(self, prompt: str, message_history=None):
+    async def run_stream_events(self, prompt: str, message_history=None, **_: object):
         self.prompts.append(prompt)
 
         async def _gen():
@@ -80,7 +80,7 @@ async def test_subagent_planner_plan_updates(tmp_path, monkeypatch):
 
     from isaac.agent.brain import session_ops
 
-    def _build(_model_id: str, _register: object, toolsets=None, **kwargs: object):
+    def _build(_model_id: str, *, toolsets=None, **kwargs: object):
         _ = toolsets
         return runner
 
@@ -120,7 +120,7 @@ async def test_subagent_plan_refreshes_each_prompt(tmp_path, monkeypatch):
 
     from isaac.agent.brain import session_ops
 
-    def _build(_model_id: str, _register: object, toolsets=None, **kwargs: object):
+    def _build(_model_id: str, *, toolsets=None, **kwargs: object):
         _ = toolsets
         return runner
 
@@ -265,7 +265,7 @@ async def test_subagent_records_tool_history(tmp_path, monkeypatch):
 
             return _decorator
 
-        async def run_stream_events(self, prompt: str, message_history=None):
+        async def run_stream_events(self, prompt: str, message_history=None, **_: object):
             _ = prompt, message_history
             part = ToolCallPart(
                 tool_name="run_command",
@@ -289,7 +289,7 @@ async def test_subagent_records_tool_history(tmp_path, monkeypatch):
 
     from isaac.agent.brain import session_ops
 
-    def _build(_model_id: str, _register: object, toolsets=None, **kwargs: object):
+    def _build(_model_id: str, *, toolsets=None, **kwargs: object):
         _ = toolsets
         return runner
 
@@ -443,15 +443,13 @@ async def test_delegate_tool_carryover_acp_integration(monkeypatch, tmp_path):
 
     def _build_delegate_agent(spec, *_, **__):
         model = PromptAwareModel(call_tools=[])
-        agent = PydanticAgent(
+        return PydanticAgent(
             model,
-            toolsets=(),
+            toolsets=[build_isaac_toolset(tool_names=delegate_mod._expand_tool_names(spec))],
             system_prompt=spec.system_prompt or "test",
             instructions=spec.instructions,
             output_type=[spec.output_type or str, DeferredToolRequests],
         )
-        register_tools(agent, tool_names=delegate_mod._expand_tool_names(spec))
-        return agent
 
     monkeypatch.setattr(delegate_mod, "_build_delegate_agent", _build_delegate_agent)
 
@@ -473,8 +471,8 @@ async def test_delegate_tool_carryover_acp_integration(monkeypatch, tmp_path):
             custom_output_text="done",
         ),
         output_type=[str, DeferredToolRequests],
+        toolsets=[build_isaac_toolset()],
     )
-    register_tools(runner_first)
     agent._prompt_handler.set_session_runner(session.session_id, runner_first)  # type: ignore[attr-defined]
 
     await agent.prompt(prompt=[text_block("first")], session_id=session.session_id)
@@ -519,8 +517,8 @@ async def test_delegate_tool_carryover_acp_integration(monkeypatch, tmp_path):
             custom_output_text="done",
         ),
         output_type=[str, DeferredToolRequests],
+        toolsets=[build_isaac_toolset()],
     )
-    register_tools(runner_second)
     agent._prompt_handler.set_session_runner(session.session_id, runner_second)  # type: ignore[attr-defined]
 
     await agent.prompt(prompt=[text_block("second")], session_id=session.session_id)

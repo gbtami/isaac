@@ -104,14 +104,14 @@ sequenceDiagram
 ## Tools
 
 Tools are split into registry, schema, execution, and capability/toolset assembly to keep
-protocol exposure and runtime execution independent and reusable. Production agents attach
-Isaac tools through Pydantic AI capabilities; `register_tools()` remains as a compatibility
-shim for tests and custom runner factories.
+protocol exposure and runtime execution independent and reusable. Agents attach
+Isaac tools through Pydantic AI capabilities or constructor `toolsets`; there is no
+post-construction registration path.
 
 - Registry/metadata: `src/isaac/agent/tools/registry.py`
 - Schema generation: `src/isaac/agent/tools/schema.py`
 - Execution/validation: `src/isaac/agent/tools/executor.py`
-- Capability/toolset assembly plus legacy compatibility registration: `src/isaac/agent/tools/registration.py`
+- Capability/toolset assembly: `src/isaac/agent/tools/registration.py`
 
 ## Delegate Subagents
 

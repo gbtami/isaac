@@ -7,10 +7,7 @@ from dataclasses import dataclass
 import logging
 from typing import Any, Awaitable, Callable, Dict
 
-try:
-    from pydantic_ai import FunctionToolCallEvent, FunctionToolResultEvent  # type: ignore
-except ImportError:  # pragma: no cover - older pydantic-ai compatibility
-    from pydantic_ai.messages import FunctionToolCallEvent, FunctionToolResultEvent  # type: ignore
+from pydantic_ai import FunctionToolCallEvent, FunctionToolResultEvent  # type: ignore
 from pydantic_ai.messages import RetryPromptPart
 from isaac.agent.history_types import ChatMessage
 from isaac.agent.brain.events import ToolCallFinish, ToolCallStart
@@ -75,9 +72,7 @@ class PromptRunner:
             if isinstance(event, FunctionToolCallEvent):
                 tool_name = getattr(event.part, "tool_name", None) or ""
                 raw_args = getattr(event.part, "args", None)
-                tool_call_id = str(
-                    getattr(event, "tool_call_id", "") or getattr(event.part, "tool_call_id", "") or ""
-                )
+                tool_call_id = str(getattr(event, "tool_call_id", "") or getattr(event.part, "tool_call_id", "") or "")
                 args = coerce_tool_args(raw_args)
                 log_event(
                     logger,
@@ -101,9 +96,7 @@ class PromptRunner:
 
             if isinstance(event, FunctionToolResultEvent):
                 result_part = getattr(event, "result", None) or getattr(event, "part", None)
-                tool_call_id = str(
-                    getattr(event, "tool_call_id", "") or getattr(result_part, "tool_call_id", "") or ""
-                )
+                tool_call_id = str(getattr(event, "tool_call_id", "") or getattr(result_part, "tool_call_id", "") or "")
                 call_input = tool_call_inputs.pop(tool_call_id, {})
                 tool_name = getattr(result_part, "tool_name", None) or ""
                 content = getattr(result_part, "content", None)

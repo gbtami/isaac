@@ -16,7 +16,14 @@ from typing import Any, Callable, Iterable
 import asyncio.subprocess as aio_subprocess
 from acp import PROTOCOL_VERSION, RequestError
 from acp.core import connect_to_agent
-from acp.schema import AuthMethodAgent, EnvVarAuthMethod, TerminalAuthMethod, ClientCapabilities, FileSystemCapabilities, Implementation
+from acp.schema import (
+    AuthMethodAgent,
+    EnvVarAuthMethod,
+    TerminalAuthMethod,
+    ClientCapabilities,
+    FileSystemCapabilities,
+    Implementation,
+)
 
 from isaac.acp_runtime import ACP_STDIO_BUFFER_LIMIT_BYTES
 from isaac.client.acp_client import ACPClient, apply_session_config_options

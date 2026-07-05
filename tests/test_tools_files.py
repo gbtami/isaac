@@ -13,7 +13,7 @@ from pydantic_ai import Agent as PydanticAgent  # type: ignore
 from pydantic_ai import DeferredToolRequests  # type: ignore
 from pydantic_ai.models.test import TestModel  # type: ignore
 
-from isaac.agent.tools import register_tools
+from isaac.agent.tools import build_isaac_toolset
 from isaac.agent.tools.apply_patch import apply_patch
 from isaac.agent.tools.edit_file import edit_file
 from isaac.agent.tools.list_files import list_files
@@ -52,8 +52,8 @@ async def test_tool_list_files_sends_progress(tmp_path: Path):
             custom_output_text="done",
         ),
         output_type=[str, DeferredToolRequests],
+        toolsets=[build_isaac_toolset()],
     )
-    register_tools(runner)
     agent._prompt_handler.set_session_runner(session.session_id, runner)  # type: ignore[attr-defined]
 
     response = await agent.prompt(prompt=[text_block("list files")], session_id=session.session_id)
@@ -95,8 +95,8 @@ async def test_tool_read_file_returns_content(tmp_path: Path):
             custom_output_text="done",
         ),
         output_type=[str, DeferredToolRequests],
+        toolsets=[build_isaac_toolset()],
     )
-    register_tools(runner)
     agent._prompt_handler.set_session_runner(session.session_id, runner)  # type: ignore[attr-defined]
 
     response = await agent.prompt(prompt=[text_block("read file")], session_id=session.session_id)
@@ -129,8 +129,8 @@ async def test_tool_run_command_executes(tmp_path: Path):
             custom_output_text="done",
         ),
         output_type=[str, DeferredToolRequests],
+        toolsets=[build_isaac_toolset()],
     )
-    register_tools(runner)
     agent._prompt_handler.set_session_runner(session.session_id, runner)  # type: ignore[attr-defined]
 
     response = await agent.prompt(prompt=[text_block("run command")], session_id=session.session_id)
@@ -231,8 +231,8 @@ async def test_tool_code_search(tmp_path: Path):
             custom_output_text="done",
         ),
         output_type=[str, DeferredToolRequests],
+        toolsets=[build_isaac_toolset()],
     )
-    register_tools(runner)
     agent._prompt_handler.set_session_runner(session.session_id, runner)  # type: ignore[attr-defined]
 
     response = await agent.prompt(prompt=[text_block("search hello")], session_id=session.session_id)
