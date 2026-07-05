@@ -171,10 +171,13 @@ async def test_delegate_tool_isolation_default(monkeypatch, tool_name: str):
         prompt: str,
         *_: object,
         history: list[Any] | None = None,
+        on_result: Any = None,
         **__: object,
     ):
         captured["prompt"] = prompt
         captured["history"] = history
+        if tool_name == "planner" and on_result is not None:
+            await on_result(PlanSteps(entries=[PlanStep(content="ok")]))
         return "ok", None
 
     class RunnerStub:
@@ -195,7 +198,11 @@ async def test_delegate_tool_isolation_default(monkeypatch, tool_name: str):
     result = await tool(None, task="check isolation")
 
     assert result["error"] is None
-    assert result["content"] == "ok"
+    if tool_name == "planner":
+        assert isinstance(result["content"], PlanSteps)
+        assert result["content"].entries[0].content == "ok"
+    else:
+        assert result["content"] == "ok"
     assert captured["history"] is None
     assert "check isolation" in captured["prompt"]
 
@@ -563,6 +570,7 @@ async def test_delegate_tool_emits_thought_without_text_progress(monkeypatch):
             on_text: Any,
             on_thought: Any,
             _cancel_event: Any,
+            on_result: Any = None,
             **__: object,
         ):
             assert on_thought is not None
@@ -570,7 +578,9 @@ async def test_delegate_tool_emits_thought_without_text_progress(monkeypatch):
             await on_thought("delegate thinking two")
             await on_text("streaming ")
             await on_text("output")
-            return '{"entries":[{"content":"step","priority":"high"}]}', None
+            if on_result is not None:
+                await on_result(PlanSteps(entries=[PlanStep(content="step", priority="high")]))
+            return "planner output", None
 
         monkeypatch.setattr("isaac.agent.subagents.delegate_tools.stream_with_runner", fake_stream_with_runner)
         monkeypatch.setattr(
@@ -582,6 +592,7 @@ async def test_delegate_tool_emits_thought_without_text_progress(monkeypatch):
 
         result = await planner(SimpleNamespace(tool_call_id="tc-delegate"), task="plan it")
         assert result["error"] is None
+        assert isinstance(result["content"], PlanSteps)
     finally:
         reset_delegate_tool_context(ctx)
 

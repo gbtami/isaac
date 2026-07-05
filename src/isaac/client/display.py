@@ -3,8 +3,6 @@
 from __future__ import annotations
 
 from typing import Any, Iterable
-import ast
-import contextlib
 from io import StringIO
 from threading import Lock
 
@@ -117,17 +115,7 @@ def print_plan(entries: Iterable[Any]) -> None:
     }
 
     def _format_content(raw: Any) -> str:
-        if not isinstance(raw, str):
-            return str(raw)
-        text = raw.strip()
-        if text.startswith("steps="):
-            text = text.split("=", 1)[1].strip()
-        if text.startswith("[") and text.endswith("]"):
-            with contextlib.suppress(Exception):
-                parsed = ast.literal_eval(text)
-                if isinstance(parsed, list):
-                    return "\n".join(f"- {str(item).strip()}" for item in parsed if str(item).strip())
-        return text
+        return raw.strip() if isinstance(raw, str) else str(raw)
 
     for entry in entries:
         status = getattr(entry, "status", "pending") or "pending"

@@ -54,7 +54,7 @@ To test isaac with other ACP clients after code changes without bumping the vers
   - `acp_agent.py`: ACP-facing agent composed from ACP handler mixins.
   - `brain/prompt_handler.py`: Prompt handling with plan/tool integration; assistant text is emitted once at end-of-turn (tool/plan/thought updates may still stream).
   - `brain/prompt_runner.py`: Stream handling and tool call updates.
-  - `brain/plan_parser.py`: Plan parsing utilities for converting model text to ACP plan updates.
+  - `brain/plan_schema.py`: Structured planner output models used for ACP plan updates.
   - `brain/plan_updates.py`: Plan update helpers (status updates, stable IDs).
   - `brain/agent_factory.py`: Model runner creation for prompt handling.
   - `brain/tool_args.py`: Tool argument coercion for model calls.
