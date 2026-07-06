@@ -3,10 +3,10 @@ from __future__ import annotations
 import asyncio
 import fnmatch
 import re
-from pathlib import Path
 from typing import Optional
 
 from isaac.agent.ai_types import ToolContext
+from isaac.agent.tools.safety import BinaryFileError, PathAccessError, ensure_text_file, resolve_workspace_path
 
 
 async def code_search(
@@ -19,8 +19,16 @@ async def code_search(
     cwd: Optional[str] = None,
 ) -> dict:
     """Search for a pattern in code using ripgrep with a Python fallback."""
-    base = Path(cwd or Path.cwd())
-    path = (base / directory) if not Path(directory).is_absolute() else Path(directory)
+
+    _ = ctx
+    try:
+        path = resolve_workspace_path(cwd, directory)
+    except PathAccessError as exc:
+        return {
+            "content": None,
+            "error": str(exc),
+            "returncode": -1,
+        }
     if not path.exists():
         return {
             "content": None,
@@ -30,7 +38,7 @@ async def code_search(
     if not path.is_dir():
         return {"content": None, "error": f"'{directory}' is not a directory.", "returncode": -1}
 
-    cmd = ["rg", "--line-number", "--color", "never"]
+    cmd = ["rg", "--line-number", "--color", "never", "--no-messages"]
     if not case_sensitive:
         cmd.append("-i")
     if glob:
@@ -58,11 +66,12 @@ async def code_search(
             if glob and not fnmatch.fnmatch(file.name, glob):
                 continue
             try:
-                for idx, line in enumerate(file.read_text(encoding="utf-8", errors="ignore").splitlines(), start=1):
+                ensure_text_file(file)
+                for idx, line in enumerate(file.read_text(encoding="utf-8").splitlines(), start=1):
                     if regex.search(line):
                         rel = file.relative_to(path)
                         matches.append(f"{rel}:{idx}:{line}")
-            except Exception:
+            except (BinaryFileError, UnicodeDecodeError, OSError):
                 continue
         return {"content": "\n".join(matches), "error": None, "returncode": 0}
     except asyncio.TimeoutError:

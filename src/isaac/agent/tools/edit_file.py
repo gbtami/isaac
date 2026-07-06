@@ -1,28 +1,17 @@
 from __future__ import annotations
 
 import difflib
-from pathlib import Path
 from typing import Optional
 
 from isaac.agent.ai_types import ToolContext
-
-
-def _resolve(base: Optional[str], target: str, *, allow_outside: bool) -> Path | None:
-    p = Path(target)
-    base_path = Path(base) if base else None
-    if base_path and base_path.is_absolute():
-        base_path = base_path.resolve()
-    if p.is_absolute():
-        resolved = p
-    else:
-        resolved = (base_path or Path.cwd()) / p
-    resolved = resolved.resolve()
-    if base_path and not allow_outside:
-        try:
-            resolved.relative_to(base_path)
-        except ValueError:
-            return None
-    return resolved
+from isaac.agent.tools.safety import (
+    BinaryFileError,
+    PathAccessError,
+    ProtectedPathError,
+    ensure_text_target,
+    resolve_workspace_path,
+    sha256_file,
+)
 
 
 async def edit_file(
@@ -34,17 +23,12 @@ async def edit_file(
     start: Optional[int] = None,
     end: Optional[int] = None,
     allow_outside: bool = False,
+    expected_sha256: Optional[str] = None,
     **_: object,
 ) -> dict:
-    """Overwrite a file with new content.
+    """Overwrite a text file with new content."""
 
-    Args:
-        path: Path to the file to edit.
-        content: Complete replacement content for the file (must be non-empty).
-        create: Whether to create the file if it does not exist.
-        start: Optional starting line (1-based) for partial replacement.
-        end: Optional ending line (1-based, inclusive) for partial replacement.
-    """
+    _ = ctx
     if not path:
         return {
             "path": path,
@@ -52,12 +36,14 @@ async def edit_file(
             "error": "Missing required arguments: path",
             "returncode": -1,
         }
-    resolved = _resolve(cwd, path, allow_outside=allow_outside)
-    if resolved is None:
+    try:
+        resolved = resolve_workspace_path(cwd, path, allow_outside=allow_outside)
+        ensure_text_target(resolved, cwd)
+    except (PathAccessError, ProtectedPathError, BinaryFileError) as exc:
         return {
             "path": path,
             "content": None,
-            "error": "Path is outside allowed working directory",
+            "error": str(exc),
             "returncode": -1,
         }
     if resolved.exists() and resolved.is_dir():
@@ -68,11 +54,21 @@ async def edit_file(
             "returncode": -1,
         }
     old_text = ""
+    old_hash = sha256_file(resolved) if resolved.exists() else None
     if resolved.exists():
         try:
             old_text = resolved.read_text(encoding="utf-8")
         except Exception:
             old_text = ""
+
+    if expected_sha256 is not None and old_hash != expected_sha256:
+        return {
+            "path": path,
+            "content": "",
+            "error": "File changed since it was read; expected_sha256 does not match",
+            "returncode": -1,
+            "sha256": old_hash,
+        }
 
     if not resolved.exists() and not create:
         return {
@@ -108,6 +104,7 @@ async def edit_file(
             new_text = content
 
         resolved.write_text(new_text, encoding="utf-8")
+        new_hash = sha256_file(resolved)
         old_lines = old_text.splitlines(keepends=True)
         new_lines = new_text.splitlines(keepends=True)
         diff = "".join(
@@ -131,6 +128,8 @@ async def edit_file(
             "diff": diff,
             "new_text": new_text,
             "old_text": old_text,
+            "old_sha256": old_hash,
+            "sha256": new_hash,
             "error": None,
             "returncode": 0,
         }

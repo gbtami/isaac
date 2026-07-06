@@ -116,6 +116,18 @@ no post-construction registration path.
 - Argument models for direct ACP calls: `src/isaac/agent/tools/args.py`
 - Execution/validation: `src/isaac/agent/tools/executor.py`
 - Capability/toolset assembly: `src/isaac/agent/tools/registration.py`
+- Shared safety helpers: `src/isaac/agent/tools/safety.py`
+
+Tool hardening keeps the public Isaac tool contract stable while borrowing the
+most useful Harness ideas internally. Filesystem tools resolve paths relative to
+the session cwd, block symlink escapes, refuse binary content in text tools, and
+protect high-risk write targets such as `.git`, `.env*`, and private-key-looking
+files. Mutating file tools return SHA-256 hashes and accept optional
+`expected_sha256` values for optimistic stale-write checks. `run_command` keeps
+ACP approval semantics and adds lightweight shell policy via built-in
+catastrophic command blockers plus optional `ISAAC_SHELL_ALLOWLIST` /
+`ISAAC_SHELL_DENYLIST` regexes. These checks are defense-in-depth, not a
+sandbox.
 
 ## Delegate Subagents
 

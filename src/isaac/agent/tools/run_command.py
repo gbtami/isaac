@@ -1,7 +1,10 @@
+from __future__ import annotations
+
 import asyncio
 from typing import Optional
 
 from isaac.agent.ai_types import ToolContext
+from isaac.agent.tools.safety import PathAccessError, ShellCommandDenied, resolve_command_cwd, validate_shell_command
 
 
 async def run_command(
@@ -11,16 +14,24 @@ async def run_command(
     timeout: Optional[float] = None,
 ) -> dict:
     """Execute a shell command and capture its output."""
+
     if command == "" and isinstance(ctx, str):
         command = ctx
         ctx = None
+    _ = ctx
+
+    try:
+        validate_shell_command(command)
+        resolved_cwd = resolve_command_cwd(None, cwd) if cwd else None
+    except (ShellCommandDenied, PathAccessError) as exc:
+        return {"content": "", "error": str(exc), "returncode": -1}
 
     try:
         proc = await asyncio.create_subprocess_shell(
             command,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
-            cwd=cwd,
+            cwd=str(resolved_cwd) if resolved_cwd else None,
         )
         try:
             stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=timeout)

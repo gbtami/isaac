@@ -35,10 +35,12 @@ class ReadFileArgs(BaseModel):
     start: int | None = Field(
         None,
         description="Starting line number (1-based)",
+        ge=1,
     )
     lines: int | None = Field(
         None,
         description="Number of lines to read",
+        ge=1,
     )
 
 
@@ -57,6 +59,7 @@ class RunCommandArgs(BaseModel):
     timeout: float | None = Field(
         None,
         description="Timeout in seconds",
+        gt=0,
     )
 
 
@@ -80,6 +83,10 @@ class EditFileArgs(BaseModel):
         True,
         description="Create the file if it does not exist (default: true).",
     )
+    expected_sha256: str | None = Field(
+        None,
+        description="Optional SHA-256 hash that the existing file must match before writing.",
+    )
 
 
 class ApplyPatchArgs(BaseModel):
@@ -98,6 +105,11 @@ class ApplyPatchArgs(BaseModel):
     strip: int | None = Field(
         None,
         description="Strip leading path components (patch -p)",
+        ge=0,
+    )
+    expected_sha256: str | None = Field(
+        None,
+        description="Optional SHA-256 hash that the existing file must match before patching.",
     )
 
 
@@ -112,10 +124,12 @@ class FileSummaryArgs(BaseModel):
     head_lines: int | None = Field(
         20,
         description="Number of head lines to include",
+        ge=0,
     )
     tail_lines: int | None = Field(
         20,
         description="Number of tail lines to include",
+        ge=0,
     )
 
 
@@ -142,6 +156,7 @@ class CodeSearchArgs(BaseModel):
     timeout: float | None = Field(
         None,
         description="Timeout in seconds",
+        gt=0,
     )
 
 

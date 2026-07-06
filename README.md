@@ -57,12 +57,15 @@ Common variables:
 
 - `OPENROUTER_API_KEY` (or provider-specific model keys)
 - `ISAAC_ACP_STDIO_BUFFER_LIMIT_BYTES` (optional ACP stdio buffer override)
+- `ISAAC_SHELL_ALLOWLIST` (optional comma/newline-separated regex allowlist for `run_command`)
+- `ISAAC_SHELL_DENYLIST` (optional comma/newline-separated regex denylist for `run_command`)
 
 ## Features
 
 - ACP 0.11 session config options for mode/model selection
 - Pydantic AI 2.x capability-based agent assembly
 - Prompt turns, tool calls, filesystem and terminal ACP flows
+- Workspace-contained filesystem tools with binary-file guards, protected write paths, and optional SHA-256 write preconditions
 - ACP-backed approval flow for `run_command` with an experimental Pydantic AI capability bridge
 - Optional Pydantic AI Harness CodeMode experiments via `ISAAC_HARNESS_CODE_MODE=1` and the `harness` extra
 - Interactive client slash commands (`/mode`, `/model`, `/status`, `/usage`)

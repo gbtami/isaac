@@ -24,6 +24,7 @@ from acp import (
 )
 
 from isaac.agent.fs import resolve_path_for_session
+from isaac.agent.tools.safety import PathAccessError, validate_shell_command
 from isaac.agent.terminal_common import TerminalState, build_exit_status, read_nonblocking
 
 
@@ -37,7 +38,11 @@ async def create_terminal(
     import uuid
 
     terminal_id = str(uuid.uuid4())
-    cwd = resolve_path_for_session(session_cwds, params.session_id, params.cwd) if params.cwd else Path.cwd()
+    cwd = resolve_path_for_session(session_cwds, params.session_id, params.cwd or ".")
+    if not cwd.exists() or not cwd.is_dir():
+        raise PathAccessError(f"Working directory is not usable: {params.cwd or '.'}")
+
+    validate_shell_command(" ".join([params.command, *(params.args or [])]))
 
     env = os.environ.copy()
     if params.env:

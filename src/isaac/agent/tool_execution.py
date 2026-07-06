@@ -28,6 +28,7 @@ from isaac.agent.agent_terminal import (
     terminal_output,
 )
 from isaac.agent.tool_io import await_with_cancel, truncate_text, truncate_tool_output
+from isaac.agent.tools.safety import PathAccessError, ShellCommandDenied, resolve_command_cwd, validate_shell_command
 from isaac.agent.tools import run_tool
 from isaac.log_utils import log_context, log_event
 
@@ -145,6 +146,20 @@ async def execute_run_command_with_terminal(
     )
     await ctx.send_update(session_notification(session_id, start))
 
+    session_cwd = ctx.session_cwds.get(session_id, Path.cwd())
+    try:
+        validate_shell_command(command)
+        resolved_cwd = resolve_command_cwd(session_cwd, cwd_arg)
+    except (PathAccessError, ShellCommandDenied) as exc:
+        progress = tracker.progress(
+            external_id=tool_call_id,
+            status="failed",
+            raw_output={"content": None, "error": str(exc), "returncode": -1},
+            content=[tool_content(text_block(f"Command blocked: {exc}"))],
+        )
+        await ctx.send_update(session_notification(session_id, progress))
+        return
+
     # Request permission before executing shell commands (ask mode only).
     mode = ctx.session_modes.get(session_id, "ask")
     if mode == "ask":
@@ -180,7 +195,7 @@ async def execute_run_command_with_terminal(
                 session_id=session_id,
                 command="bash",
                 args=["-lc", command],
-                cwd=cwd_arg,
+                cwd=str(resolved_cwd),
                 output_byte_limit=ctx.terminal_output_limit,
             ),
         )

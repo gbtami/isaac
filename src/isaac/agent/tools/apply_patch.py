@@ -9,13 +9,14 @@ from pathlib import Path
 from typing import Optional
 
 from isaac.agent.ai_types import ToolContext
-
-
-def _resolve(base: Optional[str], target: str) -> Path:
-    p = Path(target)
-    if p.is_absolute():
-        return p
-    return Path(base or Path.cwd()) / p
+from isaac.agent.tools.safety import (
+    BinaryFileError,
+    PathAccessError,
+    ProtectedPathError,
+    ensure_text_target,
+    resolve_workspace_path,
+    sha256_file,
+)
 
 
 async def apply_patch(
@@ -24,22 +25,39 @@ async def apply_patch(
     patch: str = "",
     strip: Optional[int] = None,
     cwd: Optional[str] = None,
+    expected_sha256: Optional[str] = None,
     **_: object,
 ) -> dict:
-    """Apply a unified diff patch to a file using the `patch` command."""
-    resolved = _resolve(cwd, path)
+    """Apply a unified diff patch to a text file using the `patch` command."""
+
+    _ = ctx
+    try:
+        resolved = resolve_workspace_path(cwd, path)
+        ensure_text_target(resolved, cwd)
+    except (PathAccessError, ProtectedPathError, BinaryFileError) as exc:
+        return {"path": path, "content": "", "error": str(exc)}
+
     if not resolved.exists():
         return {"path": path, "content": "", "error": f"File not found: {path}"}
     try:
         old_text = resolved.read_text(encoding="utf-8")
     except Exception:
         old_text = ""
+    old_hash = sha256_file(resolved)
+    if expected_sha256 is not None and old_hash != expected_sha256:
+        return {
+            "path": path,
+            "content": "",
+            "error": "File changed since it was read; expected_sha256 does not match",
+            "sha256": old_hash,
+        }
 
     strip_val = str(strip if strip is not None else 0)
 
     async def _run_patch(patch_text: str) -> tuple[int, str, str]:
         try:
-            with tempfile.NamedTemporaryFile("w+", delete=False) as tmp:
+            tmp_path = ""
+            with tempfile.NamedTemporaryFile("w+", delete=False, encoding="utf-8") as tmp:
                 tmp.write(patch_text)
                 tmp.flush()
                 tmp_path = tmp.name
@@ -58,6 +76,9 @@ async def apply_patch(
             raise
         except Exception as exc:  # pragma: no cover - defensive
             return 1, "", str(exc)
+        finally:
+            if tmp_path:
+                Path(tmp_path).unlink(missing_ok=True)
 
         stdout_text = stdout.decode(errors="ignore") if stdout else ""
         stderr_text = stderr.decode(errors="ignore") if stderr else ""
@@ -82,6 +103,8 @@ async def apply_patch(
             "error": None,
             "new_text": new_text,
             "old_text": old_text,
+            "old_sha256": old_hash,
+            "sha256": sha256_file(resolved),
         }
     except FileNotFoundError:
         return {"path": path, "content": "", "error": "`patch` command not found"}

@@ -17,6 +17,9 @@ from isaac.agent.tools import build_isaac_tools_capability
 from isaac.agent.tools.apply_patch import apply_patch
 from isaac.agent.tools.edit_file import edit_file
 from isaac.agent.tools.list_files import list_files
+from isaac.agent.tools.read_file import read_file
+from isaac.agent.tools.run_command import run_command
+from isaac.agent.tools.safety import sha256_file
 from tests.utils import make_function_agent
 
 
@@ -362,3 +365,95 @@ async def test_file_system_read_write(tmp_path: Path):
     response = await agent.read_text_file(path="fs.txt", session_id=session.session_id, line=0, limit=10)
 
     assert response.content == content
+
+
+@pytest.mark.asyncio
+async def test_read_file_blocks_symlink_escape(tmp_path: Path):
+    workspace = tmp_path / "workspace"
+    outside = tmp_path / "outside"
+    workspace.mkdir()
+    outside.mkdir()
+    (outside / "secret.txt").write_text("secret", encoding="utf-8")
+    (workspace / "link").symlink_to(outside, target_is_directory=True)
+
+    result = await read_file(path="link/secret.txt", cwd=str(workspace))
+
+    assert result["error"] == "Path is outside allowed working directory"
+    assert result["content"] == ""
+
+
+@pytest.mark.asyncio
+async def test_list_files_hides_outside_symlink(tmp_path: Path):
+    workspace = tmp_path / "workspace"
+    outside = tmp_path / "outside"
+    workspace.mkdir()
+    outside.mkdir()
+    (outside / "secret.txt").write_text("secret", encoding="utf-8")
+    (workspace / "safe.txt").write_text("ok", encoding="utf-8")
+    (workspace / "outside-link").symlink_to(outside, target_is_directory=True)
+
+    result = await list_files(directory=".", recursive=False, cwd=str(workspace))
+
+    assert result["error"] is None
+    assert "safe.txt" in result["content"]
+    assert "outside-link" not in result["content"]
+
+
+@pytest.mark.asyncio
+async def test_edit_file_refuses_protected_paths(tmp_path: Path):
+    result = await edit_file(path=".env", content="TOKEN=secret\n", cwd=str(tmp_path))
+
+    assert result["error"]
+    assert "protected path" in result["error"]
+    assert not (tmp_path / ".env").exists()
+
+
+@pytest.mark.asyncio
+async def test_text_tools_refuse_binary_files(tmp_path: Path):
+    target = tmp_path / "image.bin"
+    target.write_bytes(b"abc\x00def")
+
+    read_result = await read_file(path="image.bin", cwd=str(tmp_path))
+    edit_result = await edit_file(path="image.bin", content="text", cwd=str(tmp_path))
+
+    assert "binary file" in read_result["error"]
+    assert "binary file" in edit_result["error"]
+    assert target.read_bytes() == b"abc\x00def"
+
+
+@pytest.mark.asyncio
+async def test_edit_file_expected_sha256_blocks_stale_write(tmp_path: Path):
+    target = tmp_path / "guarded.txt"
+    target.write_text("old\n", encoding="utf-8")
+    stale_hash = sha256_file(target)
+    target.write_text("changed\n", encoding="utf-8")
+
+    result = await edit_file(
+        path="guarded.txt",
+        content="new\n",
+        cwd=str(tmp_path),
+        expected_sha256=stale_hash,
+    )
+
+    assert result["error"] == "File changed since it was read; expected_sha256 does not match"
+    assert target.read_text(encoding="utf-8") == "changed\n"
+
+
+@pytest.mark.asyncio
+async def test_run_command_shell_policy_env_allowlist(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
+    monkeypatch.setenv("ISAAC_SHELL_ALLOWLIST", r"^echo\b")
+
+    allowed = await run_command(command="echo ok", cwd=str(tmp_path))
+    blocked = await run_command(command="python -V", cwd=str(tmp_path))
+
+    assert allowed["error"] is None
+    assert allowed["content"] == "ok"
+    assert blocked["error"] == "Command does not match ISAAC_SHELL_ALLOWLIST"
+
+
+@pytest.mark.asyncio
+async def test_run_command_blocks_catastrophic_patterns():
+    result = await run_command(command="rm -rf /")
+
+    assert result["returncode"] == -1
+    assert "catastrophic deny pattern" in result["error"]
