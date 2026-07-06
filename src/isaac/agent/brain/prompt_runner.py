@@ -137,7 +137,15 @@ class PromptRunner:
                     summary = tool_history_summary(tool_name, raw_output, status, raw_input=call_input)
                     if summary:
                         with contextlib.suppress(Exception):
-                            record_history({"role": "assistant", "content": summary})
+                            record_history(
+                                {
+                                    "role": "assistant",
+                                    "content": summary,
+                                    "source": "tool_summary",
+                                    "tool_name": tool_name,
+                                    "tool_kind": tool_kind(tool_name),
+                                }
+                            )
 
                 if plan_progress and plan_progress.get("plan") and not raw_output.get("error"):
                     entries = getattr(plan_progress["plan"], "entries", []) or []

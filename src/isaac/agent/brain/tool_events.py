@@ -61,16 +61,35 @@ def tool_history_summary(
         return _lines(f"Updated file{path_str} [{status}]", detail)
     if tool_name == "read_file":
         path = raw_output.get("path") or (raw_input or {}).get("path")
+        line_hint = ""
+        if raw_input:
+            start = raw_input.get("start")
+            lines = raw_input.get("lines")
+            if start is not None and lines is not None:
+                try:
+                    line_hint = f" lines {start}-{int(start) + int(lines) - 1}"
+                except (TypeError, ValueError):
+                    line_hint = f" from line {start}"
+            elif start is not None:
+                line_hint = f" from line {start}"
+        sha = raw_output.get("sha256")
+        sha_line = f"SHA256: {sha}" if sha else ""
+        excerpt = _truncate(raw_output.get("content") or "", 600)
+        detail = _lines(sha_line, f"Excerpt:\n{excerpt}" if excerpt else "")
         if path:
-            return f"Read file {path} [{status}]"
+            return _lines(f"Read file {path}{line_hint} [{status}]", detail)
     if tool_name == "list_files":
         root = raw_output.get("directory") or raw_output.get("path") or (raw_input or {}).get("directory")
+        listing = _truncate(raw_output.get("content") or "", 900)
+        detail = f"Entries:\n{listing}" if listing else ""
         if root:
-            return f"Listed files in {root} [{status}]"
+            return _lines(f"Listed files in {root} [{status}]", detail)
     if tool_name == "file_summary":
         path = raw_output.get("path") or (raw_input or {}).get("path")
+        summary = _truncate(raw_output.get("content") or "", 1000)
+        detail = f"Summary:\n{summary}" if summary else ""
         if path:
-            return f"Summarized file {path} [{status}]"
+            return _lines(f"Summarized file {path} [{status}]", detail)
     if is_delegate_tool(tool_name):
         task = raw_output.get("task") or (raw_input or {}).get("task")
         task_str = f": {task}" if task else ""
@@ -80,15 +99,19 @@ def tool_history_summary(
     if tool_name == "code_search":
         pattern = raw_output.get("pattern") or (raw_input or {}).get("pattern")
         directory = raw_output.get("directory") or (raw_input or {}).get("directory")
+        matches = _truncate(raw_output.get("content") or "", 1000)
         if pattern:
             where = f" in {directory}" if directory else ""
-            return f"Searched for '{pattern}'{where} [{status}]"
+            detail = f"Matches:\n{matches}" if matches else ""
+            return _lines(f"Searched for '{pattern}'{where} [{status}]", detail)
     if tool_name == "fetch_url":
         fetched = raw_output.get("url") or raw_output.get("source") or raw_output.get("request_url")
         status_code = raw_output.get("status_code")
-        detail = f" ({status_code})" if status_code else ""
+        status_detail = f" ({status_code})" if status_code else ""
+        content_detail = _truncate(raw_output.get("content") or "", 900)
+        detail = f"Content:\n{content_detail}" if content_detail else ""
         if fetched:
-            return f"Fetched URL {fetched}{detail} [{status}]"
+            return _lines(f"Fetched URL {fetched}{status_detail} [{status}]", detail)
     if tool_name:
         return f"{summary_prefix}"
     if content:
@@ -97,11 +120,20 @@ def tool_history_summary(
 
 
 def should_record_tool_history(tool_name: str) -> bool:
-    """Keep history focused on state-changing actions and delegate outputs."""
+    """Return True when a compact tool observation should enter brain history."""
 
     if is_delegate_tool(tool_name):
         return True
-    return tool_name in {"edit_file", "apply_patch", "run_command"}
+    return tool_name in {
+        "edit_file",
+        "apply_patch",
+        "run_command",
+        "read_file",
+        "list_files",
+        "file_summary",
+        "code_search",
+        "fetch_url",
+    }
 
 
 def tool_kind(tool_name: str) -> str:

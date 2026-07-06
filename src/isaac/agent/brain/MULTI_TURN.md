@@ -33,7 +33,12 @@ Where History Lives
 Prompt Assembly
 ---------------
 
-- The model prompt history comes from `SessionState.history`.
+- The raw continuity log comes from `SessionState.history`.
+- Before each model call, Isaac builds prompt history with `select_context_history()`
+  instead of taking a fixed tail of recent messages. The selector keeps the
+  recent conversational tail for coherence, but also preserves older
+  coding-critical facts such as compaction checkpoints, file edits, command/test
+  results, delegate outputs, and relevant read/search observations.
 - Before sending to the model, Isaac injects a short system hint listing recent
   files touched (most recent last). This resolves ambiguous follow-ups such as
   "split it" by anchoring on the last edited file.
@@ -43,13 +48,17 @@ Prompt Assembly
 Tool Call Context and History
 -----------------------------
 
-- The stream event handler records tool results and produces a tool summary that
-  is appended to `SessionState.history`.
+- The stream event handler records tool results and produces a compact tool
+  observation that is appended to `SessionState.history` with metadata such as
+  `source=tool_summary`, `tool_name`, and `tool_kind`.
 - Summaries include concrete data:
   - `run_command`: command, cwd, and truncated stdout/stderr.
   - `edit_file`/`apply_patch`: path + diff or summary.
+  - `read_file`/`file_summary`: path, hash when available, and a bounded excerpt.
+  - `list_files`/`code_search`/`fetch_url`: query/root and bounded results.
   - delegate tools: task + summary.
-- This keeps the model aware of what changed without forcing it to re-read files.
+- This keeps the model aware of what changed or was learned without forcing it to
+  re-read files after every follow-up.
 
 Tool Call Normalization
 -----------------------
@@ -133,7 +142,7 @@ Important Files
 - `src/isaac/agent/brain/compaction.py`
   - Compaction prompt, summary prefix, token estimates, and history rebuild.
 - `src/isaac/agent/brain/history_utils.py`
-  - History trimming and usage token extraction helpers.
+  - Context selection, fallback history trimming, and usage token extraction helpers.
 - `src/isaac/agent/brain/plan_helpers.py`
   - Parsing planner tool output into PlanSteps.
 - `src/isaac/agent/brain/recent_files.py`

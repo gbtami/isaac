@@ -15,7 +15,7 @@ from isaac.agent.history_types import ChatMessage
 from isaac.agent.brain.plan_helpers import plan_from_planner_result
 from isaac.agent.brain.prompt_runner import PromptEnv, PromptRunner
 from isaac.agent.brain.prompt_result import PromptResult
-from isaac.agent.brain.history_utils import extract_usage_total, trim_history
+from isaac.agent.brain.history_utils import extract_usage_total, select_context_history
 from isaac.agent.brain.compaction import maybe_compact_history
 from isaac.agent.brain.instrumentation import base_run_metadata
 from isaac.agent.brain.recent_files import record_recent_file
@@ -137,7 +137,11 @@ class PromptHandler:
             auto_compact_ratio=self._AUTO_COMPACT_RATIO,
             compact_user_message_max_tokens=self._COMPACT_USER_MESSAGE_MAX_TOKENS,
         )
-        history = trim_history(state.history, self._MAX_HISTORY_MESSAGES)
+        history = select_context_history(
+            state.history,
+            current_prompt=prompt_text,
+            context_limit=model_registry.get_context_limit(state.model_id),
+        )
         plan_progress: dict[str, Any] | None = {"plan": None, "idx": 0}
         _push_thought = self._prompt_runner._make_thought_sender(session_id)  # type: ignore[attr-defined]
 
@@ -151,7 +155,15 @@ class PromptHandler:
             if not content:
                 return
             role = str(msg.get("role") or "assistant")
-            state.history.append({"role": role, "content": content, "source": "tool_summary"})
+            item: ChatMessage = {
+                "role": role,
+                "content": content,
+                "source": str(msg.get("source") or "tool_summary"),
+            }
+            for key in ("tool_name", "tool_kind", "synthetic", "checkpoint"):
+                if key in msg:
+                    item[key] = msg[key]
+            state.history.append(item)
 
         async def _maybe_capture_plan(event: Any) -> None:
             if not isinstance(event, FunctionToolResultEvent):

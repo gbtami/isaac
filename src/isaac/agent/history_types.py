@@ -20,6 +20,8 @@ class ChatMessage(TypedDict, total=False):
     source: str
     synthetic: bool
     checkpoint: dict[str, Any]
+    tool_name: str
+    tool_kind: str
 
 
 HistoryInput: TypeAlias = Sequence[ChatMessage] | Sequence[ai_messages.ModelMessage]
