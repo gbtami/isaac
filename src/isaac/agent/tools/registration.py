@@ -187,9 +187,18 @@ class _ToolRegistrar:
         path: str,
         start: int | None = None,
         lines: int | None = None,
+        max_lines: int | None = None,
     ) -> Any:
-        self._log("read_file", {"path": path, "start": start, "lines": lines})
-        return await run_tool("read_file", ctx=ctx, **self._runtime_kwargs(ctx), path=path, start=start, lines=lines)
+        self._log("read_file", {"path": path, "start": start, "lines": lines, "max_lines": max_lines})
+        return await run_tool(
+            "read_file",
+            ctx=ctx,
+            **self._runtime_kwargs(ctx),
+            path=path,
+            start=start,
+            lines=lines,
+            max_lines=max_lines,
+        )
 
     async def run_command_tool(
         self,
@@ -271,6 +280,7 @@ class _ToolRegistrar:
         glob: str | None = None,
         case_sensitive: bool = True,
         timeout: float | None = None,
+        max_results: int | None = None,
     ) -> Any:
         self._log(
             "code_search",
@@ -280,6 +290,7 @@ class _ToolRegistrar:
                 "glob": glob,
                 "case_sensitive": case_sensitive,
                 "timeout": timeout,
+                "max_results": max_results,
             },
         )
         return await run_tool(
@@ -291,6 +302,7 @@ class _ToolRegistrar:
             glob=glob,
             case_sensitive=case_sensitive,
             timeout=timeout,
+            max_results=max_results,
         )
 
     async def fetch_url_tool(

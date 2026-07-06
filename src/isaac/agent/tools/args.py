@@ -39,7 +39,15 @@ class ReadFileArgs(BaseModel):
     )
     lines: int | None = Field(
         None,
-        description="Number of lines to read",
+        description="Number of lines to read from start",
+        ge=1,
+    )
+    max_lines: int | None = Field(
+        None,
+        description=(
+            "Maximum lines to return when reading from start or the beginning. "
+            "Defaults to a safe bounded value; use next_start from truncated results to continue."
+        ),
         ge=1,
     )
 
@@ -157,6 +165,11 @@ class CodeSearchArgs(BaseModel):
         None,
         description="Timeout in seconds",
         gt=0,
+    )
+    max_results: int | None = Field(
+        None,
+        description="Maximum number of search matches to return; defaults to a bounded result set.",
+        ge=1,
     )
 
 

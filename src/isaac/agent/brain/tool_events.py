@@ -66,7 +66,13 @@ def tool_history_summary(
     if tool_name == "read_file":
         path = raw_output.get("path") or (raw_input or {}).get("path")
         line_hint = ""
-        if raw_input:
+        start_line = raw_output.get("start_line")
+        end_line = raw_output.get("end_line")
+        total_lines = raw_output.get("total_lines")
+        if isinstance(start_line, int) and isinstance(end_line, int) and end_line >= start_line:
+            total_hint = f" of {total_lines}" if isinstance(total_lines, int) and total_lines >= end_line else ""
+            line_hint = f" lines {start_line}-{end_line}{total_hint}"
+        elif raw_input:
             start = raw_input.get("start")
             lines = raw_input.get("lines")
             if start is not None and lines is not None:
@@ -78,8 +84,12 @@ def tool_history_summary(
                 line_hint = f" from line {start}"
         sha = raw_output.get("sha256")
         sha_line = f"SHA256: {sha}" if sha else ""
+        continuation = ""
+        if raw_output.get("truncated"):
+            next_start = raw_output.get("next_start")
+            continuation = f"Truncated; continue with start={next_start}." if next_start else "Truncated."
         excerpt = _truncate(raw_output.get("content") or "", 600)
-        detail = _lines(sha_line, f"Excerpt:\n{excerpt}" if excerpt else "")
+        detail = _lines(sha_line, continuation, f"Excerpt:\n{excerpt}" if excerpt else "")
         if path:
             return _lines(f"Read file {path}{line_hint} [{status}]", detail)
     if tool_name == "list_files":
@@ -109,9 +119,17 @@ def tool_history_summary(
         pattern = raw_output.get("pattern") or (raw_input or {}).get("pattern")
         directory = raw_output.get("directory") or (raw_input or {}).get("directory")
         matches = _truncate(raw_output.get("content") or "", 1000)
+        match_count = raw_output.get("match_count")
+        shown_count = raw_output.get("shown_count")
+        count_detail = ""
+        if isinstance(match_count, int):
+            if isinstance(shown_count, int) and shown_count != match_count:
+                count_detail = f"Showing {shown_count} of {match_count} matches."
+            else:
+                count_detail = f"Found {match_count} matches."
         if pattern:
             where = f" in {directory}" if directory else ""
-            detail = f"Matches:\n{matches}" if matches else ""
+            detail = _lines(count_detail, f"Matches:\n{matches}" if matches else "")
             return _lines(f"Searched for '{pattern}'{where} [{status}]", detail)
     if tool_name == "mark_plan_step":
         step = raw_output.get("step") or raw_output.get("step_id") or (raw_input or {}).get("step")

@@ -347,3 +347,82 @@ async def test_fetch_url_blocks_bad_scheme():
     result = await fetch_url("file:///etc/passwd")
     assert result["error"]
     assert "https" in result["error"].lower()
+
+
+@pytest.mark.asyncio
+async def test_read_file_defaults_to_bounded_pages(tmp_path: Path):
+    target = tmp_path / "large.txt"
+    target.write_text("".join(f"line {idx}\n" for idx in range(1, 451)))
+
+    result = await read_file(path=str(target))
+
+    assert result["error"] is None
+    assert result["truncated"] is True
+    assert result["total_lines"] == 450
+    assert result["lines_returned"] == 400
+    assert result["start_line"] == 1
+    assert result["end_line"] == 400
+    assert result["next_start"] == 401
+    assert "line 400" in result["content"]
+    assert "line 401" not in result["content"]
+
+
+@pytest.mark.asyncio
+async def test_read_file_can_continue_from_next_start(tmp_path: Path):
+    target = tmp_path / "large.txt"
+    target.write_text("".join(f"line {idx}\n" for idx in range(1, 451)))
+
+    result = await read_file(path=str(target), start=401, lines=50)
+
+    assert result["error"] is None
+    assert result["truncated"] is False
+    assert result["start_line"] == 401
+    assert result["end_line"] == 450
+    assert result["lines_returned"] == 50
+    assert "next_start" not in result
+    assert result["content"].startswith("line 401\n")
+
+
+@pytest.mark.asyncio
+async def test_code_search_caps_results_and_reports_counts(tmp_path: Path):
+    target = tmp_path / "search.txt"
+    target.write_text("".join(f"hello {idx}\n" for idx in range(1, 8)))
+
+    result = await code_search(pattern="hello", directory=str(tmp_path), max_results=3)
+
+    assert result["error"] is None
+    assert result["returncode"] == 0
+    assert result["match_count"] == 7
+    assert result["shown_count"] == 3
+    assert result["truncated"] is True
+    assert "hello 3" in result["content"]
+    assert "hello 4" not in result["content"]
+
+
+@pytest.mark.asyncio
+async def test_code_search_no_matches_is_completed_not_failed(tmp_path: Path):
+    target = tmp_path / "search.txt"
+    target.write_text("hello world\n")
+
+    result = await code_search(pattern="missing", directory=str(tmp_path))
+
+    assert result["error"] is None
+    assert result["returncode"] == 0
+    assert result["match_count"] == 0
+    assert result["shown_count"] == 0
+    assert result["content"] == ""
+
+
+@pytest.mark.asyncio
+async def test_read_file_max_lines_bounds_explicit_large_range(tmp_path: Path):
+    target = tmp_path / "large.txt"
+    target.write_text("".join(f"line {idx}\n" for idx in range(1, 21)))
+
+    result = await read_file(path=str(target), start=1, lines=20, max_lines=5)
+
+    assert result["error"] is None
+    assert result["truncated"] is True
+    assert result["lines_returned"] == 5
+    assert result["next_start"] == 6
+    assert "line 5" in result["content"]
+    assert "line 6" not in result["content"]

@@ -480,10 +480,22 @@ def _extract_sha256(raw_output: dict[str, Any]) -> str | None:
 def _extract_metadata(tool_name: str, raw_output: dict[str, Any], raw_input: dict[str, Any] | None) -> dict[str, Any]:
     metadata: dict[str, Any] = {}
     if raw_input:
-        for key in ("start", "lines", "cwd", "expected_sha256"):
+        for key in ("start", "lines", "max_lines", "cwd", "expected_sha256", "max_results"):
             if key in raw_input and raw_input[key] is not None:
                 metadata[key] = raw_input[key]
-    for key in ("returncode", "truncated", "num_tokens", "status_code"):
+    for key in (
+        "returncode",
+        "truncated",
+        "num_tokens",
+        "status_code",
+        "total_lines",
+        "start_line",
+        "end_line",
+        "next_start",
+        "match_count",
+        "shown_count",
+        "max_results",
+    ):
         if key in raw_output and raw_output[key] is not None:
             metadata[key] = raw_output[key]
     if tool_name == "run_command" and raw_output.get("error"):
