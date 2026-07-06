@@ -30,6 +30,14 @@ Where History Lives
    - Delegate tools (planner/review/coding) keep their own short summaries when
      `carryover=True`. They never inherit the full parent history.
 
+4) Structured coding memory
+   - `SessionState.coding_memory` stores typed `CodingMemoryEvent` records for
+     durable coding facts: file observations, edits, commands, delegate outputs,
+     fetches, and plans.
+   - The records are persisted in `prompt.json` alongside chat history so
+     `session/load` restores both the UI replay and the model's task memory.
+   - The memory is deterministic and compact; it is not a second agent loop.
+
 Prompt Assembly
 ---------------
 
@@ -39,9 +47,12 @@ Prompt Assembly
   recent conversational tail for coherence, but also preserves older
   coding-critical facts such as compaction checkpoints, file edits, command/test
   results, delegate outputs, and relevant read/search observations.
-- Before sending to the model, Isaac injects a short system hint listing recent
-  files touched (most recent last). This resolves ambiguous follow-ups such as
-  "split it" by anchoring on the last edited file.
+- Before sending to the model, Isaac injects selected structured coding memory
+  as a transient Pydantic AI capability. The selection is path/query/error aware
+  and bounded by the active model context limit.
+- Isaac also injects a short system hint listing recent files touched (most
+  recent last). This resolves ambiguous follow-ups such as "split it" by
+  anchoring on the last edited file.
 - History is sanitized before passing to pydantic-ai to avoid empty or malformed
   messages.
 
@@ -189,3 +200,22 @@ structured tool outputs in the session history log and replay them into model
 history on resume.
 If you update tool outputs or add new tools, ensure their summaries include
 critical state (paths, commands, outcomes) so follow-up prompts remain grounded.
+
+
+Structured Memory Events
+------------------------
+
+The context selector still works on chat-style history, but long coding sessions
+also need file/task-aware facts that survive transcript trimming. Isaac records
+these with Pydantic models in `brain/memory.py`:
+
+- `observation`: read/list/search/file-summary findings.
+- `edit`: successful or failed file mutation attempts.
+- `command`: commands, return status, and compact output/error context.
+- `delegate` / `plan`: delegated subagent and planner outcomes.
+- `fetch`: URL fetches and compact fetched context.
+
+Prompt assembly renders only the selected memory events into a Pydantic AI
+`Capability` instruction block (`isaac-coding-memory`). This keeps the persisted
+chat history clean while still using Pydantic AI's intended extension boundary
+for transient run context.

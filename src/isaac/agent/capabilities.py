@@ -29,6 +29,7 @@ from pydantic_ai.capabilities import (  # type: ignore
 from pydantic_ai.tools import ToolDefinition  # type: ignore
 
 from isaac.agent.brain.history_processors import sanitize_message_history
+from isaac.agent.brain.memory import CodingMemory, selected_memory_context
 from isaac.agent.brain.recent_files import recent_files_context_text
 
 ModeGetter = Callable[[], str]
@@ -195,6 +196,34 @@ def build_recent_files_capability(recent_files: list[str], context_count: int) -
     )
 
 
+def build_coding_memory_capability(
+    memory: CodingMemory,
+    *,
+    current_prompt: str,
+    context_limit: int | None,
+) -> Any | None:
+    """Build a per-run instruction capability from structured coding memory.
+
+    The memory store is Isaac-owned and deterministic, while Pydantic AI gets
+    only a compact, selected context block for the current run. This follows the
+    same capability-boundary pattern as recent files: transient context is not
+    written back into chat history just to influence one model call.
+    """
+
+    message = selected_memory_context(
+        memory,
+        current_prompt=current_prompt,
+        context_limit=context_limit,
+    )
+    if message is None:
+        return None
+    return Capability(
+        instructions=message,
+        id="isaac-coding-memory",
+        description="Transient context from durable structured coding memory for this session.",
+    )
+
+
 def build_toolset_capabilities(toolsets: Iterable[Any] | None) -> list[Any]:
     """Wrap externally supplied toolsets as Pydantic AI capabilities.
 
@@ -277,6 +306,7 @@ __all__ = [
     "build_acp_deferred_tool_results",
     "build_acp_permission_capability",
     "build_base_capabilities",
+    "build_coding_memory_capability",
     "build_event_stream_observer_capability",
     "build_history_sanitizer_capability",
     "build_mode_capability",

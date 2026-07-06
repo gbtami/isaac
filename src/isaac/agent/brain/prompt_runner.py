@@ -12,6 +12,7 @@ from pydantic_ai import FunctionToolCallEvent, FunctionToolResultEvent  # type: 
 from pydantic_ai.messages import RetryPromptPart
 from isaac.agent.history_types import ChatMessage
 from isaac.agent.brain.events import ToolCallFinish, ToolCallStart
+from isaac.agent.brain.memory import CodingMemoryEvent, memory_events_from_tool_result
 from isaac.agent.brain.tool_events import should_record_tool_history, tool_history_summary, tool_kind
 from isaac.agent.brain.tool_args import coerce_tool_args
 from isaac.log_utils import log_event
@@ -65,6 +66,7 @@ class PromptRunner:
         session_id: str,
         plan_progress: dict[str, Any] | None = None,
         record_history: Callable[[ChatMessage], None] | None = None,
+        record_memory: Callable[[CodingMemoryEvent], None] | None = None,
     ) -> Callable[[Any], Awaitable[bool]]:
         tool_call_inputs: Dict[str, Dict[str, Any]] = {}
         started_tool_calls: set[str] = set()
@@ -120,6 +122,11 @@ class PromptRunner:
                         raw_output["error"] = "permission denied"
                         raw_output["content"] = ""
                         raw_output.setdefault("returncode", -1)
+                    error_text = str(raw_output.get("error") or "").strip()
+                    returncode = raw_output.get("returncode")
+                    if error_text:
+                        status = "failed"
+                    elif isinstance(returncode, int) and returncode != 0:
                         status = "failed"
                 new_text = raw_output.get("new_text")
                 old_text = raw_output.get("old_text")
@@ -146,6 +153,16 @@ class PromptRunner:
                                     "tool_kind": tool_kind(tool_name),
                                 }
                             )
+
+                if record_memory:
+                    for memory_event in memory_events_from_tool_result(
+                        tool_name,
+                        raw_output,
+                        status,
+                        raw_input=call_input,
+                    ):
+                        with contextlib.suppress(Exception):
+                            record_memory(memory_event)
 
                 if plan_progress and plan_progress.get("plan") and not raw_output.get("error"):
                     entries = getattr(plan_progress["plan"], "entries", []) or []

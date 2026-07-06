@@ -13,6 +13,7 @@ from isaac.agent.ai_types import SessionToolDeps
 from isaac.agent.brain.prompt import SUBAGENT_INSTRUCTIONS, SYSTEM_PROMPT
 from isaac.agent.history_types import ChatMessage
 from isaac.agent.brain.plan_helpers import plan_from_planner_result
+from isaac.agent.brain.memory import CodingMemory, CodingMemoryEvent
 from isaac.agent.brain.prompt_runner import PromptEnv, PromptRunner
 from isaac.agent.brain.prompt_result import PromptResult
 from isaac.agent.brain.history_utils import extract_usage_total, select_context_history
@@ -22,7 +23,11 @@ from isaac.agent.brain.recent_files import record_recent_file
 from isaac.agent.brain.session_ops import RunnerFactory, build_runner, respond_model_error, set_session_model
 from isaac.agent.brain.session_state import SessionState
 from isaac.agent.runner import stream_with_runner
-from isaac.agent.capabilities import build_event_stream_observer_capability, build_recent_files_capability
+from isaac.agent.capabilities import (
+    build_coding_memory_capability,
+    build_event_stream_observer_capability,
+    build_recent_files_capability,
+)
 from isaac.agent.subagents.delegate_tools import (
     DelegateToolContext,
     reset_delegate_tool_context,
@@ -165,6 +170,9 @@ class PromptHandler:
                     item[key] = msg[key]
             state.history.append(item)
 
+        def _record_memory(event: CodingMemoryEvent) -> None:
+            state.coding_memory.append(event)
+
         async def _maybe_capture_plan(event: Any) -> None:
             if not isinstance(event, FunctionToolResultEvent):
                 return
@@ -184,6 +192,7 @@ class PromptHandler:
             session_id,
             plan_progress=plan_progress,
             record_history=_record_history,
+            record_memory=_record_memory,
         )
 
         async def _on_event(event: Any) -> bool:
@@ -208,6 +217,14 @@ class PromptHandler:
             return handled
 
         run_capabilities = [build_event_stream_observer_capability(_on_event)]
+        context_limit = model_registry.get_context_limit(state.model_id)
+        coding_memory_capability = build_coding_memory_capability(
+            state.coding_memory,
+            current_prompt=prompt_text,
+            context_limit=context_limit,
+        )
+        if coding_memory_capability is not None:
+            run_capabilities.append(coding_memory_capability)
         recent_files_capability = build_recent_files_capability(state.recent_files, self._RECENT_FILES_CONTEXT)
         if recent_files_capability is not None:
             run_capabilities.append(recent_files_capability)
@@ -337,6 +354,7 @@ class PromptHandler:
         state.model_error_notified = False
         state.usage_total_tokens_since_compaction = 0
         state.last_compaction_checkpoint = None
+        state.coding_memory = CodingMemory()
 
     def close_session(self, session_id: str) -> None:
         self._sessions.pop(session_id, None)
@@ -352,6 +370,7 @@ class PromptHandler:
             "history": list(state.history),
             "model_id": state.model_id,
             "recent_files": list(state.recent_files),
+            "coding_memory": state.coding_memory.model_dump_jsonable(),
             "usage_total_tokens_since_compaction": state.usage_total_tokens_since_compaction,
             "last_compaction_checkpoint": state.last_compaction_checkpoint,
         }
@@ -364,6 +383,7 @@ class PromptHandler:
         state.history = list(snapshot.get("history") or [])
         state.model_id = snapshot.get("model_id") or state.model_id
         state.recent_files = list(snapshot.get("recent_files") or [])
+        state.coding_memory = CodingMemory.from_snapshot(snapshot.get("coding_memory"))
         usage_since_compaction = snapshot.get("usage_total_tokens_since_compaction")
         state.usage_total_tokens_since_compaction = (
             int(usage_since_compaction) if isinstance(usage_since_compaction, int) else 0

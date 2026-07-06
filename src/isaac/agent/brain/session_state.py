@@ -6,6 +6,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from isaac.agent.history_types import ChatMessage
+from isaac.agent.brain.memory import CodingMemory
 
 
 @dataclass
@@ -17,6 +18,7 @@ class SessionState:
     system_prompt: str | None = None
     history: list[ChatMessage] = field(default_factory=list)
     recent_files: list[str] = field(default_factory=list)
+    coding_memory: CodingMemory = field(default_factory=CodingMemory)
     last_usage_total_tokens: int | None = None
     usage_total_tokens_since_compaction: int = 0
     last_compaction_checkpoint: dict[str, Any] | None = None

@@ -17,6 +17,7 @@ from isaac.agent.brain.compaction import (
 )
 from isaac.agent.brain.model_errors import ModelBuildError
 from isaac.agent.brain.prompt_result import PromptResult
+from isaac.agent.brain.memory import CodingMemory
 from isaac.agent.brain.session_state import SessionState
 from isaac.log_utils import log_context as log_ctx, log_event
 
@@ -102,6 +103,7 @@ async def build_runner(
         state.system_prompt = system_prompt
         state.history = []
         state.recent_files = []
+        state.coding_memory = CodingMemory()
         state.last_usage_total_tokens = None
         state.usage_total_tokens_since_compaction = 0
         state.last_compaction_checkpoint = None
