@@ -7,10 +7,11 @@ Implements storing session metadata and session/update history to disk so that
 from __future__ import annotations
 
 import json
+import re
 import shutil
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Iterable, List
+from typing import Any, ClassVar, Iterable, List
 
 from acp.schema import SessionNotification
 
@@ -22,14 +23,21 @@ class SessionStore:
     root: Path
     max_sessions: int = 50
 
+    _SESSION_ID_RE: ClassVar[re.Pattern[str]] = re.compile(r"^[A-Za-z0-9_-]{1,80}$")
+
     def __post_init__(self) -> None:
         self.root.mkdir(parents=True, exist_ok=True)
         self.cleanup()
 
     def session_dir(self, session_id: str) -> Path:
+        self.validate_session_id(session_id)
         path = self.root / session_id
         path.mkdir(parents=True, exist_ok=True)
         return path
+
+    def validate_session_id(self, session_id: str) -> None:
+        if not self._SESSION_ID_RE.fullmatch(session_id or ""):
+            raise ValueError("Invalid session id")
 
     def persist_meta(
         self,
@@ -39,9 +47,11 @@ class SessionStore:
         *,
         current_mode: str,
         current_model: str,
+        additional_directories: Iterable[Path] = (),
     ) -> None:
         meta = {
             "cwd": str(cwd),
+            "additionalDirectories": [str(path) for path in additional_directories],
             "mcpServers": [self._dump_model(server) for server in (mcp_servers or [])],
             "mode": current_mode,
             "model": current_model,

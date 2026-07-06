@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import difflib
+from pathlib import Path
 from typing import Optional
 
 from isaac.agent.ai_types import ToolContext
@@ -24,6 +25,8 @@ async def edit_file(
     end: Optional[int] = None,
     allow_outside: bool = False,
     expected_sha256: Optional[str] = None,
+    session_cwd: str | Path | None = None,
+    additional_directories: tuple[str | Path, ...] = (),
     **_: object,
 ) -> dict:
     """Overwrite a text file with new content."""
@@ -37,8 +40,14 @@ async def edit_file(
             "returncode": -1,
         }
     try:
-        resolved = resolve_workspace_path(cwd, path, allow_outside=allow_outside)
-        ensure_text_target(resolved, cwd)
+        base = session_cwd or cwd
+        resolved = resolve_workspace_path(
+            base,
+            path,
+            allow_outside=allow_outside,
+            additional_directories=additional_directories,
+        )
+        ensure_text_target(resolved, base)
     except (PathAccessError, ProtectedPathError, BinaryFileError) as exc:
         return {
             "path": path,

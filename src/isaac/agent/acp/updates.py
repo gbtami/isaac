@@ -46,15 +46,20 @@ class SessionUpdateMixin:
     async def checkpoint_session(self, session_id: str) -> SessionNotification:
         """Persist prompt state for later restore."""
 
+        self._persist_prompt_snapshot(session_id)
+        return session_notification(
+            session_id,
+            update_agent_message(text_block("Checkpoint saved.")),
+        )
+
+    def _persist_prompt_snapshot(self, session_id: str) -> None:
+        """Persist the model-visible prompt state for restart/session-load continuity."""
+
         snapshot: dict[str, Any] = {}
         handler_snapshot = getattr(self._prompt_handler, "snapshot", None)
         if callable(handler_snapshot):
             snapshot = handler_snapshot(session_id)
         self._session_store.persist_prompt_state(session_id, snapshot)
-        return session_notification(
-            session_id,
-            update_agent_message(text_block("Checkpoint saved.")),
-        )
 
     async def restore_session_state(self, session_id: str) -> SessionNotification:
         """Restore prompt state from persisted snapshot."""

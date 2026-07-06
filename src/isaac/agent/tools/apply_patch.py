@@ -26,14 +26,17 @@ async def apply_patch(
     strip: Optional[int] = None,
     cwd: Optional[str] = None,
     expected_sha256: Optional[str] = None,
+    session_cwd: str | Path | None = None,
+    additional_directories: tuple[str | Path, ...] = (),
     **_: object,
 ) -> dict:
     """Apply a unified diff patch to a text file using the `patch` command."""
 
     _ = ctx
     try:
-        resolved = resolve_workspace_path(cwd, path)
-        ensure_text_target(resolved, cwd)
+        base = session_cwd or cwd
+        resolved = resolve_workspace_path(base, path, additional_directories=additional_directories)
+        ensure_text_target(resolved, base)
     except (PathAccessError, ProtectedPathError, BinaryFileError) as exc:
         return {"path": path, "content": "", "error": str(exc)}
 

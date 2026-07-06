@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from pathlib import Path
 from typing import Optional
 
 from isaac.agent.ai_types import ToolContext
@@ -12,6 +13,8 @@ async def run_command(
     command: str = "",
     cwd: Optional[str] = None,
     timeout: Optional[float] = None,
+    session_cwd: str | Path | None = None,
+    additional_directories: tuple[str | Path, ...] = (),
 ) -> dict:
     """Execute a shell command and capture its output."""
 
@@ -22,7 +25,11 @@ async def run_command(
 
     try:
         validate_shell_command(command)
-        resolved_cwd = resolve_command_cwd(None, cwd) if cwd else None
+        resolved_cwd = resolve_command_cwd(
+            session_cwd,
+            cwd or ".",
+            additional_directories=additional_directories,
+        )
     except (ShellCommandDenied, PathAccessError) as exc:
         return {"content": "", "error": str(exc), "returncode": -1}
 

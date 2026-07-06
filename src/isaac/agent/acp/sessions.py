@@ -24,6 +24,7 @@ from acp.schema import (
 
 from isaac.agent import models as model_registry
 from isaac.agent.acp.auth_methods import auth_method_env_var_name, auth_method_payload, find_auth_method
+from isaac.agent.acp.history import build_chat_history
 from isaac.agent.brain.model_errors import ModelBuildError
 from isaac.agent.brain.prompt import SYSTEM_PROMPT
 from isaac.agent.mcp_support import build_mcp_toolsets
@@ -63,9 +64,10 @@ class SessionLifecycleMixin:
             self._sessions.add(session_id)
             cwd_path = self._require_absolute_cwd(cwd)
             self._session_cwds[session_id] = cwd_path
+            additional_paths = self._coerce_additional_directories(additional_directories)
+            self._session_additional_directories[session_id] = additional_paths
             session_system_prompt = self._build_session_system_prompt(cwd_path)
             self._session_system_prompts[session_id] = session_system_prompt
-            _ = additional_directories
             mcp_servers = mcp_servers or []
             self._cancel_events[session_id] = asyncio.Event()
             toolsets = build_mcp_toolsets(mcp_servers)
@@ -102,14 +104,21 @@ class SessionLifecycleMixin:
         """Reload an existing session and replay history (Session Setup / loading)."""
         with log_context(session_id=session_id, cwd=cwd):
             log_event(logger, "acp.session.load")
+        try:
+            self._session_store.validate_session_id(session_id)
+        except ValueError as exc:
+            raise RequestError.invalid_params({"message": str(exc)}) from exc
         self._sessions.add(session_id)
         stored_meta = self._load_session_meta(session_id)
         cwd_path = self._require_absolute_cwd(cwd)
         self._session_cwds[session_id] = cwd_path
+        additional_paths = self._coerce_additional_directories(
+            additional_directories if additional_directories is not None else stored_meta.get("additionalDirectories")
+        )
+        self._session_additional_directories[session_id] = additional_paths
         session_system_prompt = self._build_session_system_prompt(cwd_path)
         self._session_system_prompts[session_id] = session_system_prompt
         self._cancel_events.setdefault(session_id, asyncio.Event())
-        _ = additional_directories
         mcp_servers = mcp_servers or stored_meta.get("mcpServers", [])
         toolsets = build_mcp_toolsets(mcp_servers)
         self._session_toolsets[session_id] = toolsets
@@ -141,6 +150,7 @@ class SessionLifecycleMixin:
         self._session_model_ids[session_id] = model_id
         history = self._load_session_history(session_id)
         self._session_history[session_id].extend(history)
+        await self._restore_prompt_state_on_load(session_id, history, model_id)
         self._persist_session_meta(
             session_id,
             cwd_path,
@@ -200,6 +210,7 @@ class SessionLifecycleMixin:
         self._session_cwds.pop(session_id, None)
         self._session_modes.pop(session_id, None)
         self._session_model_ids.pop(session_id, None)
+        self._session_additional_directories.pop(session_id, None)
         self._session_history.pop(session_id, None)
         self._session_allowed_commands.pop(session_id, None)
         self._session_mcp_servers.pop(session_id, None)
@@ -208,6 +219,9 @@ class SessionLifecycleMixin:
         self._session_commands_advertised.discard(session_id)
         self._session_last_chunk.pop(session_id, None)
         self._session_system_prompts.pop(session_id, None)
+        close_prompt_session = getattr(self._prompt_handler, "close_session", None)
+        if callable(close_prompt_session):
+            close_prompt_session(session_id)
         return CloseSessionResponse()
 
     async def set_session_mode(self, session_id: str, mode_id: str, **_: Any) -> SetSessionModeResponse | None:
@@ -242,29 +256,8 @@ class SessionLifecycleMixin:
                 system_prompt=self._session_system_prompts.get(session_id),
             )
             self._session_model_ids[session_id] = model_id
-            try:
-                model_registry.set_current_model(model_id)
-            except Exception as exc:
-                log_event(
-                    logger,
-                    "acp.session.model.persist_failed",
-                    level=logging.WARNING,
-                    session_id=session_id,
-                    model_id=model_id,
-                    error=str(exc),
-                )
         except ModelBuildError as exc:
-            try:
-                model_registry.set_current_model(previous_model_id)
-            except Exception as rollback_exc:
-                log_event(
-                    logger,
-                    "acp.session.model.persist_rollback_failed",
-                    level=logging.WARNING,
-                    session_id=session_id,
-                    model_id=previous_model_id,
-                    error=str(rollback_exc),
-                )
+            self._session_model_ids[session_id] = previous_model_id
             payload = self._auth_required_from_model_build_error(exc)
             if payload:
                 raise RequestError.auth_required(payload)
@@ -428,6 +421,7 @@ class SessionLifecycleMixin:
             mcp_servers or [],
             current_mode=current_mode,
             current_model=current_model,
+            additional_directories=self._session_additional_directories.get(session_id, ()),
         )
 
     def _load_session_meta(self, session_id: str) -> dict[str, Any]:
@@ -442,6 +436,36 @@ class SessionLifecycleMixin:
         if not path.is_absolute():
             raise RequestError.invalid_request({"message": "cwd must be an absolute path"})
         return path
+
+    @classmethod
+    def _coerce_additional_directories(cls, additional_directories: list[str] | tuple[str, ...] | None) -> tuple[Path, ...]:
+        paths: list[Path] = []
+        for item in additional_directories or []:
+            path = cls._require_absolute_cwd(str(item))
+            paths.append(path)
+        return tuple(paths)
+
+    async def _restore_prompt_state_on_load(
+        self,
+        session_id: str,
+        history: list[SessionNotification],
+        model_id: str,
+    ) -> None:
+        """Restore the model-visible brain state after ACP history replay loads.
+
+        ``session/load`` replays UI updates, but the next prompt must also see
+        previous user/assistant context. Prefer the richer prompt snapshot when
+        present and reconstruct a clean chat history from ACP updates otherwise.
+        """
+
+        snapshot = self._session_store.load_prompt_state(session_id)
+        if not snapshot and history:
+            snapshot = {"history": build_chat_history(history), "model_id": model_id}
+        if not snapshot:
+            return
+        restorer = getattr(self._prompt_handler, "restore_snapshot", None)
+        if callable(restorer):
+            await restorer(session_id, snapshot)
 
     async def _send_available_commands(self, session_id: str) -> None:
         """Advertise slash commands using `available_commands_update` per ACP spec."""

@@ -34,6 +34,10 @@ class PromptMixin:
                 cwd=cwd,
             ),
             set_usage=lambda session_id, usage: self._session_usage.__setitem__(session_id, usage),
+            session_cwd=lambda session_id: self._session_cwds.get(session_id),
+            session_additional_directories=lambda session_id: self._session_additional_directories.get(
+                session_id, ()
+            ),
             supports_plan_updates=self._client_supports_plan_updates,
         )
         return PromptHandler(
@@ -89,6 +93,7 @@ class PromptMixin:
             prompt_text,
             cancel_event,
         )
+        self._persist_prompt_snapshot(session_id)
         return self._prompt_result(result)
 
     @staticmethod

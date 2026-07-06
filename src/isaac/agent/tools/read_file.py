@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Optional
 
 from isaac.agent.ai_types import ToolContext
@@ -18,12 +19,14 @@ async def read_file(
     start: Optional[int] = None,
     lines: Optional[int] = None,
     cwd: Optional[str] = None,
+    session_cwd: str | Path | None = None,
+    additional_directories: tuple[str | Path, ...] = (),
 ) -> dict:
     """Read a text file with optional line range."""
 
     _ = ctx
     try:
-        resolved = resolve_workspace_path(cwd, path)
+        resolved = resolve_workspace_path(session_cwd or cwd, path, additional_directories=additional_directories)
     except PathAccessError as exc:
         return {"content": "", "num_tokens": 0, "error": str(exc)}
 

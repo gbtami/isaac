@@ -9,6 +9,7 @@ from pydantic_ai import FunctionToolResultEvent  # type: ignore
 from pydantic_ai.usage import UsageLimits  # type: ignore
 
 from isaac.agent import models as model_registry
+from isaac.agent.ai_types import SessionToolDeps
 from isaac.agent.brain.prompt import SUBAGENT_INSTRUCTIONS, SYSTEM_PROMPT
 from isaac.agent.history_types import ChatMessage
 from isaac.agent.brain.plan_helpers import plan_from_planner_result
@@ -221,12 +222,25 @@ class PromptHandler:
             )
 
         # Provide parent permission routing to delegate tool runs in this prompt turn.
+        session_cwd = self.env.session_cwd(session_id)
+        tool_deps = None
+        if session_cwd is not None:
+            tool_deps = SessionToolDeps(
+                session_id=session_id,
+                cwd=session_cwd,
+                additional_directories=self.env.session_additional_directories(session_id),
+                mode=self.env.session_modes.get(session_id, "ask"),
+                model_id=state.model_id or "",
+            )
         delegate_token = set_delegate_tool_context(
             DelegateToolContext(
                 session_id=session_id,
                 request_run_permission=self.env.request_run_permission,
                 send_update=self.env.send_protocol_update,
                 mode_getter=lambda: self.env.session_modes.get(session_id, "ask"),
+                cwd=session_cwd,
+                additional_directories=self.env.session_additional_directories(session_id),
+                model_id=state.model_id or "",
             )
         )
         try:
@@ -238,6 +252,7 @@ class PromptHandler:
                 cancel_event,
                 history=history,
                 capabilities=run_capabilities,
+                deps=tool_deps,
                 log_context="subagent",
                 request_tool_approval=_request_tool_approval,
                 usage_limits=UsageLimits(
@@ -310,6 +325,9 @@ class PromptHandler:
         state.model_error_notified = False
         state.usage_total_tokens_since_compaction = 0
         state.last_compaction_checkpoint = None
+
+    def close_session(self, session_id: str) -> None:
+        self._sessions.pop(session_id, None)
 
     def session_ids(self) -> list[str]:
         return list(self._sessions.keys())

@@ -11,6 +11,8 @@ from pydantic_ai.exceptions import ToolRetryError  # type: ignore
 from pydantic_ai.messages import RetryPromptPart  # type: ignore
 
 from isaac.agent.ai_types import ToolContext
+from isaac.agent.constants import TOOL_OUTPUT_LIMIT
+from isaac.agent.tool_io import truncate_tool_output
 from isaac.agent.tools.registry import TOOL_ARG_MODELS, TOOL_HANDLERS
 from isaac.log_utils import log_event
 
@@ -122,4 +124,8 @@ async def run_tool(function_name: str, ctx: ToolContext | None = None, **kwargs:
 
     if isinstance(result, dict) and result.get("content") is None:
         result["content"] = ""
+    if isinstance(result, dict):
+        result, was_truncated = truncate_tool_output(result, TOOL_OUTPUT_LIMIT)
+        if was_truncated:
+            result["truncated"] = True
     return result

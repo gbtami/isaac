@@ -18,6 +18,8 @@ async def list_files(
     directory: str = ".",
     recursive: bool = True,
     cwd: Optional[str] = None,
+    session_cwd: str | Path | None = None,
+    additional_directories: tuple[str | Path, ...] = (),
 ) -> dict:
     """List files and directories in a given path."""
 
@@ -25,7 +27,7 @@ async def list_files(
     max_entries = MAX_LIST_ENTRIES
     max_chars = MAX_LIST_CHARS
     try:
-        path = resolve_workspace_path(cwd, directory)
+        path = resolve_workspace_path(session_cwd or cwd, directory, additional_directories=additional_directories)
     except PathAccessError as exc:
         return {"content": "", "error": str(exc)}
 

@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import fnmatch
 import re
+from pathlib import Path
 from typing import Optional
 
 from isaac.agent.ai_types import ToolContext
@@ -17,12 +18,14 @@ async def code_search(
     case_sensitive: bool = True,
     timeout: Optional[float] = None,
     cwd: Optional[str] = None,
+    session_cwd: str | Path | None = None,
+    additional_directories: tuple[str | Path, ...] = (),
 ) -> dict:
     """Search for a pattern in code using ripgrep with a Python fallback."""
 
     _ = ctx
     try:
-        path = resolve_workspace_path(cwd, directory)
+        path = resolve_workspace_path(session_cwd or cwd, directory, additional_directories=additional_directories)
     except PathAccessError as exc:
         return {
             "content": None,

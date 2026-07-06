@@ -40,6 +40,7 @@ class StreamRunner(Protocol):
         *,
         message_history: Sequence[ai_messages.ModelMessage] | None = None,
         deferred_tool_results: DeferredToolResults | None = None,
+        deps: Any | None = None,
         capabilities: Sequence[Any] | None = None,
         usage_limits: Any | None = None,
         metadata: dict[str, Any] | None = None,
@@ -59,6 +60,7 @@ async def stream_with_runner(
     log_context: str | None = None,
     request_tool_approval: Callable[[str, str, dict[str, Any]], asyncio.Future | bool] | None = None,
     capabilities: Sequence[Any] | None = None,
+    deps: Any | None = None,
     usage_limits: Any | None = None,
     metadata: dict[str, Any] | None = None,
 ) -> tuple[str | None, Any | None]:
@@ -123,6 +125,8 @@ async def stream_with_runner(
             kwargs["message_history"] = message_history
         if deferred_results is not None:
             kwargs["deferred_tool_results"] = deferred_results
+        if deps is not None:
+            kwargs["deps"] = deps
         if usage_limits is not None:
             kwargs["usage_limits"] = usage_limits
         if metadata is not None:

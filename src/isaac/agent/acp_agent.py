@@ -59,6 +59,7 @@ class ACPAgent(
         self._conn: AgentSideConnection | None = conn
         self._sessions: set[str] = set()
         self._session_cwds: dict[str, Path] = {}
+        self._session_additional_directories: dict[str, tuple[Path, ...]] = {}
         self._terminals: Dict[str, TerminalState] = {}
         self._session_modes: Dict[str, str] = {}
         self._cancel_events: Dict[str, asyncio.Event] = {}

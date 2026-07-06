@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Optional
 
 from isaac.agent.ai_types import ToolContext
@@ -20,10 +21,12 @@ async def file_summary(
     head_lines: Optional[int] = 20,
     tail_lines: Optional[int] = 20,
     cwd: Optional[str] = None,
+    session_cwd: str | Path | None = None,
+    additional_directories: tuple[str | Path, ...] = (),
 ) -> dict:
     _ = ctx
     try:
-        resolved = resolve_workspace_path(cwd, path)
+        resolved = resolve_workspace_path(session_cwd or cwd, path, additional_directories=additional_directories)
     except PathAccessError as exc:
         return {"content": "", "error": str(exc)}
 

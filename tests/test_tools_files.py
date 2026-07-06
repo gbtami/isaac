@@ -183,6 +183,78 @@ async def test_tool_run_command_executes(tmp_path: Path):
 
 
 @pytest.mark.asyncio
+async def test_model_tool_read_file_uses_session_cwd_for_relative_path(tmp_path: Path):
+    target = tmp_path / "relative_model.txt"
+    target.write_text("from model session cwd", encoding="utf-8")
+
+    conn = AsyncMock(spec=AgentSideConnection)
+    conn.session_update = AsyncMock()
+    agent = make_function_agent(conn)
+    session = await agent.new_session(cwd=str(tmp_path), mcp_servers=[])
+
+    runner = PydanticAgent(
+        FixedArgsModel(
+            fixed_args={"read_file": {"path": "relative_model.txt"}},
+            call_tools=["read_file"],
+            custom_output_text="done",
+        ),
+        output_type=[str, DeferredToolRequests],
+        toolsets=(),
+        capabilities=[build_isaac_tools_capability()],
+    )
+    agent._prompt_handler.set_session_runner(session.session_id, runner)  # type: ignore[attr-defined]
+
+    response = await agent.prompt(prompt=[text_block("read relative file")], session_id=session.session_id)
+
+    assert response.stop_reason == "end_turn"
+    progress = [
+        call.kwargs["update"]
+        for call in conn.session_update.call_args_list
+        if isinstance(call.kwargs.get("update"), ToolCallProgress)
+    ]
+    assert progress
+    assert progress[-1].status == "completed"
+    assert progress[-1].raw_output["error"] is None
+    assert progress[-1].raw_output["content"] == "from model session cwd"
+
+
+@pytest.mark.asyncio
+async def test_direct_tool_can_read_absolute_path_from_additional_directory(tmp_path: Path):
+    workspace = tmp_path / "workspace"
+    docs = tmp_path / "docs"
+    workspace.mkdir()
+    docs.mkdir()
+    target = docs / "notes.txt"
+    target.write_text("shared context", encoding="utf-8")
+
+    conn = AsyncMock(spec=AgentSideConnection)
+    conn.session_update = AsyncMock()
+    agent = make_function_agent(conn)
+    session = await agent.new_session(
+        cwd=str(workspace),
+        additional_directories=[str(docs)],
+        mcp_servers=[],
+    )
+
+    await agent._execute_tool(
+        session_id=session.session_id,
+        tool_name="read_file",
+        tool_call_id="tc-additional-read",
+        arguments={"path": str(target)},
+    )
+
+    progress = [
+        call.kwargs["update"]
+        for call in conn.session_update.call_args_list
+        if isinstance(call.kwargs.get("update"), ToolCallProgress)
+    ]
+    assert progress
+    assert progress[-1].status == "completed"
+    assert progress[-1].raw_output["error"] is None
+    assert progress[-1].raw_output["content"] == "shared context"
+
+
+@pytest.mark.asyncio
 async def test_tool_apply_patch(tmp_path: Path):
     target = tmp_path / "edit_me.txt"
     target.write_text("old content\n")

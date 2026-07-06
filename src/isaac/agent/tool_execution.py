@@ -40,6 +40,7 @@ class ToolExecutionContext:
     send_update: Callable[[SessionNotification], Awaitable[None]]
     request_run_permission: Callable[[str, str, str, str | None], Awaitable[bool]]
     session_cwds: Dict[str, Path]
+    session_additional_directories: Dict[str, tuple[Path, ...]]
     session_modes: Dict[str, str]
     terminals: Dict[str, TerminalState]
     cancel_events: Dict[str, asyncio.Event]
@@ -73,7 +74,10 @@ async def execute_tool(
     result: dict[str, Any] | None = await await_with_cancel(
         run_tool(
             tool_name,
-            cwd=str(ctx.session_cwds.get(session_id, Path.cwd())),
+            session_cwd=str(ctx.session_cwds.get(session_id, Path.cwd())),
+            additional_directories=tuple(
+                str(path) for path in ctx.session_additional_directories.get(session_id, ())
+            ),
             **(arguments or {}),
         ),
         cancel_event,
@@ -149,7 +153,11 @@ async def execute_run_command_with_terminal(
     session_cwd = ctx.session_cwds.get(session_id, Path.cwd())
     try:
         validate_shell_command(command)
-        resolved_cwd = resolve_command_cwd(session_cwd, cwd_arg)
+        resolved_cwd = resolve_command_cwd(
+            session_cwd,
+            cwd_arg,
+            additional_directories=ctx.session_additional_directories.get(session_id, ()),
+        )
     except (PathAccessError, ShellCommandDenied) as exc:
         progress = tracker.progress(
             external_id=tool_call_id,

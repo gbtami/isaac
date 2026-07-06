@@ -10,6 +10,7 @@ import logging
 import time
 import uuid
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any, Awaitable, Callable
 
 from pydantic import BaseModel
@@ -19,7 +20,7 @@ from pydantic_ai.exceptions import ModelRetry  # type: ignore
 from pydantic_ai.usage import UsageLimits  # type: ignore
 
 from acp.helpers import session_notification, text_block, update_agent_thought
-from isaac.agent.ai_types import AgentRunner
+from isaac.agent.ai_types import AgentRunner, SessionToolDeps
 from isaac.agent import models as model_registry
 from isaac.agent.brain.instrumentation import base_run_metadata
 from isaac.agent.brain.prompt import SYSTEM_PROMPT
@@ -55,6 +56,9 @@ class DelegateToolContext:
     request_run_permission: Callable[[str, str, str, str | None], Awaitable[bool]]
     send_update: Callable[[Any], Awaitable[None]]
     mode_getter: Callable[[], str]
+    cwd: Path | None = None
+    additional_directories: tuple[Path, ...] = ()
+    model_id: str = ""
 
 
 def set_delegate_tool_context(ctx: DelegateToolContext) -> contextvars.Token[DelegateToolContext | None]:
@@ -205,12 +209,13 @@ def _build_delegate_agent(
     spec: DelegateToolSpec,
     *,
     mode_getter: Callable[[], str] | None = None,
+    model_id: str | None = None,
 ) -> AgentRunner:
     """Create a delegate agent for the current session model."""
 
     load_runtime_env()
     config = load_models_config()
-    model_id = model_registry.current_model_id()
+    model_id = model_id or model_registry.current_model_id()
     models_cfg = config.get("models", {})
     if model_id not in models_cfg:
         raise ValueError(f"Unknown model id: {model_id}")
@@ -362,6 +367,15 @@ async def _run_delegate_once(
             structured = output
 
     delegate_ctx = get_delegate_tool_context()
+    deps = None
+    if delegate_ctx is not None and delegate_ctx.cwd is not None:
+        deps = SessionToolDeps(
+            session_id=delegate_ctx.session_id,
+            cwd=delegate_ctx.cwd,
+            additional_directories=delegate_ctx.additional_directories,
+            mode=delegate_ctx.mode_getter(),
+            model_id=delegate_ctx.model_id,
+        )
 
     async def _request_tool_approval(call_id: str, tool_name: str, args: dict[str, Any]) -> bool:
         if tool_name != "run_command":
@@ -391,13 +405,14 @@ async def _run_delegate_once(
             on_result=_capture_result,
             log_context=log_context,
             request_tool_approval=_request_tool_approval,
+            deps=deps,
             usage_limits=UsageLimits(
                 request_limit=DELEGATE_REQUEST_LIMIT,
                 tool_calls_limit=DELEGATE_TOOL_CALLS_LIMIT,
             ),
             metadata=base_run_metadata(
                 component=f"isaac.delegate.run.{spec.name}",
-                model_id=model_registry.current_model_id(),
+                model_id=(delegate_ctx.model_id if delegate_ctx and delegate_ctx.model_id else model_registry.current_model_id()),
                 extra={
                     "session_id": session_id or "",
                     "delegate_run_id": delegate_run_id,
@@ -492,8 +507,9 @@ async def run_delegate_tool(
     send_update = delegate_ctx.send_update if delegate_ctx else None
     parent_session_id = delegate_ctx.session_id if delegate_ctx else None
     mode_getter = delegate_ctx.mode_getter if delegate_ctx else (lambda: "ask")
+    model_id = delegate_ctx.model_id if delegate_ctx and delegate_ctx.model_id else None
     try:
-        agent = _build_delegate_agent(spec, mode_getter=mode_getter)
+        agent = _build_delegate_agent(spec, mode_getter=mode_getter, model_id=model_id)
         active_agent = agent
         prompt = _build_delegate_prompt(task, context, carryover_summary)
 

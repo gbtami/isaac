@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import contextlib
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any, Awaitable, Callable
 
 from acp.contrib.tool_calls import ToolCallTracker
@@ -107,6 +108,8 @@ def build_prompt_env(
     send_update: Callable[[Any], Awaitable[None]],
     request_run_permission: Callable[[str, str, str, str | None], Awaitable[bool]],
     set_usage: Callable[[str, Any | None], None],
+    session_cwd: Callable[[str], Path | None],
+    session_additional_directories: Callable[[str], tuple[Path, ...]],
     supports_plan_updates: Callable[[], bool] = lambda: False,
 ) -> PromptEnv:
     """Construct a PromptEnv wired to ACP update helpers."""
@@ -124,6 +127,8 @@ def build_prompt_env(
         send_protocol_update=send_update,
         request_run_permission=request_run_permission,
         set_usage=set_usage,
+        session_cwd=session_cwd,
+        session_additional_directories=session_additional_directories,
     )
 
 

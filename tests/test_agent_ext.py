@@ -93,7 +93,8 @@ async def test_session_config_options_include_mode_and_model(monkeypatch, tmp_pa
         value=target_id,
     )
     assert _config_current_value(resp.config_options, "model") == target_id
-    assert model_registry.current_model_id() == target_id
+    assert agent._session_model_ids[session.session_id] == target_id
+    assert model_registry.current_model_id() == fn_model_id
 
 
 @pytest.mark.asyncio
@@ -133,6 +134,41 @@ async def test_session_load_replays_history(monkeypatch, tmp_path: Path):
     updates = [call.kwargs["update"] for call in conn.session_update.await_args_list]  # type: ignore[attr-defined]
     texts = [getattr(u.content, "text", "") for u in updates if isinstance(u, AgentMessageChunk)]
     assert "world" in " ".join(texts)
+
+
+@pytest.mark.asyncio
+async def test_session_load_restores_brain_history_from_replayed_updates(monkeypatch, tmp_path: Path):
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "xdg"))
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setattr("pathlib.Path.home", lambda: tmp_path)
+    conn = AsyncMock(spec=AgentSideConnection)
+    conn.session_update = AsyncMock()
+    agent = ACPAgent(conn)
+    session = await agent.new_session(cwd=str(tmp_path), mcp_servers=[])
+
+    agent._record_update(_make_user_chunk(session.session_id, "remember src/foo.py"))  # type: ignore[attr-defined]
+    agent._record_update(_make_agent_chunk(session.session_id, "I will remember src/foo.py"))  # type: ignore[attr-defined]
+
+    # Simulate a process restart: the UI history is on disk, but brain memory is empty.
+    reloaded = ACPAgent(conn)
+    conn.session_update.reset_mock()
+    await reloaded.load_session(cwd=str(tmp_path), mcp_servers=[], session_id=session.session_id)
+
+    snapshot = reloaded._prompt_handler.snapshot(session.session_id)  # type: ignore[attr-defined]
+    restored_history = snapshot.get("history") or []
+    assert any("remember src/foo.py" in item.get("content", "") for item in restored_history)
+    assert any("I will remember src/foo.py" in item.get("content", "") for item in restored_history)
+
+
+@pytest.mark.asyncio
+async def test_load_session_rejects_invalid_session_id(monkeypatch, tmp_path: Path):
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "xdg"))
+    monkeypatch.setenv("HOME", str(tmp_path))
+    conn = AsyncMock(spec=AgentSideConnection)
+    agent = ACPAgent(conn)
+
+    with pytest.raises(RequestError):
+        await agent.load_session(cwd=str(tmp_path), mcp_servers=[], session_id="../../evil")
 
 
 @pytest.mark.asyncio

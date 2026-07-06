@@ -92,6 +92,18 @@ def _coerce_base(base: str | Path | None) -> Path | None:
     return Path(base).expanduser().resolve(strict=False)
 
 
+def _coerce_roots(roots: Iterable[str | Path] | None) -> tuple[Path, ...]:
+    if roots is None:
+        return ()
+    coerced: list[Path] = []
+    for root in roots:
+        try:
+            coerced.append(Path(root).expanduser().resolve(strict=False))
+        except (OSError, RuntimeError, TypeError, ValueError):
+            continue
+    return tuple(coerced)
+
+
 def is_relative_to(path: Path, base: Path) -> bool:
     try:
         path.relative_to(base)
@@ -105,6 +117,7 @@ def resolve_workspace_path(
     target: str | Path,
     *,
     allow_outside: bool = False,
+    additional_directories: Iterable[str | Path] | None = None,
 ) -> Path:
     """Resolve ``target`` with symlink-aware optional workspace containment.
 
@@ -119,8 +132,10 @@ def resolve_workspace_path(
     raw = Path(target).expanduser()
     candidate = raw if raw.is_absolute() else (base_path or Path.cwd().resolve(strict=False)) / raw
     resolved = candidate.resolve(strict=False)
-    if base_path is not None and not allow_outside and not is_relative_to(resolved, base_path):
-        raise PathAccessError("Path is outside allowed working directory")
+    if base_path is not None and not allow_outside:
+        allowed_roots = (base_path, *_coerce_roots(additional_directories))
+        if not any(is_relative_to(resolved, root) for root in allowed_roots):
+            raise PathAccessError("Path is outside allowed working directory")
     return resolved
 
 
@@ -239,8 +254,13 @@ def validate_shell_command(command: str) -> None:
         raise ShellCommandDenied("Command does not match ISAAC_SHELL_ALLOWLIST")
 
 
-def resolve_command_cwd(session_cwd: str | Path | None, cwd: str | Path | None) -> Path:
-    resolved = resolve_workspace_path(session_cwd, cwd or ".")
+def resolve_command_cwd(
+    session_cwd: str | Path | None,
+    cwd: str | Path | None,
+    *,
+    additional_directories: Iterable[str | Path] | None = None,
+) -> Path:
+    resolved = resolve_workspace_path(session_cwd, cwd or ".", additional_directories=additional_directories)
     if not resolved.exists():
         raise PathAccessError(f"Working directory does not exist: {cwd or '.'}")
     if not resolved.is_dir():

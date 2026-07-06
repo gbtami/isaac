@@ -8,7 +8,7 @@ from typing import Any, Awaitable, Callable, Iterable
 from pydantic_ai import FunctionToolset, Tool  # type: ignore
 from pydantic_ai.capabilities import Toolset as ToolsetCapability  # type: ignore
 
-from isaac.agent.ai_types import ToolContext
+from isaac.agent.ai_types import SessionToolDeps, ToolContext
 
 from isaac.agent.subagents import DELEGATE_TOOL_TIMEOUTS
 from isaac.agent.tools.executor import run_tool
@@ -117,6 +117,18 @@ class _ToolRegistrar:
             return
         log_event(self._logger, "tool.wrapper.invoke", level=logging.DEBUG, tool=tool_name, args=args)
 
+    @staticmethod
+    def _runtime_kwargs(ctx: ToolContext) -> dict[str, Any]:
+        """Return session-bound runtime kwargs hidden from model schemas."""
+
+        deps = getattr(ctx, "deps", None)
+        if not isinstance(deps, SessionToolDeps):
+            return {}
+        return {
+            "session_cwd": str(deps.cwd),
+            "additional_directories": tuple(str(path) for path in deps.additional_directories),
+        }
+
     def delegate_tool(
         self, tool_name: str
     ) -> Callable[[ToolContext, str, str | None, str | None, bool], Awaitable[Any]]:
@@ -145,6 +157,7 @@ class _ToolRegistrar:
             return await run_tool(
                 tool_name,
                 ctx=ctx,
+                **self._runtime_kwargs(ctx),
                 task=task,
                 context=context,
                 session_id=session_id,
@@ -160,7 +173,13 @@ class _ToolRegistrar:
         recursive: bool = True,
     ) -> Any:
         self._log("list_files", {"directory": directory, "recursive": recursive})
-        return await run_tool("list_files", ctx=ctx, directory=directory, recursive=recursive)
+        return await run_tool(
+            "list_files",
+            ctx=ctx,
+            **self._runtime_kwargs(ctx),
+            directory=directory,
+            recursive=recursive,
+        )
 
     async def read_file_tool(
         self,
@@ -170,7 +189,7 @@ class _ToolRegistrar:
         lines: int | None = None,
     ) -> Any:
         self._log("read_file", {"path": path, "start": start, "lines": lines})
-        return await run_tool("read_file", ctx=ctx, path=path, start=start, lines=lines)
+        return await run_tool("read_file", ctx=ctx, **self._runtime_kwargs(ctx), path=path, start=start, lines=lines)
 
     async def run_command_tool(
         self,
@@ -180,7 +199,14 @@ class _ToolRegistrar:
         timeout: float | None = None,
     ) -> Any:
         self._log("run_command", {"command": command, "cwd": cwd, "timeout": timeout})
-        return await run_tool("run_command", ctx=ctx, command=command, cwd=cwd, timeout=timeout)
+        return await run_tool(
+            "run_command",
+            ctx=ctx,
+            **self._runtime_kwargs(ctx),
+            command=command,
+            cwd=cwd,
+            timeout=timeout,
+        )
 
     async def edit_file_tool(
         self,
@@ -188,9 +214,18 @@ class _ToolRegistrar:
         path: str,
         content: str,
         create: bool = True,
+        expected_sha256: str | None = None,
     ) -> Any:
-        self._log("edit_file", {"path": path, "create": create})
-        return await run_tool("edit_file", ctx=ctx, path=path, content=content, create=create)
+        self._log("edit_file", {"path": path, "create": create, "expected_sha256": expected_sha256})
+        return await run_tool(
+            "edit_file",
+            ctx=ctx,
+            **self._runtime_kwargs(ctx),
+            path=path,
+            content=content,
+            create=create,
+            expected_sha256=expected_sha256,
+        )
 
     async def apply_patch_tool(
         self,
@@ -198,9 +233,18 @@ class _ToolRegistrar:
         path: str,
         patch: str,
         strip: int | None = None,
+        expected_sha256: str | None = None,
     ) -> Any:
-        self._log("apply_patch", {"path": path, "strip": strip})
-        return await run_tool("apply_patch", ctx=ctx, path=path, patch=patch, strip=strip)
+        self._log("apply_patch", {"path": path, "strip": strip, "expected_sha256": expected_sha256})
+        return await run_tool(
+            "apply_patch",
+            ctx=ctx,
+            **self._runtime_kwargs(ctx),
+            path=path,
+            patch=patch,
+            strip=strip,
+            expected_sha256=expected_sha256,
+        )
 
     async def file_summary_tool(
         self,
@@ -213,6 +257,7 @@ class _ToolRegistrar:
         return await run_tool(
             "file_summary",
             ctx=ctx,
+            **self._runtime_kwargs(ctx),
             path=path,
             head_lines=head_lines,
             tail_lines=tail_lines,
@@ -240,6 +285,7 @@ class _ToolRegistrar:
         return await run_tool(
             "code_search",
             ctx=ctx,
+            **self._runtime_kwargs(ctx),
             pattern=pattern,
             directory=directory,
             glob=glob,

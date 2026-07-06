@@ -5,6 +5,7 @@ from __future__ import annotations
 import contextlib
 from dataclasses import dataclass
 import logging
+from pathlib import Path
 from typing import Any, Awaitable, Callable, Dict
 
 from pydantic_ai import FunctionToolCallEvent, FunctionToolResultEvent  # type: ignore
@@ -33,6 +34,8 @@ class PromptEnv:
     send_protocol_update: Callable[[Any], Awaitable[None]]
     request_run_permission: Callable[[str, str, str, str | None], Awaitable[bool]]
     set_usage: Callable[[str, Any | None], None]
+    session_cwd: Callable[[str], Path | None] = lambda _session_id: None
+    session_additional_directories: Callable[[str], tuple[Path, ...]] = lambda _session_id: ()
 
 
 class PromptRunner:

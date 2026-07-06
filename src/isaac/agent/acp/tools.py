@@ -35,6 +35,7 @@ class ToolCallsMixin:
             send_update=self._send_update,
             request_run_permission=self._request_run_permission,
             session_cwds=self._session_cwds,
+            session_additional_directories=self._session_additional_directories,
             session_modes=self._session_modes,
             terminals=self._terminals,
             cancel_events=self._cancel_events,
