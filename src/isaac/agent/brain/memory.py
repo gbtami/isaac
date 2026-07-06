@@ -165,6 +165,48 @@ class CodingMemory(BaseModel):
             return cls()
 
 
+class TaskFileSummary(BaseModel):
+    """Compact per-file task state derived from coding memory."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    path: str
+    status: str = "observed"
+    notes: list[str] = Field(default_factory=list)
+    last_sha256: str | None = None
+
+
+class TaskCommandSummary(BaseModel):
+    """Compact command/test state derived from coding memory."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    command: str
+    status: str = "completed"
+    summary: str
+
+
+class TaskCheckpoint(BaseModel):
+    """Deterministic task checkpoint used as compact run context.
+
+    This is intentionally derived from structured events instead of model prose.
+    It gives the next model run a stable map of important files, validation,
+    and unresolved work without waiting for emergency context compaction.
+    """
+
+    model_config = ConfigDict(extra="ignore")
+
+    key_files: list[TaskFileSummary] = Field(default_factory=list)
+    recent_commands: list[TaskCommandSummary] = Field(default_factory=list)
+    open_items: list[str] = Field(default_factory=list)
+    risks: list[str] = Field(default_factory=list)
+    recent_progress: list[str] = Field(default_factory=list)
+
+    @property
+    def is_empty(self) -> bool:
+        return not (self.key_files or self.recent_commands or self.open_items or self.risks or self.recent_progress)
+
+
 def memory_events_from_tool_result(
     tool_name: str,
     raw_output: dict[str, Any],
@@ -217,6 +259,87 @@ def delegate_artifact_paths(raw_output: dict[str, Any]) -> list[str]:
         if path:
             paths.append(path)
     return _unique(paths)
+
+
+def build_task_checkpoint(
+    memory: CodingMemory,
+    *,
+    current_prompt: str = "",
+    max_files: int = 8,
+    max_commands: int = 5,
+    max_open_items: int = 8,
+    max_risks: int = 5,
+    max_progress: int = 6,
+) -> TaskCheckpoint:
+    """Build a deterministic task checkpoint from structured memory events.
+
+    The selector intentionally favors unresolved work, failed validation, recent
+    edits, and prompt-relevant paths.  Unlike compaction, this does not call a
+    model; it is safe to run for every prompt and survives restart because the
+    source events are persisted in ``CodingMemory``.
+    """
+
+    events = list(memory.events)
+    if not events:
+        return TaskCheckpoint()
+
+    prompt_terms = _terms(current_prompt)
+    key_files = _checkpoint_files(events, prompt_terms=prompt_terms, max_files=max_files)
+    recent_commands = _checkpoint_commands(events, max_commands=max_commands)
+    open_items = _checkpoint_open_items(events, max_items=max_open_items)
+    risks = _checkpoint_risks(events, max_items=max_risks)
+    recent_progress = _checkpoint_recent_progress(events, max_items=max_progress)
+    return TaskCheckpoint(
+        key_files=key_files,
+        recent_commands=recent_commands,
+        open_items=open_items,
+        risks=risks,
+        recent_progress=recent_progress,
+    )
+
+
+def task_checkpoint_context(
+    memory: CodingMemory,
+    *,
+    current_prompt: str,
+    context_limit: int | None,
+) -> str | None:
+    """Render the deterministic task checkpoint as transient run context."""
+
+    checkpoint = build_task_checkpoint(memory, current_prompt=current_prompt)
+    if checkpoint.is_empty:
+        return None
+
+    max_tokens = _checkpoint_budget(context_limit)
+    lines = [
+        "Session task checkpoint (deterministic summary from structured coding memory):",
+        "Use this for continuity; verify file contents before exact edits.",
+    ]
+
+    if checkpoint.open_items:
+        lines.append("Open work:")
+        lines.extend(f"- {item}" for item in checkpoint.open_items)
+    if checkpoint.risks:
+        lines.append("Risks / unresolved concerns:")
+        lines.extend(f"- {risk}" for risk in checkpoint.risks)
+    if checkpoint.key_files:
+        lines.append("Key files:")
+        for file_summary in checkpoint.key_files:
+            note = "; ".join(file_summary.notes[:2])
+            sha = f" sha256={file_summary.last_sha256[:12]}" if file_summary.last_sha256 else ""
+            suffix = f" — {note}" if note else ""
+            lines.append(f"- {file_summary.path} [{file_summary.status}{sha}]{suffix}")
+    if checkpoint.recent_commands:
+        lines.append("Recent validation / commands:")
+        for command_summary in checkpoint.recent_commands:
+            summary = command_summary.summary.replace("\n", " ")
+            lines.append(f"- {command_summary.command} [{command_summary.status}]: {summary}")
+    if checkpoint.recent_progress:
+        lines.append("Recent progress:")
+        lines.extend(f"- {item}" for item in checkpoint.recent_progress)
+
+    rendered = "\n".join(lines)
+    return _truncate_text_tokens(rendered, max_tokens)
 
 
 def selected_memory_context(
@@ -643,6 +766,184 @@ def _maybe(key: str, value: Any) -> dict[str, Any]:
     return {key: value}
 
 
+def _checkpoint_files(
+    events: list[CodingMemoryEvent],
+    *,
+    prompt_terms: set[str],
+    max_files: int,
+) -> list[TaskFileSummary]:
+    if max_files <= 0:
+        return []
+
+    by_path: dict[str, tuple[int, int, TaskFileSummary]] = {}
+    last_index = len(events) - 1
+    for idx, event in enumerate(events):
+        if not event.paths:
+            continue
+        for path in event.paths:
+            status = _file_checkpoint_status(event)
+            note = _checkpoint_note(event)
+            score = _file_checkpoint_score(event, path, idx=idx, last_index=last_index, prompt_terms=prompt_terms)
+            previous = by_path.get(path)
+            if previous is None:
+                by_path[path] = (score, idx, TaskFileSummary(path=path, status=status, notes=[note], last_sha256=event.sha256))
+                continue
+            old_score, old_idx, summary = previous
+            if note not in summary.notes:
+                summary.notes.insert(0, note)
+                summary.notes = summary.notes[:3]
+            if score >= old_score or idx >= old_idx:
+                summary.status = status
+                summary.last_sha256 = event.sha256 or summary.last_sha256
+                by_path[path] = (max(score, old_score), idx, summary)
+
+    ranked = sorted(by_path.values(), key=lambda item: (item[0], item[1]), reverse=True)
+    return [summary for _score, _idx, summary in ranked[:max_files]]
+
+
+def _checkpoint_commands(events: list[CodingMemoryEvent], *, max_commands: int) -> list[TaskCommandSummary]:
+    summaries: list[TaskCommandSummary] = []
+    for event in reversed(events):
+        if event.kind not in {"command", "test"}:
+            continue
+        command = event.command or event.tool_name or "validation"
+        summaries.append(
+            TaskCommandSummary(
+                command=command,
+                status=event.status,
+                summary=event.compact_summary(max_tokens=90).replace("\n", " "),
+            )
+        )
+        if len(summaries) >= max_commands:
+            break
+    summaries.reverse()
+    return summaries
+
+
+def _checkpoint_open_items(events: list[CodingMemoryEvent], *, max_items: int) -> list[str]:
+    items: list[str] = []
+    for event in reversed(events):
+        if event.kind not in {"finding", "followup", "plan", "test"}:
+            continue
+        if event.kind in {"plan", "test"} and event.status == "completed":
+            continue
+        text = _checkpoint_note(event)
+        if not _append_unique(items, text):
+            continue
+        if len(items) >= max_items:
+            break
+    items.reverse()
+    return items
+
+
+def _checkpoint_risks(events: list[CodingMemoryEvent], *, max_items: int) -> list[str]:
+    risks: list[str] = []
+    for event in reversed(events):
+        if event.kind != "risk" and not (event.status != "completed" and event.kind == "command"):
+            continue
+        text = _checkpoint_note(event)
+        if not _append_unique(risks, text):
+            continue
+        if len(risks) >= max_items:
+            break
+    risks.reverse()
+    return risks
+
+
+def _checkpoint_recent_progress(events: list[CodingMemoryEvent], *, max_items: int) -> list[str]:
+    progress: list[str] = []
+    for event in reversed(events):
+        if event.status != "completed":
+            continue
+        if event.kind not in {"edit", "delegate", "plan"}:
+            continue
+        text = _checkpoint_note(event)
+        if not _append_unique(progress, text):
+            continue
+        if len(progress) >= max_items:
+            break
+    progress.reverse()
+    return progress
+
+
+def _file_checkpoint_status(event: CodingMemoryEvent) -> str:
+    if event.status != "completed":
+        return f"{event.kind}_{event.status}"
+    if event.kind == "edit":
+        return "edited"
+    if event.kind in {"finding", "risk", "followup"}:
+        return "needs_attention"
+    if event.kind == "command":
+        return "validated"
+    return "observed"
+
+
+def _file_checkpoint_score(
+    event: CodingMemoryEvent,
+    path: str,
+    *,
+    idx: int,
+    last_index: int,
+    prompt_terms: set[str],
+) -> int:
+    recency = max(0, min(25, last_index - idx))
+    score = 25 - recency
+    if event.kind == "edit":
+        score += 80
+    elif event.kind in {"finding", "risk", "followup"}:
+        score += 72
+    elif event.kind == "command":
+        score += 42
+    elif event.kind in {"observation", "fetch"}:
+        score += 30
+    else:
+        score += 20
+    if event.status != "completed":
+        score += 24
+    specific_terms = _specific_checkpoint_terms(prompt_terms)
+    if _matches_terms(path.lower(), specific_terms) or _matches_terms(event.search_text(), specific_terms):
+        score += 80
+    return score
+
+
+def _checkpoint_note(event: CodingMemoryEvent, *, max_tokens: int = 70) -> str:
+    locator = _event_locator(event)
+    prefix = f"{event.kind}"
+    if event.status != "completed":
+        prefix = f"{prefix}/{event.status}"
+    if locator:
+        prefix = f"{prefix} {locator}"
+    body = event.compact_summary(max_tokens=max_tokens).replace("\n", " ")
+    if body.lower().startswith(prefix.lower()):
+        return body
+    return f"{prefix}: {body}"
+
+
+def _append_unique(items: list[str], text: str) -> bool:
+    normalized = text.strip()
+    if not normalized:
+        return False
+    key = re.sub(r"\s+", " ", normalized.lower())
+    existing = {re.sub(r"\s+", " ", item.lower()) for item in items}
+    if key in existing:
+        return False
+    items.append(normalized)
+    return True
+
+
+def _checkpoint_budget(context_limit: int | None) -> int:
+    if not context_limit or context_limit <= 0:
+        return 1_600
+    return max(800, min(2_400, int(context_limit * 0.035)))
+
+
+def _specific_checkpoint_terms(terms: set[str]) -> set[str]:
+    """Drop generic directory words before scoring checkpoint relevance."""
+
+    generic = {"src", "lib", "app", "tests", "test", "docs", "doc"}
+    return {term for term in terms if len(term) >= 4 and term not in generic}
+
+
 def _event_score(
     event: CodingMemoryEvent,
     *,
@@ -721,8 +1022,13 @@ def _unique(values: list[str]) -> list[str]:
 __all__ = [
     "CodingMemory",
     "CodingMemoryEvent",
+    "TaskCheckpoint",
+    "TaskCommandSummary",
+    "TaskFileSummary",
+    "build_task_checkpoint",
     "delegate_artifact_paths",
     "memory_events_from_tool_result",
     "select_memory_events",
     "selected_memory_context",
+    "task_checkpoint_context",
 ]

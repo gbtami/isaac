@@ -29,6 +29,7 @@ from isaac.agent.capabilities import (
     build_event_stream_observer_capability,
     build_plan_progress_capabilities,
     build_recent_files_capability,
+    build_task_checkpoint_capability,
 )
 from isaac.agent.subagents.delegate_tools import (
     DelegateToolContext,
@@ -210,6 +211,13 @@ class PromptHandler:
             )
         )
         context_limit = model_registry.get_context_limit(state.model_id)
+        task_checkpoint_capability = build_task_checkpoint_capability(
+            state.coding_memory,
+            current_prompt=prompt_text,
+            context_limit=context_limit,
+        )
+        if task_checkpoint_capability is not None:
+            run_capabilities.append(task_checkpoint_capability)
         coding_memory_capability = build_coding_memory_capability(
             state.coding_memory,
             current_prompt=prompt_text,

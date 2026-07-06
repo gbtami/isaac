@@ -29,7 +29,7 @@ from pydantic_ai.capabilities import (  # type: ignore
 from pydantic_ai.tools import ToolDefinition  # type: ignore
 
 from isaac.agent.brain.history_processors import sanitize_message_history
-from isaac.agent.brain.memory import CodingMemory, selected_memory_context
+from isaac.agent.brain.memory import CodingMemory, selected_memory_context, task_checkpoint_context
 from isaac.agent.brain.plan_progress import PlanProgress
 from isaac.agent.brain.recent_files import recent_files_context_text
 
@@ -194,6 +194,33 @@ def build_recent_files_capability(recent_files: list[str], context_count: int) -
         instructions=message,
         id="isaac-recent-files",
         description="Transient context about files touched earlier in this session.",
+    )
+
+
+def build_task_checkpoint_capability(
+    memory: CodingMemory,
+    *,
+    current_prompt: str,
+    context_limit: int | None,
+) -> Any | None:
+    """Build a compact deterministic task-checkpoint capability.
+
+    This complements event-level coding memory with a stable per-run summary of
+    open work, key files, and recent validation. It stays on Pydantic AI's
+    capability path so persisted chat history remains user/assistant text.
+    """
+
+    message = task_checkpoint_context(
+        memory,
+        current_prompt=current_prompt,
+        context_limit=context_limit,
+    )
+    if message is None:
+        return None
+    return Capability(
+        instructions=message,
+        id="isaac-task-checkpoint",
+        description="Transient deterministic checkpoint from structured coding memory for this session.",
     )
 
 
@@ -372,5 +399,6 @@ __all__ = [
     "build_recent_files_capability",
     "build_prompt_capabilities",
     "build_system_prompt_capability",
+    "build_task_checkpoint_capability",
     "build_toolset_capabilities",
 ]

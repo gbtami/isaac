@@ -243,3 +243,23 @@ Prompt assembly renders only the selected memory events into a Pydantic AI
 `Capability` instruction block (`isaac-coding-memory`). This keeps the persisted
 chat history clean while still using Pydantic AI's intended extension boundary
 for transient run context.
+
+Deterministic Task Checkpoint
+-----------------------------
+
+Structured memory is event-level by design. To make long sessions easier to
+resume, Isaac also derives a deterministic task checkpoint before every prompt
+and injects it through a Pydantic AI capability (`isaac-task-checkpoint`). This
+checkpoint is not a model-generated summary and does not mutate chat history.
+It is rebuilt from persisted `CodingMemoryEvent` records and contains:
+
+- open work from planner, review findings, tests, and follow-ups;
+- unresolved risks and failed validation;
+- key files with their latest observed/edited status and hashes when available;
+- recent validation commands and compact outcomes;
+- recent concrete progress such as edits, delegate completions, and explicit
+  plan-step updates.
+
+This complements emergency compaction. Compaction remains useful when raw chat
+history is too large, but the checkpoint gives every normal turn a compact map
+of the current task state without making an extra LLM call.
