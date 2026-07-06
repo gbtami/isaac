@@ -48,3 +48,13 @@ def test_build_plan_removed_targets_default_plan() -> None:
 
     assert isinstance(update, AgentPlanRemovedUpdate)
     assert update.id == DEFAULT_PLAN_ID
+
+
+def test_build_plan_update_accepts_explicit_status_vector() -> None:
+    steps = PlanSteps(entries=[PlanStep(content="alpha", id="a"), PlanStep(content="beta", id="b")])
+
+    update = build_plan_update(steps, statuses=["completed", "in_progress"])
+
+    assert update is not None
+    assert [entry.status for entry in update.entries] == ["completed", "in_progress"]
+    assert [entry.field_meta.get("id") for entry in update.entries] == ["a", "b"]

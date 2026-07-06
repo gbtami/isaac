@@ -176,6 +176,8 @@ Important Files
   - Context selection, fallback history trimming, and usage token extraction helpers.
 - `src/isaac/agent/brain/plan_helpers.py`
   - Parsing planner tool output into PlanSteps.
+- `src/isaac/agent/brain/plan_progress.py`
+  - Run-scoped explicit plan status state and stable step ids.
 - `src/isaac/agent/brain/recent_files.py`
   - Recent-file tracking and context injection helpers.
 - `src/isaac/agent/brain/session_state.py`
@@ -187,7 +189,7 @@ Important Files
 - `src/isaac/agent/acp/prompt_env.py`
   - ACP adapter for message, tool, and plan updates.
 - `src/isaac/agent/acp/plan_updates.py`
-  - Converts PlanSteps into ACP plan updates.
+  - Converts PlanSteps plus explicit status vectors into ACP plan updates.
 - `src/isaac/agent/acp/history.py`
   - ACP update replay into model-friendly history.
 - `src/isaac/agent/runner.py`

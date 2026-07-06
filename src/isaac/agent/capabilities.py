@@ -13,9 +13,9 @@ import copy
 from dataclasses import is_dataclass, replace
 import inspect
 import os
-from typing import Any, Awaitable, Callable
+from typing import Any, Awaitable, Callable, Literal
 
-from pydantic_ai import DeferredToolRequests, DeferredToolResults, RunContext, ToolDenied  # type: ignore
+from pydantic_ai import DeferredToolRequests, DeferredToolResults, FunctionToolset, RunContext, Tool, ToolDenied  # type: ignore
 from pydantic_ai.capabilities import (  # type: ignore
     Capability,
     HandleDeferredToolCalls,
@@ -30,6 +30,7 @@ from pydantic_ai.tools import ToolDefinition  # type: ignore
 
 from isaac.agent.brain.history_processors import sanitize_message_history
 from isaac.agent.brain.memory import CodingMemory, selected_memory_context
+from isaac.agent.brain.plan_progress import PlanProgress
 from isaac.agent.brain.recent_files import recent_files_context_text
 
 ModeGetter = Callable[[], str]
@@ -224,6 +225,62 @@ def build_coding_memory_capability(
     )
 
 
+def build_plan_progress_capabilities(
+    progress: PlanProgress,
+    *,
+    session_id: str,
+    send_plan_update: Callable[[str, Any, int | None, str | None, list[str] | None], Awaitable[None]],
+) -> list[Any]:
+    """Expose explicit plan-step status reporting as a run-scoped toolset.
+
+    The tool is intentionally transient: it exists only for the current prompt
+    turn and updates the ACP plan UI from Isaac-owned state. This keeps plan
+    progress deterministic while using Pydantic AI's normal tool/capability
+    boundary instead of parsing assistant prose or inferring progress from
+    unrelated tool successes.
+    """
+
+    async def mark_plan_step(
+        ctx: RunContext[Any],
+        step: int | str,
+        status: Literal["pending", "in_progress", "completed"],
+        note: str | None = None,
+    ) -> dict[str, Any]:
+        _ = ctx
+        result = progress.mark(step, status, note)
+        if progress.plan is not None and not result.get("error"):
+            await send_plan_update(session_id, progress.plan, None, None, list(progress.statuses))
+        return result
+
+    toolset: FunctionToolset[Any] = FunctionToolset(id="isaac-plan-progress")
+    toolset.add_tool(
+        Tool(
+            mark_plan_step,
+            takes_ctx=True,
+            name="mark_plan_step",
+            description=(
+                "Explicitly report real progress on the current plan. "
+                "Use only after a plan exists and when a step actually starts, is completed, "
+                "or needs to be reset to pending. The step argument is the 1-based step number "
+                "or the step id."
+            ),
+            strict=True,
+            sequential=True,
+            metadata={"tool_group": "control", "mutates_state": False},
+        )
+    )
+    instructions = Capability(
+        instructions=(
+            "Plan progress policy: tool calls do not automatically complete plan steps. "
+            "When a plan is active, call mark_plan_step only when you have concrete evidence "
+            "that a step has started or finished. Do not mark exploratory reads/searches as completed work."
+        ),
+        id="isaac-plan-progress-instructions",
+        description="Transient instructions for explicit ACP plan progress reporting.",
+    )
+    return [ToolsetCapability(toolset), instructions]
+
+
 def build_toolset_capabilities(toolsets: Iterable[Any] | None) -> list[Any]:
     """Wrap externally supplied toolsets as Pydantic AI capabilities.
 
@@ -311,6 +368,7 @@ __all__ = [
     "build_history_sanitizer_capability",
     "build_mode_capability",
     "build_optional_harness_capabilities",
+    "build_plan_progress_capabilities",
     "build_recent_files_capability",
     "build_prompt_capabilities",
     "build_system_prompt_capability",

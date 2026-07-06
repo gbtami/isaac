@@ -300,7 +300,7 @@ def _memory_kind_for_tool(tool_name: str) -> MemoryKind | None:
         return "observation"
     if name == "fetch_url":
         return "fetch"
-    if name == "planner":
+    if name in {"planner", "mark_plan_step"}:
         return "plan"
     if is_delegate_tool(name):
         return "delegate"

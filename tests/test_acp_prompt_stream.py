@@ -101,5 +101,5 @@ async def test_acp_prompt_update_sequence(monkeypatch, tmp_path) -> None:
     assert finish_idx != -1
     assert plan_in_idx != -1
     assert msg_idx != -1
-    assert plan_done_idx != -1
-    assert start_idx < finish_idx < plan_in_idx < msg_idx < plan_done_idx
+    assert plan_done_idx == -1
+    assert start_idx < finish_idx < plan_in_idx < msg_idx

@@ -13,6 +13,7 @@ from isaac.agent.ai_types import SessionToolDeps
 from isaac.agent.brain.prompt import SUBAGENT_INSTRUCTIONS, SYSTEM_PROMPT
 from isaac.agent.history_types import ChatMessage
 from isaac.agent.brain.plan_helpers import plan_from_planner_result
+from isaac.agent.brain.plan_progress import PlanProgress
 from isaac.agent.brain.memory import CodingMemory, CodingMemoryEvent
 from isaac.agent.brain.prompt_runner import PromptEnv, PromptRunner
 from isaac.agent.brain.prompt_result import PromptResult
@@ -26,6 +27,7 @@ from isaac.agent.runner import stream_with_runner
 from isaac.agent.capabilities import (
     build_coding_memory_capability,
     build_event_stream_observer_capability,
+    build_plan_progress_capabilities,
     build_recent_files_capability,
 )
 from isaac.agent.subagents.delegate_tools import (
@@ -147,7 +149,7 @@ class PromptHandler:
             current_prompt=prompt_text,
             context_limit=model_registry.get_context_limit(state.model_id),
         )
-        plan_progress: dict[str, Any] | None = {"plan": None, "idx": 0}
+        plan_progress = PlanProgress()
         _push_thought = self._prompt_runner._make_thought_sender(session_id)  # type: ignore[attr-defined]
 
         # Keep tool/plan/thought updates streaming, but emit assistant text only once
@@ -183,40 +185,30 @@ class PromptHandler:
             plan_update = plan_from_planner_result(result_part)
             if plan_update is None:
                 return
-            if plan_progress is not None:
-                plan_progress["plan"] = plan_update
-                plan_progress["idx"] = 0
-            await self.env.send_plan_update(session_id, plan_update, 0, None)
+            plan_update = plan_progress.set_plan(plan_update)
+            await self.env.send_plan_update(session_id, plan_update, None, None, list(plan_progress.statuses))
 
         base_handler = self._prompt_runner._build_runner_event_handler(  # type: ignore[attr-defined]
             session_id,
-            plan_progress=plan_progress,
+            plan_progress=None,
             record_history=_record_history,
             record_memory=_record_memory,
         )
 
         async def _on_event(event: Any) -> bool:
-            result_part = getattr(event, "result", None) or getattr(event, "part", None)
-            is_planner_result = (
-                isinstance(event, FunctionToolResultEvent) and getattr(result_part, "tool_name", "") == "planner"
-            )
-            if is_planner_result and plan_progress is not None:
-                saved_plan = plan_progress.get("plan")
-                saved_idx = plan_progress.get("idx", 0)
-                plan_progress["plan"] = None
-                plan_progress["idx"] = saved_idx
-                handled = await base_handler(event)
-                plan_progress["plan"] = saved_plan
-                plan_progress["idx"] = saved_idx
-                await _maybe_capture_plan(event)
-                record_recent_file(state.recent_files, event, self._MAX_RECENT_FILES)
-                return handled
-            await _maybe_capture_plan(event)
             handled = await base_handler(event)
+            await _maybe_capture_plan(event)
             record_recent_file(state.recent_files, event, self._MAX_RECENT_FILES)
             return handled
 
         run_capabilities = [build_event_stream_observer_capability(_on_event)]
+        run_capabilities.extend(
+            build_plan_progress_capabilities(
+                plan_progress,
+                session_id=session_id,
+                send_plan_update=self.env.send_plan_update,
+            )
+        )
         context_limit = model_registry.get_context_limit(state.model_id)
         coding_memory_capability = build_coding_memory_capability(
             state.coding_memory,
@@ -319,8 +311,9 @@ class PromptHandler:
             payload = response_text if response_text.endswith("\n") else f"{response_text}\n"
             await self.env.send_message_chunk(session_id, payload)
             state.history.append({"role": "assistant", "content": response_text, "source": "assistant"})
-        if plan_progress and plan_progress.get("plan"):
-            await self.env.send_plan_update(session_id, plan_progress["plan"], None, "completed")
+        # Plan steps are no longer auto-completed at end of turn. The model
+        # reports concrete progress through the run-scoped mark_plan_step tool,
+        # avoiding false completion from exploratory or failed work.
         with log_ctx(session_id=session_id, model_id=state.model_id):
             log_event(
                 logger,

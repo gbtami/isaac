@@ -113,6 +113,14 @@ def tool_history_summary(
             where = f" in {directory}" if directory else ""
             detail = f"Matches:\n{matches}" if matches else ""
             return _lines(f"Searched for '{pattern}'{where} [{status}]", detail)
+    if tool_name == "mark_plan_step":
+        step = raw_output.get("step") or raw_output.get("step_id") or (raw_input or {}).get("step")
+        step_status = raw_output.get("status") or (raw_input or {}).get("status")
+        note = raw_output.get("note") or (raw_input or {}).get("note")
+        detail = f" Note: {_truncate(note, 400)}" if note else ""
+        if step and step_status:
+            return f"Plan step {step} marked {step_status} [{status}].{detail}"
+        return f"Plan progress reported [{status}].{detail}"
     if tool_name == "fetch_url":
         fetched = raw_output.get("url") or raw_output.get("source") or raw_output.get("request_url")
         status_code = raw_output.get("status_code")
@@ -179,6 +187,7 @@ def should_record_tool_history(tool_name: str) -> bool:
         "file_summary",
         "code_search",
         "fetch_url",
+        "mark_plan_step",
     }
 
 
@@ -196,6 +205,8 @@ def tool_kind(tool_name: str) -> str:
         return "execute"
     if name in {"fetch_url"}:
         return "fetch"
+    if name in {"mark_plan_step"}:
+        return "plan"
     if is_delegate_tool(name):
         return "think"
     return "other"

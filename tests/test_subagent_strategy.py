@@ -103,7 +103,8 @@ async def test_subagent_planner_plan_updates(tmp_path, monkeypatch):
     assert plan_updates, "Expected plan updates from planner tool"
     assert plan_updates[0].entries[0].status == "in_progress"
     assert plan_updates[0].entries[0].field_meta.get("id")
-    assert plan_updates[-1].entries[0].status == "completed"
+    assert plan_updates[-1].entries[0].status == "in_progress"
+    assert plan_updates[-1].entries[1].status == "pending"
     assert runner.prompts  # ensure runner executed
 
 

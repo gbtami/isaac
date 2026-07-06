@@ -89,12 +89,14 @@ class ACPPromptEnvAdapter:
         plan_steps: Any,
         active_index: int | None,
         status_all: str | None,
+        statuses: list[str] | None = None,
     ) -> None:
         update = build_plan_update(
             plan_steps,
             active_index=active_index,
             status_all=status_all,
             use_incremental=self.supports_plan_updates(),
+            statuses=statuses,
         )
         if update is None:
             return

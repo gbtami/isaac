@@ -30,7 +30,7 @@ class PromptEnv:
     send_thought_chunk: Callable[[str, str], Awaitable[None]]
     send_tool_start: Callable[[str, ToolCallStart], Awaitable[None]]
     send_tool_finish: Callable[[str, ToolCallFinish], Awaitable[None]]
-    send_plan_update: Callable[[str, Any, int | None, str | None], Awaitable[None]]
+    send_plan_update: Callable[[str, Any, int | None, str | None, list[str] | None], Awaitable[None]]
     send_notification: Callable[[str, str], Awaitable[None]]
     send_protocol_update: Callable[[Any], Awaitable[None]]
     request_run_permission: Callable[[str, str, str, str | None], Awaitable[bool]]
@@ -163,19 +163,6 @@ class PromptRunner:
                     ):
                         with contextlib.suppress(Exception):
                             record_memory(memory_event)
-
-                if plan_progress and plan_progress.get("plan") and not raw_output.get("error"):
-                    entries = getattr(plan_progress["plan"], "entries", []) or []
-                    if entries:
-                        idx = plan_progress.get("idx", 0)
-                        idx = max(int(idx), 0)
-                        if idx < len(entries):
-                            idx += 1
-                            plan_progress["idx"] = idx
-                            if idx >= len(entries):
-                                await self.env.send_plan_update(session_id, plan_progress["plan"], None, "completed")
-                            else:
-                                await self.env.send_plan_update(session_id, plan_progress["plan"], idx, None)
                 return True
 
             return False
