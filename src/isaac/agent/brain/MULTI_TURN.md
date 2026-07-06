@@ -33,7 +33,7 @@ Where History Lives
 4) Structured coding memory
    - `SessionState.coding_memory` stores typed `CodingMemoryEvent` records for
      durable coding facts: file observations, edits, commands, delegate outputs,
-     fetches, and plans.
+     delegate artifacts, fetches, and plans.
    - The records are persisted in `prompt.json` alongside chat history so
      `session/load` restores both the UI replay and the model's task memory.
    - The memory is deterministic and compact; it is not a second agent loop.
@@ -67,9 +67,29 @@ Tool Call Context and History
   - `edit_file`/`apply_patch`: path + diff or summary.
   - `read_file`/`file_summary`: path, hash when available, and a bounded excerpt.
   - `list_files`/`code_search`/`fetch_url`: query/root and bounded results.
-  - delegate tools: task + summary.
+  - delegate tools: task + summary plus artifact counts.
 - This keeps the model aware of what changed or was learned without forcing it to
   re-read files after every follow-up.
+
+Delegate Artifact Propagation
+-----------------------------
+
+Delegate outputs are not treated as opaque prose. When a delegate returns
+structured JSON, Isaac expands it into parent-session coding memory events:
+
+- coding `files[]` become file observation/edit events, depending on their
+  declared `action` (`changed`, `created`, `deleted`, `inspected`, `verified`,
+  or `unchanged`).
+- review `findings[]` become open finding events with severity and optional
+  file/line metadata.
+- `tests[]`, `risks[]`, and `followups[]` become durable test/risk/follow-up
+  events, so the main agent can remember pending validation and open concerns.
+- planner `entries[]` become open plan events in memory in addition to ACP plan
+  updates shown in the client.
+
+This keeps delegates isolated while still letting the parent brain retain the
+concrete artifacts produced by delegate work. The parent does not need the
+delegate's full private history; it receives normalized artifacts instead.
 
 Tool Call Normalization
 -----------------------
@@ -214,6 +234,8 @@ these with Pydantic models in `brain/memory.py`:
 - `command`: commands, return status, and compact output/error context.
 - `delegate` / `plan`: delegated subagent and planner outcomes.
 - `fetch`: URL fetches and compact fetched context.
+- `test`, `risk`, `finding`, `followup`: structured artifacts returned by
+  delegate subagents.
 
 Prompt assembly renders only the selected memory events into a Pydantic AI
 `Capability` instruction block (`isaac-coding-memory`). This keeps the persisted

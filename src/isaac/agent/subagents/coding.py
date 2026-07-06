@@ -23,12 +23,13 @@ Guidelines:
 - You may delegate to other tools (planner/review) for planning or validation, but keep depth low.
 - When reporting results, include a short "Files:" list with each file and intent.
 
-After acting, return a concise summary and list files changed.
+After acting, return a concise summary and list file artifacts.
 If you did not change files, explain why.
 
 Output:
 - Return ONLY JSON with keys: summary, files, tests, risks, followups.
-- files is a list of objects with: path, summary, intent.
+- files is a list of objects with: path, action, summary, intent.
+- action is one of: changed, created, deleted, inspected, verified, unchanged.
 - If no files changed, use files=[] and explain why in summary.
 """
 

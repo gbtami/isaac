@@ -19,6 +19,10 @@ class DelegateFileChange(BaseModel):
     model_config = ConfigDict(extra="ignore")
 
     path: str = Field(..., description="Path to the file that was changed or inspected.")
+    action: Literal["changed", "created", "deleted", "inspected", "verified", "unchanged"] | None = Field(
+        None,
+        description="What the delegate did with this file, if known.",
+    )
     summary: str = Field(..., description="Short description of what changed or was verified.")
     intent: str | None = Field(
         None,

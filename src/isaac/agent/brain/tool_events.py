@@ -2,7 +2,11 @@
 
 from __future__ import annotations
 
+import contextlib
+import json
 from typing import Any
+
+from pydantic import BaseModel
 
 
 def is_delegate_tool(tool_name: str) -> bool:
@@ -93,8 +97,13 @@ def tool_history_summary(
     if is_delegate_tool(tool_name):
         task = raw_output.get("task") or (raw_input or {}).get("task")
         task_str = f": {task}" if task else ""
-        summary = raw_output.get("summary") or raw_output.get("content") or ""
-        detail = f"Summary:\n{_truncate(summary)}" if summary else ""
+        payload = _delegate_payload(raw_output)
+        summary = raw_output.get("summary") or payload.get("summary") or raw_output.get("content") or ""
+        artifact_detail = _delegate_artifact_detail(payload)
+        detail = _lines(
+            f"Summary:\n{_truncate(summary)}" if summary else "",
+            artifact_detail,
+        )
         return _lines(f"Delegated to {tool_name}{task_str} [{status}]", detail)
     if tool_name == "code_search":
         pattern = raw_output.get("pattern") or (raw_input or {}).get("pattern")
@@ -117,6 +126,43 @@ def tool_history_summary(
     if content:
         return f"Tool result [{status}]: {content}"
     return None
+
+
+def _delegate_payload(raw_output: dict[str, Any]) -> dict[str, Any]:
+    content = raw_output.get("content")
+    if isinstance(content, BaseModel):
+        with contextlib.suppress(Exception):
+            return content.model_dump()
+    if isinstance(content, dict):
+        return content
+    if isinstance(content, str):
+        stripped = content.strip()
+        if stripped.startswith("{"):
+            with contextlib.suppress(Exception):
+                parsed = json.loads(stripped)
+                if isinstance(parsed, dict):
+                    return parsed
+    return {}
+
+
+def _delegate_artifact_detail(payload: dict[str, Any]) -> str:
+    if not payload:
+        return ""
+    counts: list[str] = []
+    for key, label in (
+        ("files", "files"),
+        ("findings", "findings"),
+        ("tests", "tests"),
+        ("risks", "risks"),
+        ("followups", "followups"),
+        ("entries", "plan entries"),
+    ):
+        value = payload.get(key)
+        if isinstance(value, list) and value:
+            counts.append(f"{label}={len(value)}")
+    if not counts:
+        return ""
+    return f"Artifacts: {', '.join(counts)}"
 
 
 def should_record_tool_history(tool_name: str) -> bool:

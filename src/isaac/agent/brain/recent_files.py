@@ -7,6 +7,8 @@ from typing import Any
 
 from pydantic_ai import FunctionToolResultEvent  # type: ignore
 
+from isaac.agent.brain.memory import delegate_artifact_paths
+
 
 def record_recent_file(recent_files: list[str], event: Any, max_recent: int) -> None:
     """Track the most recently edited files for follow-up prompt context."""
@@ -15,20 +17,23 @@ def record_recent_file(recent_files: list[str], event: Any, max_recent: int) -> 
         return
     result_part = getattr(event, "result", None) or getattr(event, "part", None)
     tool_name = getattr(result_part, "tool_name", None) or ""
-    if tool_name not in {"edit_file", "apply_patch"}:
-        return
     content = getattr(result_part, "content", None)
-    path = None
-    if isinstance(content, dict):
-        path = content.get("path")
-    if not path:
+    paths: list[str] = []
+    if tool_name in {"edit_file", "apply_patch"}:
+        path = content.get("path") if isinstance(content, dict) else None
+        if path:
+            paths.append(str(path))
+    elif tool_name == "coding" and isinstance(content, dict):
+        paths.extend(delegate_artifact_paths(content))
+    if not paths:
         return
-    normalized = str(path).strip()
-    if not normalized:
-        return
-    with contextlib.suppress(ValueError):
-        recent_files.remove(normalized)
-    recent_files.append(normalized)
+    for path in paths:
+        normalized = str(path).strip()
+        if not normalized:
+            continue
+        with contextlib.suppress(ValueError):
+            recent_files.remove(normalized)
+        recent_files.append(normalized)
     if len(recent_files) > max_recent:
         del recent_files[:-max_recent]
 
