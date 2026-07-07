@@ -512,6 +512,48 @@ async def test_edit_file_expected_sha256_blocks_stale_write(tmp_path: Path):
 
 
 @pytest.mark.asyncio
+async def test_run_command_caps_stdout_with_metadata(tmp_path: Path):
+    result = await run_command(
+        command="python -c 'print(\"x\" * 80)'",
+        cwd=str(tmp_path),
+        max_output_chars=20,
+    )
+
+    assert result["error"] is None
+    assert result["returncode"] == 0
+    assert result["stdout_truncated"] is True
+    assert result["stderr_truncated"] is False
+    assert result["truncated"] is True
+    assert result["max_output_chars"] == 20
+    assert "[truncated after 20 characters]" in result["content"]
+
+
+@pytest.mark.asyncio
+async def test_run_command_keeps_successful_stderr_as_diagnostic(tmp_path: Path):
+    result = await run_command(
+        command="python -c 'import sys; print(\"warn\", file=sys.stderr)'",
+        cwd=str(tmp_path),
+        max_output_chars=100,
+    )
+
+    assert result["returncode"] == 0
+    assert result["error"] is None
+    assert result["stderr"] == "warn"
+
+
+@pytest.mark.asyncio
+async def test_run_command_failed_stderr_becomes_error(tmp_path: Path):
+    result = await run_command(
+        command="python -c 'import sys; print(\"boom\", file=sys.stderr); sys.exit(3)'",
+        cwd=str(tmp_path),
+        max_output_chars=100,
+    )
+
+    assert result["returncode"] == 3
+    assert result["stderr"] == "boom"
+    assert result["error"] == "boom"
+
+@pytest.mark.asyncio
 async def test_run_command_shell_policy_env_allowlist(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
     monkeypatch.setenv("ISAAC_SHELL_ALLOWLIST", r"^echo\b")
 

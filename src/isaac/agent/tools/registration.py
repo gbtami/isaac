@@ -206,8 +206,17 @@ class _ToolRegistrar:
         command: str,
         cwd: str | None = None,
         timeout: float | None = None,
+        max_output_chars: int | None = None,
     ) -> Any:
-        self._log("run_command", {"command": command, "cwd": cwd, "timeout": timeout})
+        self._log(
+            "run_command",
+            {
+                "command": command,
+                "cwd": cwd,
+                "timeout": timeout,
+                "max_output_chars": max_output_chars,
+            },
+        )
         return await run_tool(
             "run_command",
             ctx=ctx,
@@ -215,6 +224,7 @@ class _ToolRegistrar:
             command=command,
             cwd=cwd,
             timeout=timeout,
+            max_output_chars=max_output_chars,
         )
 
     async def edit_file_tool(

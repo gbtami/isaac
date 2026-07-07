@@ -68,10 +68,11 @@ Tool Call Context and History
   - `read_file`/`file_summary`: path, hash when available, and a bounded excerpt.
   - `list_files`/`code_search`/`fetch_url`: query/root and bounded results.
   - delegate tools: task + summary plus artifact counts.
-- `read_file` and `code_search` are paged/bounded at the tool contract level, not
-  only by a final global string truncation. Large file reads return `next_start`
-  so the model can continue deliberately, and broad searches return match counts
-  plus a bounded result set.
+- `read_file`, `code_search`, and model-facing `run_command` results are
+  bounded at the tool contract level, not only by a final global string
+  truncation. Large file reads return `next_start` so the model can continue
+  deliberately, broad searches return match counts plus a bounded result set,
+  and shell commands return separately capped stdout/stderr diagnostics.
 - This keeps the model aware of what changed or was learned without forcing it to
   re-read files after every follow-up.
 

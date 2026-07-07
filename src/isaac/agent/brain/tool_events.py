@@ -45,11 +45,17 @@ def tool_history_summary(
         cwd_str = f" (cwd: {cwd})" if cwd else ""
         header = f"Ran command: {cmd_str}{cwd_str} [{status}]" if cmd_str else f"Ran command [{status}]"
         stdout = raw_output.get("content") or ""
-        stderr = raw_output.get("error") or ""
+        stderr = raw_output.get("stderr") or raw_output.get("error") or ""
+        truncation = ""
+        if raw_output.get("stdout_truncated") or raw_output.get("stderr_truncated") or raw_output.get("truncated"):
+            max_chars = raw_output.get("max_output_chars")
+            suffix = f" at {max_chars} chars" if isinstance(max_chars, int) else ""
+            truncation = f"Output truncated{suffix}."
         output = _lines(
             header,
             f"Stdout:\n{_truncate(stdout)}" if stdout else "",
             f"Stderr:\n{_truncate(stderr)}" if stderr else "",
+            truncation,
         )
         return output
     if tool_name in {"edit_file", "apply_patch"}:

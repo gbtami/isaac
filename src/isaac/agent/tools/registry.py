@@ -74,7 +74,7 @@ TOOL_DESCRIPTIONS: dict[str, str] = {
         "Read a bounded file excerpt with optional start/lines/max_lines. "
         "Use next_start from truncated results to continue large files."
     ),
-    "run_command": "Execute a shell command and return its output (include the full command string; use for mkdir -p).",
+    "run_command": "Execute a shell command and return bounded stdout/stderr diagnostics (include the full command string; use for mkdir -p).",
     "edit_file": (
         "Replace the contents of a file (requires path + full content; content cannot be empty; "
         "do not use for directories)."

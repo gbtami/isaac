@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from pydantic import BaseModel, ConfigDict, Field
 from .fetch_url import DEFAULT_FETCH_MAX_BYTES, DEFAULT_FETCH_TIMEOUT
+from .run_command import DEFAULT_COMMAND_OUTPUT_CHARS, MAX_COMMAND_OUTPUT_CHARS
 
 
 class ListFilesArgs(BaseModel):
@@ -68,6 +69,15 @@ class RunCommandArgs(BaseModel):
         None,
         description="Timeout in seconds",
         gt=0,
+    )
+    max_output_chars: int | None = Field(
+        DEFAULT_COMMAND_OUTPUT_CHARS,
+        description=(
+            "Maximum characters to return separately for stdout and stderr. "
+            "Use a smaller value for noisy commands; hard-capped by Isaac."
+        ),
+        ge=1,
+        le=MAX_COMMAND_OUTPUT_CHARS,
     )
 
 
