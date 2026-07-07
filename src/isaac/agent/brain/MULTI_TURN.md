@@ -96,6 +96,13 @@ This keeps delegates isolated while still letting the parent brain retain the
 concrete artifacts produced by delegate work. The parent does not need the
 delegate's full private history; it receives normalized artifacts instead.
 
+Delegate tool activity is also surfaced to the parent ACP session while the
+delegate is running. Isaac attaches a run-scoped Pydantic AI event-stream
+capability to delegate runs, prefixes inner tool-call IDs with the delegate
+tool/run identifiers, and forwards start/progress updates through the parent
+ACP update channel. This keeps long delegated work observable in compatible
+clients without sharing delegate history with the parent model.
+
 Tool Call Normalization
 -----------------------
 

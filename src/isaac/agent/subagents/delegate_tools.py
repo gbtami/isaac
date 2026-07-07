@@ -15,16 +15,20 @@ from typing import Any, Awaitable, Callable
 
 from pydantic import BaseModel
 from pydantic_ai import Agent as PydanticAgent  # type: ignore
-from pydantic_ai import DeferredToolRequests  # type: ignore
+from pydantic_ai import DeferredToolRequests, FunctionToolCallEvent, FunctionToolResultEvent  # type: ignore
 from pydantic_ai.exceptions import ModelRetry  # type: ignore
+from pydantic_ai.messages import RetryPromptPart  # type: ignore
 from pydantic_ai.usage import UsageLimits  # type: ignore
 
-from acp.helpers import session_notification, text_block, update_agent_thought
+from acp.contrib.tool_calls import ToolCallTracker
+from acp.helpers import session_notification, text_block, tool_content, tool_diff_content, update_agent_thought
 from isaac.agent.ai_types import AgentRunner, SessionToolDeps
 from isaac.agent import models as model_registry
 from isaac.agent.brain.instrumentation import base_run_metadata
 from isaac.agent.brain.prompt import SYSTEM_PROMPT
-from isaac.agent.capabilities import build_base_capabilities
+from isaac.agent.brain.tool_args import coerce_tool_args
+from isaac.agent.brain.tool_events import tool_kind
+from isaac.agent.capabilities import build_base_capabilities, build_event_stream_observer_capability
 from isaac.agent.models import load_models_config, load_runtime_env, _build_provider_model
 from isaac.agent.runner import stream_with_runner
 from isaac.log_utils import log_context as log_ctx, log_event
@@ -309,6 +313,117 @@ def _should_request_continuation(spec: DelegateToolSpec, summary: str | None) ->
     return len(summary.strip()) < spec.min_summary_chars
 
 
+
+def _delegate_tool_event_capability(
+    spec: DelegateToolSpec,
+    *,
+    delegate_run_id: str,
+    session_id: str | None,
+    send_update: Callable[[Any], Awaitable[None]] | None,
+) -> Any | None:
+    """Surface inner delegate tool calls to the parent ACP session.
+
+    Delegate agents intentionally run with isolated history, but their tool
+    activity is still important UX and debugging context for long coding
+    sessions. Expose it through Pydantic AI's run-scoped event-stream
+    capability instead of coupling delegate tools to the ACP adapter directly.
+    """
+
+    if send_update is None or not session_id:
+        return None
+
+    trackers: dict[str, ToolCallTracker] = {}
+    call_inputs: dict[str, dict[str, Any]] = {}
+
+    def _prefixed_id(tool_call_id: str) -> str:
+        base = tool_call_id or uuid.uuid4().hex
+        return f"delegate:{spec.name}:{delegate_run_id}:{base}"
+
+    async def _emit(event: Any) -> None:
+        if isinstance(event, FunctionToolCallEvent):
+            part = getattr(event, "part", None)
+            tool_name = str(getattr(part, "tool_name", "") or "")
+            raw_args = getattr(part, "args", None)
+            original_id = str(getattr(event, "tool_call_id", "") or getattr(part, "tool_call_id", "") or "")
+            prefixed_id = _prefixed_id(original_id)
+            args = coerce_tool_args(raw_args)
+            call_inputs[prefixed_id] = args
+            tracker = ToolCallTracker(id_factory=lambda: prefixed_id)
+            trackers[prefixed_id] = tracker
+            start = tracker.start(
+                external_id=prefixed_id,
+                title=f"{spec.name}: {tool_name or 'tool'}",
+                kind=tool_kind(tool_name),
+                status="in_progress",
+                raw_input={
+                    "delegate_tool": spec.name,
+                    "delegate_run_id": delegate_run_id,
+                    "tool": tool_name,
+                    **args,
+                },
+            )
+            await send_update(session_notification(session_id, start))
+            return
+
+        if isinstance(event, FunctionToolResultEvent):
+            result_part = getattr(event, "result", None) or getattr(event, "part", None)
+            tool_name = str(getattr(result_part, "tool_name", "") or "")
+            original_id = str(getattr(event, "tool_call_id", "") or getattr(result_part, "tool_call_id", "") or "")
+            prefixed_id = _prefixed_id(original_id)
+            tracker = trackers.pop(prefixed_id, None)
+            if tracker is None:
+                tracker = ToolCallTracker(id_factory=lambda: prefixed_id)
+                start = tracker.start(
+                    external_id=prefixed_id,
+                    title=f"{spec.name}: {tool_name or 'tool'}",
+                    kind=tool_kind(tool_name),
+                    status="in_progress",
+                    raw_input={
+                        "delegate_tool": spec.name,
+                        "delegate_run_id": delegate_run_id,
+                        "tool": tool_name,
+                        **call_inputs.get(prefixed_id, {}),
+                    },
+                )
+                await send_update(session_notification(session_id, start))
+
+            content = getattr(result_part, "content", None)
+            raw_output: dict[str, Any] = content.copy() if isinstance(content, dict) else {"content": content}
+            raw_output.setdefault("tool", tool_name)
+            raw_output.setdefault("delegate_tool", spec.name)
+            raw_output.setdefault("delegate_run_id", delegate_run_id)
+            status = "completed"
+            if isinstance(result_part, RetryPromptPart):
+                raw_output["error"] = result_part.model_response()
+                status = "failed"
+            else:
+                raw_output.setdefault("error", None)
+                error_text = str(raw_output.get("error") or "").strip()
+                returncode = raw_output.get("returncode")
+                if error_text or (isinstance(returncode, int) and returncode != 0):
+                    status = "failed"
+
+            content_blocks: list[Any] = []
+            new_text = raw_output.get("new_text")
+            old_text = raw_output.get("old_text")
+            if tool_name in {"edit_file", "apply_patch"} and isinstance(new_text, str):
+                path = str(raw_output.get("path") or "")
+                with contextlib.suppress(Exception):
+                    content_blocks.append(tool_diff_content(path, new_text, old_text if isinstance(old_text, str) else None))
+            summary = raw_output.get("error") or raw_output.get("content") or ""
+            if not content_blocks and summary:
+                content_blocks = [tool_content(text_block(str(summary)))]
+            progress = tracker.progress(
+                external_id=prefixed_id,
+                status=status,
+                raw_output=raw_output,
+                content=content_blocks or None,
+            )
+            await send_update(session_notification(session_id, progress))
+
+    return build_event_stream_observer_capability(_emit)
+
+
 async def _run_delegate_once(
     spec: DelegateToolSpec,
     agent: AgentRunner,
@@ -395,6 +510,14 @@ async def _run_delegate_once(
             cwd if isinstance(cwd, str) or cwd is None else str(cwd),
         )
 
+    delegate_tool_events = _delegate_tool_event_capability(
+        spec,
+        delegate_run_id=delegate_run_id,
+        session_id=session_id,
+        send_update=send_update,
+    )
+    run_capabilities = [delegate_tool_events] if delegate_tool_events is not None else None
+
     async def _run_stream() -> tuple[str | None, Any | None]:
         return await stream_with_runner(
             agent,
@@ -406,6 +529,7 @@ async def _run_delegate_once(
             log_context=log_context,
             request_tool_approval=_request_tool_approval,
             deps=deps,
+            capabilities=run_capabilities,
             usage_limits=UsageLimits(
                 request_limit=DELEGATE_REQUEST_LIMIT,
                 tool_calls_limit=DELEGATE_TOOL_CALLS_LIMIT,

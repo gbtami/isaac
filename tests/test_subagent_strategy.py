@@ -9,7 +9,7 @@ from unittest.mock import AsyncMock
 
 import pytest
 from acp import text_block
-from acp.schema import AgentPlanUpdate, AgentThoughtChunk, ToolCallProgress
+from acp.schema import AgentPlanUpdate, AgentThoughtChunk, ToolCallProgress, ToolCallStart
 from pydantic_ai.messages import (  # type: ignore
     FunctionToolCallEvent,
     FunctionToolResultEvent,
@@ -305,6 +305,82 @@ async def test_subagent_records_tool_history(tmp_path, monkeypatch):
     state = agent._prompt_handler._sessions[session.session_id]  # type: ignore[attr-defined]
     history_text = " ".join(str(msg.get("content") or "") for msg in state.history if isinstance(msg, dict))
     assert "python main.py" in history_text
+
+
+@pytest.mark.asyncio
+async def test_delegate_inner_tool_events_are_forwarded_to_parent(tmp_path, monkeypatch):
+    updates: list[Any] = []
+
+    async def send_update(note: Any) -> None:
+        updates.append(getattr(note, "update", note))
+
+    request_permission = AsyncMock(return_value=True)
+
+    class RunnerStub:
+        def run_stream_events(self, prompt: str, message_history=None, capabilities=None, **_: object):
+            _ = prompt, message_history
+            part = ToolCallPart(
+                tool_name="read_file",
+                args={"path": "src/example.py"},
+                tool_call_id="inner_read",
+            )
+            result_part = ToolReturnPart(
+                tool_name="read_file",
+                content={"path": "src/example.py", "content": "print('ok')"},
+                tool_call_id=part.tool_call_id,
+            )
+            output = json.dumps(
+                {
+                    "summary": "Summary: inspected the requested file with enough detail for carryover.",
+                    "files": [{"path": "src/example.py", "action": "inspected", "summary": "Reviewed file."}],
+                    "tests": [],
+                    "risks": [],
+                    "followups": [],
+                }
+            )
+            events = [
+                FunctionToolCallEvent(part=part),
+                FunctionToolResultEvent(part=result_part),
+                AgentRunResultEvent(result=AgentRunResult(output)),
+            ]
+            return event_stream_context(events, capabilities)
+
+    monkeypatch.setattr(
+        "isaac.agent.subagents.delegate_tools._build_delegate_agent",
+        lambda *_args, **_kwargs: RunnerStub(),
+    )
+
+    from isaac.agent.subagents.coding import coding
+
+    token = set_delegate_tool_context(
+        DelegateToolContext(
+            session_id="parent-session",
+            request_run_permission=request_permission,
+            send_update=send_update,
+            mode_getter=lambda: "ask",
+            cwd=tmp_path,
+            model_id="test-model",
+        )
+    )
+    try:
+        result = await coding(SimpleNamespace(tool_call_id="parent_tool"), task="inspect example")
+    finally:
+        reset_delegate_tool_context(token)
+
+    assert result["error"] is None
+    starts = [update for update in updates if isinstance(update, ToolCallStart)]
+    finishes = [update for update in updates if isinstance(update, ToolCallProgress)]
+    assert starts
+    assert finishes
+    assert starts[0].tool_call_id.startswith("delegate:coding:")
+    assert starts[0].tool_call_id.endswith(":inner_read")
+    assert starts[0].title == "coding: read_file"
+    assert starts[0].raw_input["delegate_tool"] == "coding"
+    assert starts[0].raw_input["path"] == "src/example.py"
+    assert finishes[0].tool_call_id == starts[0].tool_call_id
+    assert finishes[0].status == "completed"
+    assert finishes[0].raw_output["delegate_tool"] == "coding"
+    assert finishes[0].raw_output["path"] == "src/example.py"
 
 
 @pytest.mark.asyncio
