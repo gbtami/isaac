@@ -29,6 +29,7 @@ from isaac.agent.brain.prompt import SYSTEM_PROMPT
 from isaac.agent.brain.tool_args import coerce_tool_args
 from isaac.agent.brain.tool_events import tool_kind
 from isaac.agent.capabilities import build_base_capabilities, build_event_stream_observer_capability
+from isaac.agent.tools.policy import requires_tool_approval
 from isaac.agent.models import load_models_config, load_runtime_env, _build_provider_model
 from isaac.agent.runner import stream_with_runner
 from isaac.log_utils import log_context as log_ctx, log_event
@@ -63,6 +64,7 @@ class DelegateToolContext:
     cwd: Path | None = None
     additional_directories: tuple[Path, ...] = ()
     model_id: str = ""
+    request_tool_permission: Callable[[str, str, str, dict[str, Any]], Awaitable[bool]] | None = None
 
 
 def set_delegate_tool_context(ctx: DelegateToolContext) -> contextvars.Token[DelegateToolContext | None]:
@@ -493,16 +495,23 @@ async def _run_delegate_once(
         )
 
     async def _request_tool_approval(call_id: str, tool_name: str, args: dict[str, Any]) -> bool:
-        if tool_name != "run_command":
-            return True
         if delegate_ctx is None:
             return True
         mode = delegate_ctx.mode_getter()
-        if mode != "ask":
+        if not requires_tool_approval(tool_name, mode=mode):
             return True
+        routed_call_id = f"delegate:{spec.name}:{delegate_run_id}:{call_id}"
+        if delegate_ctx.request_tool_permission is not None:
+            return await delegate_ctx.request_tool_permission(
+                delegate_ctx.session_id,
+                routed_call_id,
+                tool_name,
+                args,
+            )
+        if tool_name != "run_command":
+            return False
         command = str(args.get("command") or "")
         cwd = args.get("cwd")
-        routed_call_id = f"delegate:{spec.name}:{delegate_run_id}:{call_id}"
         return await delegate_ctx.request_run_permission(
             delegate_ctx.session_id,
             routed_call_id,

@@ -10,6 +10,13 @@ from acp import RequestPermissionResponse
 from acp.helpers import text_block, tool_content
 from acp.schema import PermissionOption, ToolCall
 
+from isaac.agent.tools.policy import (
+    approval_always_option_id,
+    permission_body,
+    permission_cache_key,
+    permission_title,
+    tool_permission_kind,
+)
 from isaac.log_utils import log_context, log_event
 
 logger = logging.getLogger(__name__)
@@ -31,40 +38,48 @@ class PermissionMixin:
             raise RuntimeError("Connection missing request_permission handler")
         return await requester(session_id=session_id, tool_call=tool_call, options=options)
 
-    async def _request_run_permission(
+    async def _request_tool_permission(
         self,
         session_id: str,
         *,
         tool_call_id: str,
-        command: str,
-        cwd: str | None,
+        tool_name: str,
+        arguments: dict[str, Any],
     ) -> bool:
-        """Ask the client for permission to run a shell command (ACP permission flow)."""
+        """Ask the client for permission to run a risky tool call.
 
-        key = (command.strip(), cwd or "")
+        The allow-always cache is scoped by tool-specific stable keys. For
+        ``run_command`` this keeps Isaac's historical command+cwd caching
+        behaviour, while writes/network/delegates use path/host/task keys.
+        """
+
+        key = permission_cache_key(tool_name, arguments)
         if key in self._session_allowed_commands.get(session_id, set()):
             return True
 
         try:
             with log_context(session_id=session_id, tool_call_id=tool_call_id):
-                log_event(logger, "acp.permission.request", command=command.strip(), cwd=cwd or "")
+                log_event(
+                    logger,
+                    "acp.permission.request",
+                    tool=tool_name,
+                    permission_key=key,
+                )
+            allow_always_id = approval_always_option_id(tool_name)
             options = [
                 PermissionOption(option_id="allow_once", name="Allow once", kind="allow_once"),
-                PermissionOption(option_id="allow_always", name="Allow this command", kind="allow_always"),
+                PermissionOption(option_id=allow_always_id, name="Allow matching calls", kind="allow_always"),
                 PermissionOption(option_id="reject_once", name="Reject", kind="reject_once"),
             ]
-            command_display = command.strip() or "<empty command>"
-            cwd_display = cwd or str(self._session_cwds.get(session_id, Path.cwd()))
+            cwd_display = str(self._session_cwds.get(session_id, Path.cwd()))
+            title = permission_title(tool_name, arguments)
+            body = permission_body(tool_name, arguments, cwd_display=cwd_display)
             tool_call = ToolCall(
                 tool_call_id=tool_call_id,
-                title=f"run_command: {command_display}",
-                kind="execute",
-                raw_input={"tool": "run_command", "command": command, "cwd": cwd},
-                content=[
-                    tool_content(
-                        text_block(f"Command: {command_display}\nCWD: {cwd_display}"),
-                    )
-                ],
+                title=title,
+                kind=tool_permission_kind(tool_name),
+                raw_input={"tool": tool_name, **arguments},
+                content=[tool_content(text_block(body))],
                 status="pending",
             )
             from acp.schema import ToolCallUpdate  # type: ignore
@@ -77,25 +92,39 @@ class PermissionMixin:
                 raise RuntimeError("Connection missing request_permission handler")
             resp = await requester(session_id=session_id, tool_call=tool_call_update, options=options)
             outcome = getattr(resp, "outcome", None)
-            option_id = ""
-            if outcome is not None:
-                option_id = getattr(outcome, "option_id", "")
-            key = (command.strip(), cwd or "")
-            if option_id == "allow_always":
+            option_id = getattr(outcome, "option_id", "") if outcome is not None else ""
+            if option_id in {allow_always_id, "allow_always"}:
                 self._session_allowed_commands.setdefault(session_id, set()).add(key)
                 with log_context(session_id=session_id, tool_call_id=tool_call_id):
-                    log_event(logger, "acp.permission.granted", mode="allow_always")
+                    log_event(logger, "acp.permission.granted", tool=tool_name, mode="allow_always")
                 return True
             if option_id == "allow_once":
                 with log_context(session_id=session_id, tool_call_id=tool_call_id):
-                    log_event(logger, "acp.permission.granted", mode="allow_once")
+                    log_event(logger, "acp.permission.granted", tool=tool_name, mode="allow_once")
                 return True
             if key in self._session_allowed_commands.get(session_id, set()):
                 return True
             with log_context(session_id=session_id, tool_call_id=tool_call_id):
-                log_event(logger, "acp.permission.denied")
+                log_event(logger, "acp.permission.denied", tool=tool_name)
             return False
         except Exception as exc:  # pragma: no cover - defensive fallback
             with log_context(session_id=session_id, tool_call_id=tool_call_id):
-                log_event(logger, "acp.permission.error", level=logging.WARNING, error=str(exc))
+                log_event(logger, "acp.permission.error", level=logging.WARNING, tool=tool_name, error=str(exc))
             return False
+
+    async def _request_run_permission(
+        self,
+        session_id: str,
+        *,
+        tool_call_id: str,
+        command: str,
+        cwd: str | None,
+    ) -> bool:
+        """Ask the client for permission to run a shell command (ACP permission flow)."""
+
+        return await self._request_tool_permission(
+            session_id,
+            tool_call_id=tool_call_id,
+            tool_name="run_command",
+            arguments={"command": command, "cwd": cwd},
+        )

@@ -5,7 +5,7 @@ from typing import Any
 
 import pytest
 from acp import RequestPermissionResponse, text_block
-from acp.schema import AllowedOutcome
+from acp.schema import AllowedOutcome, ToolCallProgress
 from unittest.mock import AsyncMock
 
 from isaac.agent.tools.fetch_url import fetch_url
@@ -426,3 +426,58 @@ async def test_read_file_max_lines_bounds_explicit_large_range(tmp_path: Path):
     assert result["next_start"] == 6
     assert "line 5" in result["content"]
     assert "line 6" not in result["content"]
+
+
+@pytest.mark.asyncio
+async def test_direct_write_tool_requests_permission_and_denial_blocks_execution(tmp_path: Path):
+    conn = AsyncMock()
+    conn.session_update = AsyncMock()
+    conn.request_permission = AsyncMock(
+        return_value=RequestPermissionResponse(outcome=AllowedOutcome(option_id="reject_once", outcome="selected"))
+    )
+    agent = make_function_agent(conn)
+    session = await agent.new_session(cwd=str(tmp_path), mcp_servers=[])
+
+    await agent._execute_tool(
+        session_id=session.session_id,
+        tool_name="edit_file",
+        tool_call_id="tc-edit-denied",
+        arguments={"path": "denied.txt", "content": "nope"},
+    )
+
+    conn.request_permission.assert_awaited()
+    assert not (tmp_path / "denied.txt").exists()
+    progress = [
+        call.kwargs["update"]
+        for call in conn.session_update.call_args_list
+        if isinstance(call.kwargs.get("update"), ToolCallProgress)
+    ]
+    assert progress
+    assert progress[-1].status == "failed"
+    assert progress[-1].raw_output["error"] == "permission denied"
+
+
+@pytest.mark.asyncio
+async def test_write_permission_allow_always_is_cached_per_path(tmp_path: Path):
+    conn = AsyncMock()
+    conn.request_permission = AsyncMock(
+        return_value=RequestPermissionResponse(
+            outcome=AllowedOutcome(option_id="allow_this_target", outcome="selected")
+        )
+    )
+    agent = make_function_agent(conn)
+    session_id = "write-cache"
+    agent._session_modes[session_id] = "ask"
+    agent._session_cwds[session_id] = tmp_path
+
+    args = {"path": "same.txt", "content": "ignored for cache"}
+    first = await agent._request_tool_permission(
+        session_id, tool_call_id="tc-write-1", tool_name="edit_file", arguments=args
+    )
+    second = await agent._request_tool_permission(
+        session_id, tool_call_id="tc-write-2", tool_name="edit_file", arguments=args
+    )
+
+    assert first is True
+    assert second is True
+    conn.request_permission.assert_awaited_once()

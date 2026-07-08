@@ -68,6 +68,7 @@ CATASTROPHIC_SHELL_DENY_PATTERNS = (
 
 _BINARY_SAMPLE_BYTES = 8192
 _MAX_SHELL_COMMAND_CHARS = 20_000
+MAX_TEXT_WRITE_BYTES = 2_000_000
 
 
 class PathAccessError(ValueError):
@@ -191,10 +192,50 @@ def ensure_text_file(path: Path) -> None:
         raise BinaryFileError(f"Refusing to read binary file: {path.name}")
 
 
+def ensure_no_symlink_in_write_path(
+    base: str | Path | None,
+    target: str | Path,
+    *,
+    additional_directories: Iterable[str | Path] | None = None,
+) -> None:
+    """Reject write targets that traverse an existing symlink.
+
+    ``resolve_workspace_path`` correctly prevents symlink escapes, but once it
+    resolves a symlink we lose the fact that the user targeted a link at all.
+    Mutating through symlinks can surprise users by changing a different path,
+    so write tools reject any existing symlink component before resolving.
+    """
+
+    base_path = _coerce_base(base) or Path.cwd().resolve(strict=False)
+    raw = Path(target).expanduser()
+    candidate = raw if raw.is_absolute() else base_path / raw
+    allowed_roots = (base_path, *_coerce_roots(additional_directories))
+    check_paths: list[Path] = []
+    current = candidate
+    while True:
+        check_paths.append(current)
+        if any(current == root for root in allowed_roots) or current == current.parent:
+            break
+        current = current.parent
+    for item in reversed(check_paths):
+        if item.exists() and item.is_symlink():
+            raise ProtectedPathError(f"Refusing to write through symlink: {item}")
+
+
 def ensure_text_target(path: Path, base: str | Path | None = None) -> None:
     ensure_not_protected_for_write(path, base)
+    if path.is_symlink():
+        raise ProtectedPathError(f"Refusing to write through symlink: {display_path(path, base)}")
+    if path.exists() and not path.is_file():
+        raise ProtectedPathError(f"Refusing to write non-regular file: {display_path(path, base)}")
     if path.exists() and path.is_file() and is_binary_file(path):
         raise BinaryFileError(f"Refusing to overwrite binary file: {path.name}")
+
+
+def ensure_text_write_size(text: str) -> None:
+    size = len(text.encode("utf-8"))
+    if size > MAX_TEXT_WRITE_BYTES:
+        raise ProtectedPathError(f"Refusing to write {size} bytes; limit is {MAX_TEXT_WRITE_BYTES}")
 
 
 def sha256_file(path: Path) -> str | None:

@@ -571,3 +571,56 @@ async def test_run_command_blocks_catastrophic_patterns():
 
     assert result["returncode"] == -1
     assert "catastrophic deny pattern" in result["error"]
+
+
+@pytest.mark.asyncio
+async def test_edit_file_rejects_symlink_write_target(tmp_path: Path):
+    real_target = tmp_path / "real.txt"
+    real_target.write_text("original", encoding="utf-8")
+    link = tmp_path / "link.txt"
+    link.symlink_to(real_target)
+
+    result = await edit_file(path="link.txt", content="changed", cwd=str(tmp_path))
+
+    assert result["error"]
+    assert "symlink" in result["error"].lower()
+    assert real_target.read_text(encoding="utf-8") == "original"
+
+
+@pytest.mark.asyncio
+async def test_apply_patch_rejects_headers_for_different_file(tmp_path: Path):
+    target = tmp_path / "target.txt"
+    target.write_text("one\n", encoding="utf-8")
+    other = tmp_path / "other.txt"
+    other.write_text("one\n", encoding="utf-8")
+
+    patch = """--- other.txt
++++ other.txt
+@@ -1 +1 @@
+-one
++two
+"""
+    result = await apply_patch(path=str(target), patch=patch, strip=0)
+
+    assert result["error"]
+    assert "may only modify target.txt" in result["error"]
+    assert target.read_text(encoding="utf-8") == "one\n"
+    assert other.read_text(encoding="utf-8") == "one\n"
+
+
+@pytest.mark.asyncio
+async def test_apply_patch_rejects_parent_escape_header(tmp_path: Path):
+    target = tmp_path / "target.txt"
+    target.write_text("one\n", encoding="utf-8")
+
+    patch = """--- ../target.txt
++++ ../target.txt
+@@ -1 +1 @@
+-one
++two
+"""
+    result = await apply_patch(path=str(target), patch=patch, strip=0)
+
+    assert result["error"]
+    assert "escapes" in result["error"]
+    assert target.read_text(encoding="utf-8") == "one\n"

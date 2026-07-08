@@ -275,3 +275,29 @@ It is rebuilt from persisted `CodingMemoryEvent` records and contains:
 This complements emergency compaction. Compaction remains useful when raw chat
 history is too large, but the checkpoint gives every normal turn a compact map
 of the current task state without making an extra LLM call.
+
+Tool Approval and Write Safety
+------------------------------
+
+Risk classification now lives in `src/isaac/agent/tools/policy.py` so Pydantic
+AI deferred tool approvals, direct ACP tool-call blocks, and delegate sub-agent
+runs share one policy instead of drifting apart. In normal `ask` mode:
+
+- read/search tools run without approval;
+- `run_command`, `edit_file`, `apply_patch`, `fetch_url`, and unknown tools are
+  approval-gated;
+- delegate wrapper tools are not approval-gated by themselves, but their inner
+  risky tools use the same parent-session approval route.
+
+`yolo` mode uses the Pydantic AI `PrepareTools` capability to expose unapproved
+risky tools as normal function tools. This keeps mode behavior at the Pydantic
+AI capability boundary rather than hiding permission logic inside prompts.
+
+Write tools also have stricter filesystem safety:
+
+- text writes are size-capped;
+- writes to protected paths, binary files, non-regular files, and symlink paths
+  are rejected;
+- `edit_file` writes atomically with a temporary file plus `os.replace`;
+- `apply_patch(path=...)` validates unified-diff headers so the patch can only
+  target the requested file.

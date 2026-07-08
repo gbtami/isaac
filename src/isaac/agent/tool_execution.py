@@ -29,6 +29,7 @@ from isaac.agent.agent_terminal import (
 )
 from isaac.agent.tool_io import await_with_cancel, truncate_text, truncate_tool_output
 from isaac.agent.tools.safety import PathAccessError, ShellCommandDenied, resolve_command_cwd, validate_shell_command
+from isaac.agent.tools.policy import requires_tool_approval
 from isaac.agent.tools import run_tool
 from isaac.log_utils import log_context, log_event
 
@@ -47,6 +48,7 @@ class ToolExecutionContext:
     tool_output_limit: int
     terminal_output_limit: int
     command_timeout_s: float
+    request_tool_permission: Callable[[str, str, str, dict[str, Any]], Awaitable[bool]] | None = None
 
 
 async def execute_tool(
@@ -62,13 +64,31 @@ async def execute_tool(
     tracker = ToolCallTracker(id_factory=lambda: tool_call_id)
     with log_context(session_id=session_id, tool_call_id=tool_call_id, tool_name=tool_name):
         log_event(logger, "tool.call.start", args_keys=sorted(arguments or {}))
+    call_args = arguments or {}
     start = tracker.start(
         external_id=tool_call_id,
         title=tool_name,
         status="in_progress",
-        raw_input={"tool": tool_name, **(arguments or {})},
+        raw_input={"tool": tool_name, **call_args},
     )
     await ctx.send_update(session_notification(session_id, start))
+
+    mode = ctx.session_modes.get(session_id, "ask")
+    if requires_tool_approval(tool_name, mode=mode):
+        allowed = False
+        if ctx.request_tool_permission is not None:
+            allowed = await ctx.request_tool_permission(session_id, tool_call_id, tool_name, call_args)
+        if not allowed:
+            with log_context(session_id=session_id, tool_call_id=tool_call_id, tool_name=tool_name):
+                log_event(logger, "tool.call.denied")
+            progress = tracker.progress(
+                external_id=tool_call_id,
+                status="failed",
+                raw_output={"content": None, "error": "permission denied"},
+                content=[tool_content(text_block("Tool blocked: permission denied"))],
+            )
+            await ctx.send_update(session_notification(session_id, progress))
+            return
 
     cancel_event = ctx.cancel_events.setdefault(session_id, asyncio.Event())
     result: dict[str, Any] | None = await await_with_cancel(
@@ -78,7 +98,7 @@ async def execute_tool(
             additional_directories=tuple(
                 str(path) for path in ctx.session_additional_directories.get(session_id, ())
             ),
-            **(arguments or {}),
+            **call_args,
         ),
         cancel_event,
     )
@@ -106,7 +126,7 @@ async def execute_tool(
     if tool_name == "edit_file":
         new_text = result_with_tool.get("new_text")
         old_text = result_with_tool.get("old_text")
-        path = (arguments or {}).get("path", "")
+        path = call_args.get("path", "")
         if isinstance(new_text, str):
             with contextlib.suppress(Exception):
                 content_blocks.append(tool_diff_content(path, new_text, old_text))

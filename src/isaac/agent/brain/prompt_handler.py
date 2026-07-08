@@ -31,6 +31,7 @@ from isaac.agent.capabilities import (
     build_recent_files_capability,
     build_task_checkpoint_capability,
 )
+from isaac.agent.tools.policy import requires_tool_approval
 from isaac.agent.subagents.delegate_tools import (
     DelegateToolContext,
     reset_delegate_tool_context,
@@ -236,11 +237,18 @@ class PromptHandler:
         state.history.append({"role": "user", "content": raw_prompt_text, "source": "user"})
 
         async def _request_tool_approval(tool_call_id: str, tool_name: str, args: dict[str, Any]) -> bool:
-            if tool_name != "run_command":
-                return True
             mode = self.env.session_modes.get(session_id, "ask")
-            if mode != "ask":
+            if not requires_tool_approval(tool_name, mode=mode):
                 return True
+            if self.env.request_tool_permission is not None:
+                return await self.env.request_tool_permission(
+                    session_id,
+                    tool_call_id,
+                    tool_name,
+                    args,
+                )
+            if tool_name != "run_command":
+                return False
             command = str(args.get("command") or "")
             cwd = args.get("cwd")
             return await self.env.request_run_permission(
@@ -265,6 +273,7 @@ class PromptHandler:
             DelegateToolContext(
                 session_id=session_id,
                 request_run_permission=self.env.request_run_permission,
+                request_tool_permission=self.env.request_tool_permission,
                 send_update=self.env.send_protocol_update,
                 mode_getter=lambda: self.env.session_modes.get(session_id, "ask"),
                 cwd=session_cwd,

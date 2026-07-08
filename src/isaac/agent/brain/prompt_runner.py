@@ -37,6 +37,7 @@ class PromptEnv:
     set_usage: Callable[[str, Any | None], None]
     session_cwd: Callable[[str], Path | None] = lambda _session_id: None
     session_additional_directories: Callable[[str], tuple[Path, ...]] = lambda _session_id: ()
+    request_tool_permission: Callable[[str, str, str, dict[str, Any]], Awaitable[bool]] | None = None
 
 
 class PromptRunner:

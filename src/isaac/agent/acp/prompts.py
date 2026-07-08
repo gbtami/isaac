@@ -33,6 +33,12 @@ class PromptMixin:
                 command=command,
                 cwd=cwd,
             ),
+            request_tool_permission=lambda session_id, tool_call_id, tool_name, arguments: self._request_tool_permission(
+                session_id=session_id,
+                tool_call_id=tool_call_id,
+                tool_name=tool_name,
+                arguments=arguments,
+            ),
             set_usage=lambda session_id, usage: self._session_usage.__setitem__(session_id, usage),
             session_cwd=lambda session_id: self._session_cwds.get(session_id),
             session_additional_directories=lambda session_id: self._session_additional_directories.get(

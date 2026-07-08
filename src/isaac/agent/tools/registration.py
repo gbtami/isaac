@@ -12,6 +12,7 @@ from isaac.agent.ai_types import SessionToolDeps, ToolContext
 
 from isaac.agent.subagents import DELEGATE_TOOL_TIMEOUTS
 from isaac.agent.tools.executor import run_tool
+from isaac.agent.tools.policy import requires_tool_approval
 from isaac.agent.tools.registry import (
     DEFAULT_FETCH_MAX_BYTES,
     DEFAULT_FETCH_TIMEOUT,
@@ -79,7 +80,7 @@ def _build_tool(name: str, func: Callable[..., Awaitable[Any]], timeout: float |
         timeout=timeout,
         strict=True,
         sequential=(name in _MUTATING_TOOLS) or is_delegate,
-        requires_approval=name == "run_command",
+        requires_approval=requires_tool_approval(name, mode="ask"),
         metadata=metadata,
     )
 

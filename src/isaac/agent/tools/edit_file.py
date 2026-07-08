@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import difflib
+import os
+import tempfile
 from pathlib import Path
 from typing import Optional
 
@@ -9,10 +11,31 @@ from isaac.agent.tools.safety import (
     BinaryFileError,
     PathAccessError,
     ProtectedPathError,
+    ensure_no_symlink_in_write_path,
     ensure_text_target,
+    ensure_text_write_size,
     resolve_workspace_path,
     sha256_file,
 )
+
+
+def _atomic_write_text(path: Path, content: str) -> None:
+    tmp_name = ""
+    try:
+        with tempfile.NamedTemporaryFile(
+            "w",
+            delete=False,
+            dir=str(path.parent),
+            encoding="utf-8",
+        ) as tmp:
+            tmp_name = tmp.name
+            tmp.write(content)
+            tmp.flush()
+            os.fsync(tmp.fileno())
+        os.replace(tmp_name, path)
+    finally:
+        if tmp_name:
+            Path(tmp_name).unlink(missing_ok=True)
 
 
 async def edit_file(
@@ -41,6 +64,7 @@ async def edit_file(
         }
     try:
         base = session_cwd or cwd
+        ensure_no_symlink_in_write_path(base, path, additional_directories=additional_directories)
         resolved = resolve_workspace_path(
             base,
             path,
@@ -48,6 +72,7 @@ async def edit_file(
             additional_directories=additional_directories,
         )
         ensure_text_target(resolved, base)
+        ensure_text_write_size(content)
     except (PathAccessError, ProtectedPathError, BinaryFileError) as exc:
         return {
             "path": path,
@@ -112,7 +137,8 @@ async def edit_file(
         else:
             new_text = content
 
-        resolved.write_text(new_text, encoding="utf-8")
+        ensure_text_write_size(new_text)
+        _atomic_write_text(resolved, new_text)
         new_hash = sha256_file(resolved)
         old_lines = old_text.splitlines(keepends=True)
         new_lines = new_text.splitlines(keepends=True)

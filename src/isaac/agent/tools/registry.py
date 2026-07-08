@@ -18,6 +18,7 @@ from isaac.agent.subagents import (
     DELEGATE_TOOL_DESCRIPTIONS,
     DELEGATE_TOOL_HANDLERS,
 )
+from .policy import READ_ONLY_TOOL_NAMES
 from .args import (
     ApplyPatchArgs,
     CodeSearchArgs,
@@ -34,14 +35,10 @@ ToolHandler = Callable[..., Awaitable[dict[str, Any]]]
 DEFAULT_TOOL_TIMEOUT_S = 10.0
 RUN_COMMAND_TIMEOUT_S = 60.0
 
-# Tools permitted for planning delegate (read-only, non-destructive)
-READ_ONLY_TOOLS = {
-    "list_files",
-    "read_file",
-    "file_summary",
-    "code_search",
-    "fetch_url",
-}
+# Tools permitted for planning delegate (read-only, non-destructive).
+# ``fetch_url`` is intentionally excluded because it reaches the network and is
+# now approval-gated in normal ask mode.
+READ_ONLY_TOOLS = set(READ_ONLY_TOOL_NAMES)
 
 TOOL_HANDLERS: dict[str, ToolHandler] = {
     "list_files": list_files,

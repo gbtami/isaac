@@ -66,8 +66,8 @@ async def _prepare_tools_for_mode(
 ) -> list[ToolDefinition]:
     """Apply Isaac's session mode policy to visible tool definitions.
 
-    In normal ``ask`` mode, ``run_command`` remains an approval-required tool.
-    In ``yolo`` mode, Isaac exposes it as a normal function tool. This is now
+    In normal ``ask`` mode, risky tools remain approval-required.
+    In ``yolo`` mode, Isaac exposes approval-gated tools as normal function tools. This is now
     plugged into Pydantic AI through the built-in ``PrepareTools`` capability
     instead of the older Agent constructor hook.
     """
@@ -79,7 +79,7 @@ async def _prepare_tools_for_mode(
 
     updated: list[ToolDefinition] = []
     for tool_def in tool_defs:
-        if getattr(tool_def, "name", None) == "run_command" and getattr(tool_def, "kind", None) == "unapproved":
+        if getattr(tool_def, "kind", None) == "unapproved":
             updated.append(_copy_tool_definition(tool_def, kind="function"))
         else:
             updated.append(tool_def)
