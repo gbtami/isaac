@@ -63,7 +63,7 @@ Tool Call Context and History
   observation that is appended to `SessionState.history` with metadata such as
   `source=tool_summary`, `tool_name`, and `tool_kind`.
 - Summaries include concrete data:
-  - `run_command`: command, cwd, and truncated stdout/stderr.
+  - `run_command`: command, cwd, timeout, stripped-env count, and truncated stdout/stderr.
   - `edit_file`/`apply_patch`: path + diff or summary.
   - `read_file`/`file_summary`: path, hash when available, and a bounded excerpt.
   - `list_files`/`code_search`/`fetch_url`: query/root and bounded results.
@@ -72,9 +72,25 @@ Tool Call Context and History
   bounded at the tool contract level, not only by a final global string
   truncation. Large file reads return `next_start` so the model can continue
   deliberately, broad searches return match counts plus a bounded result set,
-  and shell commands return separately capped stdout/stderr diagnostics.
+  and shell commands return separately capped stdout/stderr diagnostics with deterministic timeout metadata.
 - This keeps the model aware of what changed or was learned without forcing it to
   re-read files after every follow-up.
+
+
+Command Execution Hardening
+---------------------------
+
+- `run_command` uses a deterministic default timeout instead of relying on the
+  provider/tool runtime alone. Explicit timeouts are clamped to Isaac's hard cap.
+- Shell commands run in a new process group where supported, so timeout cleanup
+  can terminate child processes spawned by the shell instead of only killing the
+  wrapper shell process.
+- Command environments inherit useful development variables but strip common
+  secret-like names such as tokens, passwords, credentials, cookies, private
+  keys, and API keys. `ISAAC_COMMAND_ENV_DENYLIST` can add more variable-name
+  regexes to strip.
+- Timeout, truncation, and stripped-env metadata are preserved in tool summaries
+  and structured coding memory so later turns understand command reliability.
 
 Delegate Artifact Propagation
 -----------------------------

@@ -488,6 +488,7 @@ def _extract_metadata(tool_name: str, raw_output: dict[str, Any], raw_input: dic
             "expected_sha256",
             "max_results",
             "max_output_chars",
+            "timeout",
         ):
             if key in raw_input and raw_input[key] is not None:
                 metadata[key] = raw_input[key]
@@ -506,6 +507,7 @@ def _extract_metadata(tool_name: str, raw_output: dict[str, Any], raw_input: dic
         "max_output_chars",
         "stdout_truncated",
         "stderr_truncated",
+        "env_stripped_count",
     ):
         if key in raw_output and raw_output[key] is not None:
             metadata[key] = raw_output[key]

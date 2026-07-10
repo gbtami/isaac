@@ -624,3 +624,51 @@ async def test_apply_patch_rejects_parent_escape_header(tmp_path: Path):
     assert result["error"]
     assert "escapes" in result["error"]
     assert target.read_text(encoding="utf-8") == "one\n"
+
+@pytest.mark.asyncio
+async def test_run_command_uses_default_timeout_and_reports_metadata(tmp_path: Path):
+    result = await run_command(command="echo ok", cwd=str(tmp_path))
+
+    assert result["error"] is None
+    assert result["timeout"] == 60.0
+    assert result["env_stripped_count"] >= 0
+
+
+@pytest.mark.asyncio
+async def test_run_command_clamps_timeout(tmp_path: Path):
+    result = await run_command(command="echo ok", cwd=str(tmp_path), timeout=9999)
+
+    assert result["error"] is None
+    assert result["timeout"] == 300.0
+
+
+@pytest.mark.asyncio
+async def test_run_command_strips_secret_environment(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
+    monkeypatch.setenv("ISAAC_TEST_SECRET_TOKEN", "super-secret")
+
+    result = await run_command(
+        command="python -c 'import os; print(os.getenv(\"ISAAC_TEST_SECRET_TOKEN\", \"missing\"))'",
+        cwd=str(tmp_path),
+    )
+
+    assert result["error"] is None
+    assert result["content"] == "missing"
+    assert result["env_stripped_count"] >= 1
+
+
+@pytest.mark.asyncio
+async def test_run_command_timeout_kills_process_group(tmp_path: Path):
+    marker = tmp_path / "orphan-marker.txt"
+    command = (
+        "python -c 'import subprocess, sys, time; "
+        "subprocess.Popen([sys.executable, \"-c\", "
+        f"\"import pathlib, time; time.sleep(0.5); pathlib.Path(r\\\"{marker}\\\").write_text(\\\"alive\\\")\"]); "
+        "time.sleep(5)'"
+    )
+
+    result = await run_command(command=command, cwd=str(tmp_path), timeout=0.1)
+    await asyncio.sleep(0.8)
+
+    assert "timed out" in result["error"]
+    assert result["returncode"] == -1
+    assert marker.exists() is False

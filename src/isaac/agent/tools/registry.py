@@ -11,7 +11,7 @@ from .edit_file import edit_file
 from .file_summary import file_summary
 from .list_files import list_files
 from .read_file import read_file
-from .run_command import run_command
+from .run_command import MAX_COMMAND_TIMEOUT_S, run_command
 from .fetch_url import DEFAULT_FETCH_MAX_BYTES, DEFAULT_FETCH_TIMEOUT, fetch_url
 from isaac.agent.subagents import (
     DELEGATE_TOOL_ARG_MODELS,
@@ -33,7 +33,7 @@ from .args import (
 ToolHandler = Callable[..., Awaitable[dict[str, Any]]]
 
 DEFAULT_TOOL_TIMEOUT_S = 10.0
-RUN_COMMAND_TIMEOUT_S = 60.0
+RUN_COMMAND_TIMEOUT_S = MAX_COMMAND_TIMEOUT_S + 5.0
 
 # Tools permitted for planning delegate (read-only, non-destructive).
 # ``fetch_url`` is intentionally excluded because it reaches the network and is
@@ -71,7 +71,11 @@ TOOL_DESCRIPTIONS: dict[str, str] = {
         "Read a bounded file excerpt with optional start/lines/max_lines. "
         "Use next_start from truncated results to continue large files."
     ),
-    "run_command": "Execute a shell command and return bounded stdout/stderr diagnostics (include the full command string; use for mkdir -p).",
+    "run_command": (
+        "Execute a shell command in the session workspace with a bounded timeout and bounded stdout/stderr "
+        "diagnostics. Include the full command string; use for mkdir -p. Secret-like environment "
+        "variables are stripped before execution."
+    ),
     "edit_file": (
         "Replace the contents of a file (requires path + full content; content cannot be empty; "
         "do not use for directories)."

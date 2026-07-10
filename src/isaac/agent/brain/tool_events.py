@@ -51,11 +51,18 @@ def tool_history_summary(
             max_chars = raw_output.get("max_output_chars")
             suffix = f" at {max_chars} chars" if isinstance(max_chars, int) else ""
             truncation = f"Output truncated{suffix}."
+        timeout = raw_output.get("timeout")
+        env_note = ""
+        stripped = raw_output.get("env_stripped_count")
+        if isinstance(stripped, int) and stripped > 0:
+            env_note = f"Secret-like environment variables stripped: {stripped}."
         output = _lines(
             header,
+            f"Timeout: {timeout:g}s" if isinstance(timeout, (int, float)) else "",
             f"Stdout:\n{_truncate(stdout)}" if stdout else "",
             f"Stderr:\n{_truncate(stderr)}" if stderr else "",
             truncation,
+            env_note,
         )
         return output
     if tool_name in {"edit_file", "apply_patch"}:

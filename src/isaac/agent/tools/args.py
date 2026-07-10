@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from pydantic import BaseModel, ConfigDict, Field
 from .fetch_url import DEFAULT_FETCH_MAX_BYTES, DEFAULT_FETCH_TIMEOUT
-from .run_command import DEFAULT_COMMAND_OUTPUT_CHARS, MAX_COMMAND_OUTPUT_CHARS
+from .run_command import DEFAULT_COMMAND_OUTPUT_CHARS, DEFAULT_COMMAND_TIMEOUT_S, MAX_COMMAND_OUTPUT_CHARS, MAX_COMMAND_TIMEOUT_S
 
 
 class ListFilesArgs(BaseModel):
@@ -66,9 +66,13 @@ class RunCommandArgs(BaseModel):
         description="Working directory (optional; defaults to session cwd)",
     )
     timeout: float | None = Field(
-        None,
-        description="Timeout in seconds",
+        DEFAULT_COMMAND_TIMEOUT_S,
+        description=(
+            "Timeout in seconds. Defaults to Isaac's safe command timeout and is hard-capped "
+            "so long-running commands cannot hang the session."
+        ),
         gt=0,
+        le=MAX_COMMAND_TIMEOUT_S,
     )
     max_output_chars: int | None = Field(
         DEFAULT_COMMAND_OUTPUT_CHARS,
