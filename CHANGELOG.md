@@ -5,7 +5,7 @@ All notable changes to Isaac are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.4.0] - Unreleased
+## [0.4.0] - 2026-07-10
 
 Isaac 0.4.0 is a major internal modernization of the ACP agent and reference
 client. It should be treated as an architecture boundary rather than a routine
