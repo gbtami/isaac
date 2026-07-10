@@ -59,6 +59,7 @@ Common variables:
 - `ISAAC_ACP_STDIO_BUFFER_LIMIT_BYTES` (optional ACP stdio buffer override)
 - `ISAAC_SHELL_ALLOWLIST` (optional comma/newline-separated regex allowlist for `run_command`)
 - `ISAAC_SHELL_DENYLIST` (optional comma/newline-separated regex denylist for `run_command`)
+- `ISAAC_COMMAND_ENV_DENYLIST` (optional comma/newline-separated regexes for additional environment variable names to remove from command subprocesses)
 
 ## Features
 
@@ -70,6 +71,23 @@ Common variables:
 - Optional Pydantic AI Harness CodeMode experiments via `ISAAC_HARNESS_CODE_MODE=1` and the `harness` extra
 - Interactive client slash commands (`/mode`, `/model`, `/status`, `/usage`)
 - MCP server config forwarding from the client to the agent
+
+### Command environment security
+
+`run_command` inherits the normal development environment but removes variables
+whose names look secret-bearing, including names containing `TOKEN`, `SECRET`,
+`PASSWORD`, `PRIVATE`, `CREDENTIAL`, `AUTH`, `COOKIE`, `API_KEY`, or
+`ACCESS_KEY`. Matching is case-insensitive and substring-based. For example,
+`SSH_AUTH_SOCK` is removed because its name contains `AUTH`, so commands run by
+Isaac do not automatically inherit the caller's SSH agent.
+
+`ISAAC_COMMAND_ENV_DENYLIST` can add more variable-name regular expressions to
+remove. It cannot restore names removed by the built-in policy. Run authenticated
+Git operations outside agent-executed commands, or provide only narrowly scoped
+credentials through an explicitly reviewed mechanism.
+
+These checks reduce accidental credential exposure, but they do not make
+`run_command` a sandbox.
 
 ## Development
 

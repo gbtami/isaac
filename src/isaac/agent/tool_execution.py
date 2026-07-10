@@ -95,9 +95,7 @@ async def execute_tool(
         run_tool(
             tool_name,
             session_cwd=str(ctx.session_cwds.get(session_id, Path.cwd())),
-            additional_directories=tuple(
-                str(path) for path in ctx.session_additional_directories.get(session_id, ())
-            ),
+            additional_directories=tuple(str(path) for path in ctx.session_additional_directories.get(session_id, ())),
             **call_args,
         ),
         cancel_event,

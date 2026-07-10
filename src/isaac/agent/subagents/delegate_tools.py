@@ -315,7 +315,6 @@ def _should_request_continuation(spec: DelegateToolSpec, summary: str | None) ->
     return len(summary.strip()) < spec.min_summary_chars
 
 
-
 def _delegate_tool_event_capability(
     spec: DelegateToolSpec,
     *,
@@ -411,7 +410,9 @@ def _delegate_tool_event_capability(
             if tool_name in {"edit_file", "apply_patch"} and isinstance(new_text, str):
                 path = str(raw_output.get("path") or "")
                 with contextlib.suppress(Exception):
-                    content_blocks.append(tool_diff_content(path, new_text, old_text if isinstance(old_text, str) else None))
+                    content_blocks.append(
+                        tool_diff_content(path, new_text, old_text if isinstance(old_text, str) else None)
+                    )
             summary = raw_output.get("error") or raw_output.get("content") or ""
             if not content_blocks and summary:
                 content_blocks = [tool_content(text_block(str(summary)))]
@@ -545,7 +546,11 @@ async def _run_delegate_once(
             ),
             metadata=base_run_metadata(
                 component=f"isaac.delegate.run.{spec.name}",
-                model_id=(delegate_ctx.model_id if delegate_ctx and delegate_ctx.model_id else model_registry.current_model_id()),
+                model_id=(
+                    delegate_ctx.model_id
+                    if delegate_ctx and delegate_ctx.model_id
+                    else model_registry.current_model_id()
+                ),
                 extra={
                     "session_id": session_id or "",
                     "delegate_run_id": delegate_run_id,

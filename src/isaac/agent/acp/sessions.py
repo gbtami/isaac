@@ -438,7 +438,9 @@ class SessionLifecycleMixin:
         return path
 
     @classmethod
-    def _coerce_additional_directories(cls, additional_directories: list[str] | tuple[str, ...] | None) -> tuple[Path, ...]:
+    def _coerce_additional_directories(
+        cls, additional_directories: list[str] | tuple[str, ...] | None
+    ) -> tuple[Path, ...]:
         paths: list[Path] = []
         for item in additional_directories or []:
             path = cls._require_absolute_cwd(str(item))

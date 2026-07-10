@@ -126,9 +126,17 @@ def test_memory_selection_keeps_relevant_old_observation_and_important_edits() -
     memory = CodingMemory()
     memory.extend(
         [
-            CodingMemoryEvent(kind="observation", summary="Read file src/unrelated.py noise", paths=["src/unrelated.py"]),
-            CodingMemoryEvent(kind="observation", summary="Read file src/context_selector.py class Selector", paths=["src/context_selector.py"]),
-            CodingMemoryEvent(kind="edit", summary="Updated file src/old_fix.py with important patch", paths=["src/old_fix.py"]),
+            CodingMemoryEvent(
+                kind="observation", summary="Read file src/unrelated.py noise", paths=["src/unrelated.py"]
+            ),
+            CodingMemoryEvent(
+                kind="observation",
+                summary="Read file src/context_selector.py class Selector",
+                paths=["src/context_selector.py"],
+            ),
+            CodingMemoryEvent(
+                kind="edit", summary="Updated file src/old_fix.py with important patch", paths=["src/old_fix.py"]
+            ),
         ]
     )
 

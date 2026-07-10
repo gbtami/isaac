@@ -34,11 +34,13 @@ class ToolCallsMixin:
         return ToolExecutionContext(
             send_update=self._send_update,
             request_run_permission=self._request_run_permission,
-            request_tool_permission=lambda session_id, tool_call_id, tool_name, arguments: self._request_tool_permission(
-                session_id=session_id,
-                tool_call_id=tool_call_id,
-                tool_name=tool_name,
-                arguments=arguments,
+            request_tool_permission=lambda session_id, tool_call_id, tool_name, arguments: (
+                self._request_tool_permission(
+                    session_id=session_id,
+                    tool_call_id=tool_call_id,
+                    tool_name=tool_name,
+                    arguments=arguments,
+                )
             ),
             session_cwds=self._session_cwds,
             session_additional_directories=self._session_additional_directories,

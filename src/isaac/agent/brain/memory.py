@@ -392,7 +392,9 @@ def select_memory_events(
     scored: list[tuple[int, int, CodingMemoryEvent]] = []
     recent_start = max(0, len(events) - 20)
     for idx, event in enumerate(events):
-        score = _event_score(event, idx=idx, last_index=last_index, recent_start=recent_start, prompt_terms=prompt_terms)
+        score = _event_score(
+            event, idx=idx, last_index=last_index, recent_start=recent_start, prompt_terms=prompt_terms
+        )
         if score <= 0:
             continue
         scored.append((score, idx, event))
@@ -468,7 +470,12 @@ def _extract_query(tool_name: str, raw_output: dict[str, Any], raw_input: dict[s
 def _extract_url(tool_name: str, raw_output: dict[str, Any], raw_input: dict[str, Any] | None) -> str | None:
     if tool_name != "fetch_url":
         return None
-    value = raw_output.get("url") or raw_output.get("source") or raw_output.get("request_url") or (raw_input or {}).get("url")
+    value = (
+        raw_output.get("url")
+        or raw_output.get("source")
+        or raw_output.get("request_url")
+        or (raw_input or {}).get("url")
+    )
     return str(value).strip() if value else None
 
 
@@ -569,7 +576,12 @@ def _delegate_artifact_events(
                 tool_name=tool_name,
                 tool_kind=tool_kind(tool_name),
                 paths=[path] if path else [],
-                metadata={**base_metadata, "artifact_type": "file", "artifact_index": index, **_maybe("action", action)},
+                metadata={
+                    **base_metadata,
+                    "artifact_type": "file",
+                    "artifact_index": index,
+                    **_maybe("action", action),
+                },
             )
         )
 
@@ -814,7 +826,11 @@ def _checkpoint_files(
             score = _file_checkpoint_score(event, path, idx=idx, last_index=last_index, prompt_terms=prompt_terms)
             previous = by_path.get(path)
             if previous is None:
-                by_path[path] = (score, idx, TaskFileSummary(path=path, status=status, notes=[note], last_sha256=event.sha256))
+                by_path[path] = (
+                    score,
+                    idx,
+                    TaskFileSummary(path=path, status=status, notes=[note], last_sha256=event.sha256),
+                )
                 continue
             old_score, old_idx, summary = previous
             if note not in summary.notes:

@@ -181,10 +181,10 @@ async def run_command(
             "error": str(exc),
             "returncode": -1,
             "command": command,
-            "cwd": str(resolved_cwd) if 'resolved_cwd' in locals() and resolved_cwd else cwd,
+            "cwd": str(resolved_cwd) if "resolved_cwd" in locals() and resolved_cwd else cwd,
             "timeout": timeout_s,
             "max_output_chars": output_limit,
-            "env_stripped_count": stripped_env_count if 'stripped_env_count' in locals() else 0,
+            "env_stripped_count": stripped_env_count if "stripped_env_count" in locals() else 0,
         }
 
     stdout_text = stdout.decode(errors="replace").rstrip("\n") if stdout else ""
