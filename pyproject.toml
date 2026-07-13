@@ -48,21 +48,21 @@ build-backend = "hatchling.build"
 
 [project.optional-dependencies]
 harness = [
-    "pydantic-ai-harness[code-mode]>=0.5.0,<0.6.0",
+    "pydantic-ai-harness[code-mode]>=0.5.0,<0.7.0",
 ]
 test = [
-    "ruff==0.15.20",
+    "ruff==0.15.21",
     "pytest==9.1.1",
     "pytest-asyncio==1.4.0",
-    "mypy==2.1.0",
+    "mypy==2.2.0",
 ]
 
 [dependency-groups]
 dev = [
-    "ruff==0.15.20",
+    "ruff==0.15.21",
     "pytest==9.1.1",
     "pytest-asyncio==1.4.0",
-    "mypy==2.1.0",
+    "mypy==2.2.0",
 ]
 
 [tool.ruff]
