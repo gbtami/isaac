@@ -1,151 +1,50 @@
 # Architecture
 
-This document explains the high-level structure of the isaac codebase, with a
-focus on the ACP agent and client staying independent while interoperating with
-any ACP-compliant peer.
+Isaac is a stdio ACP server. Its runtime is Pydantic AI Harness, with no bundled client.
 
-## Goals
-
-- Keep agent and client code paths independent and protocol-compliant.
-- Make responsibilities obvious by module and file name.
-- Prefer small, focused modules over monoliths.
-
-## Directory Map
-
-- `src/isaac/agent/` ACP agent implementation and runtime services.
-- `src/isaac/agent/acp/` ACP endpoint handlers split by domain.
-- `src/isaac/agent/brain/` prompt handling, planning, and model wiring.
-- `src/isaac/agent/capabilities.py` Isaac-specific Pydantic AI 2.x capabilities.
-- `src/isaac/agent/tools/` tool registry, schema, execution, registration.
-- `src/isaac/agent/subagents/` delegate agents exposed as tools.
-- `src/isaac/client/` ACP client REPL example (no shared runtime with agent).
-
-## ACP Agent Layout
-
-The ACP agent composes mixins for each protocol area. This keeps ACP endpoints
-isolated and testable while the public agent class remains small.
-
-```mermaid
-flowchart TD
-  ACPAgent[ACPAgent] --> Init[InitializationMixin]
-  ACPAgent --> Perm[PermissionMixin]
-  ACPAgent --> Sess[SessionLifecycleMixin]
-  ACPAgent --> Prompt[PromptMixin]
-  ACPAgent --> Tools[ToolCallsMixin]
-  ACPAgent --> FS[FileSystemMixin]
-  ACPAgent --> Term[TerminalMixin]
-  ACPAgent --> Updates[SessionUpdateMixin]
-  ACPAgent --> Ext[ExtensionsMixin]
-
-  Prompt --> Brain[PromptHandler]
-  Brain --> Caps[Pydantic AI capabilities]
-  Tools --> ToolExec[tool_execution]
-  Sess --> Store[SessionStore]
-  Sess --> MCP[mcp_support]
-  FS --> FSHelpers[fs.py]
-  Term --> TermHelpers[agent_terminal.py]
+```text
+Toad / any ACP client
+    -> Harness run_acp_stdio
+        -> Pydantic AI Agent
+            -> Harness Coder + Permissions + Skills + compaction
+            -> per-session Harness Planning + SessionUI
+            -> per-session LocalWorkspaceBackend
+            -> per-session MCP toolset capabilities
 ```
 
-### ACP Handlers
+## Modules
 
-- `src/isaac/agent/acp/initialization.py` init and auth.
-- `src/isaac/agent/acp/permissions.py` permission requests and run_command gating.
-- `src/isaac/agent/acp/sessions.py` session lifecycle and session config option changes (mode/model via `session/set_config_option`).
-- `src/isaac/agent/acp/prompts.py` prompt turn handling.
-- `src/isaac/agent/acp/tools.py` tool calls and dispatch.
-- `src/isaac/agent/acp/filesystem.py` fs endpoints.
-- `src/isaac/agent/acp/terminal.py` terminal endpoints.
-- `src/isaac/agent/acp/updates.py` session update persistence and replay.
-- `src/isaac/agent/acp/extensions.py` extension request/notification hooks (no model-selection ext methods).
+- `isaac.cli`: argparse, shared environment loading, stderr logging, and event-loop startup.
+- `isaac.config`: immutable settings and the platform config `.env` path.
+- `isaac.server`: binds Harness capabilities and serves the agent with the public ACP adapter.
+- `isaac.mcp`: converts ACP MCP descriptors into public Pydantic AI MCP toolset capabilities.
+- `isaac.session_ui`: advertises slash commands and projects Harness plans through standard ACP updates.
 
+Coding capabilities are bound at agent construction so Coder's self-delegation inherits them. The shared
+agent has no fixed workspace. Harness calls `configure_session` with each client's `cwd`, and the
+returned workspace backend is passed to every run in that session. There is no process-wide `chdir`.
+MCP tools are also created separately for each session. MCP commands start in that session's directory.
+Each session owns an upstream `InMemoryPlanStore` shared by its `Planning` and `SessionUI` capabilities.
+After tool results, the UI capability publishes changed full-plan snapshots, including reordered or empty plans.
+The main session owns this plan; delegate runs do not overwrite its sidebar.
 
-## Pydantic AI 2.x Capability Boundary
+The upstream adapter owns protocol negotiation, sessions, history, cancellation, text/thinking/tool
+updates, permission requests, and the `model` session config option. Isaac does not subclass the adapter
+or implement protocol endpoints. The session capability handles `/help`, `/plan`, and `/compact` through
+the public `wrap_model_request` hook, returning normal streamed/history-recorded responses. Manual compaction
+uses Harness `compact_now`; history updates still commit through the adapter's normal turn lifecycle.
+Local Harness file and shell tools operate on the agent host;
+client-native filesystem/terminal tools are not attached alongside Coder's tools.
 
-Isaac-specific cross-cutting agent behavior should live in
-`src/isaac/agent/capabilities.py` before adding more prompt-handler state.
-Current capability assembly includes:
+The adapter's defaults determine advertised capabilities. MCP HTTP/SSE support is enabled because
+the session factory connects both transports. Text prompts are supported by default; Isaac does not
+claim image/audio support across its selectable models. Persistence is absent.
 
-- `build_system_prompt_capability()`: wraps Pydantic AI `ReinjectSystemPrompt(replace_existing=True)` so Isaac's server-side prompt is reinserted on every provider request and stale system prompt parts from ACP/UI history cannot override it.
-- `build_history_sanitizer_capability()`: wraps Pydantic AI `ProcessHistory` so empty provider-bound text parts are stripped without losing message metadata.
-- `build_mode_capability()`: wraps Pydantic AI `PrepareTools` to map ACP session mode (`ask`/`yolo`) to tool visibility/approval semantics.
-- `build_acp_permission_capability()`: wraps Pydantic AI `HandleDeferredToolCalls` to resolve deferred approval requests through ACP permission prompts during a run.
-- `build_event_stream_observer_capability()`: wraps Pydantic AI `ProcessEventStream` so ACP tool-call progress, planner updates, tool-history summaries, and recent-file tracking observe each run at the Pydantic AI event-stream boundary instead of through `stream_with_runner` callbacks.
-- `build_recent_files_capability()`: contributes transient Pydantic AI instructions for ambiguous file follow-ups based on files touched by mutating tools, without appending those hints to persisted chat history.
-- `build_isaac_tools_capability()`: wraps Isaac's existing ACP-compatible coding tools in a Pydantic AI `Toolset` capability so normal agents get tools at construction time instead of via post-construction mutation.
-- `build_toolset_capabilities()`: wraps ACP-provided MCP toolsets as capabilities too, so session-specific tools no longer use a separate `Agent(toolsets=...)` lane.
-- `build_optional_harness_capabilities()`: opt-in bridge for Harness experiments. FileSystem/Shell are prefixed as `harness_*` tools and CodeMode remains explicit opt-in.
+## Boundaries
 
-ACP event projection is now attached as a per-run `ProcessEventStream`
-capability. `stream_with_runner()` treats Pydantic AI `run_stream_events()` as
-an async context manager, converts history into Pydantic AI message objects,
-streams text/thinking/final outputs, and forwards per-run capabilities; it does
-not own system prompt, recent-file context, approval, or tool/plan event policy.
+All coding behavior is provided by Harness capabilities. Do not copy CLAI2's UI, plugins, model
+resolvers, OAuth clients, or session infrastructure. Add a Harness capability when new agent behavior
+is needed. Keep Isaac-specific code limited to configuration, launch, and transport integration.
 
-Pydantic AI Harness is available through the optional `harness` extra for opt-in
-experiments. CodeMode is intentionally disabled by default and can be enabled with
-`ISAAC_HARNESS_CODE_MODE=1` once the approval/sandbox UX has been reviewed for
-the target ACP client.
-
-## Prompt Handling Flow
-
-```mermaid
-sequenceDiagram
-  participant Client
-  participant Agent as ACPAgent
-  participant Prompt as PromptHandler
-  participant Tools as ToolExec
-
-  Client->>Agent: session/prompt
-  Agent->>Prompt: handle_prompt()
-  Prompt-->>Agent: stream tool/plan/thought updates
-  Prompt->>Tools: tool calls (if needed)
-  Tools-->>Agent: tool updates
-  Prompt-->>Agent: final assistant text (single end-of-turn message)
-  Agent-->>Client: session/update
-  Agent-->>Client: prompt response
-```
-
-## Tools
-
-Tools are split into registry metadata, pydantic argument models, execution,
-and capability/toolset assembly. Agents attach Isaac tools through Pydantic AI
-capabilities; there is no constructor-toolset lane for normal/session tools and
-no post-construction registration path.
-
-- Registry/metadata: `src/isaac/agent/tools/registry.py`
-- Argument models for direct ACP calls: `src/isaac/agent/tools/args.py`
-- Execution/validation: `src/isaac/agent/tools/executor.py`
-- Capability/toolset assembly: `src/isaac/agent/tools/registration.py`
-- Shared safety helpers: `src/isaac/agent/tools/safety.py`
-
-Tool hardening keeps the public Isaac tool contract stable while borrowing the
-most useful Harness ideas internally. Filesystem tools resolve paths relative to
-the session cwd, block symlink escapes, refuse binary content in text tools, and
-protect high-risk write targets such as `.git`, `.env*`, and private-key-looking
-files. Mutating file tools return SHA-256 hashes and accept optional
-`expected_sha256` values for optimistic stale-write checks. `run_command` keeps
-ACP approval semantics and adds lightweight shell policy via built-in
-catastrophic command blockers plus optional `ISAAC_SHELL_ALLOWLIST` /
-`ISAAC_SHELL_DENYLIST` regexes. These checks are defense-in-depth, not a
-sandbox.
-
-## Delegate Subagents
-
-Delegate agents are tools with their own system prompts and tool allowlists.
-They run in fresh contexts by default (no shared conversation history).
-
-- Registry/execution: `src/isaac/agent/subagents/delegate_tools.py`
-- Tool definitions: `src/isaac/agent/subagents/planner.py`,
-  `src/isaac/agent/subagents/review.py`, `src/isaac/agent/subagents/coding.py`
-
-## Client Independence
-
-The client lives entirely under `src/isaac/client/` and uses ACP stdio transport
-to connect to any compliant agent, not just isaac. The agent likewise does not
-depend on any client-specific behaviors and only uses ACP-defined flows.
-
-The reference client now opportunistically feeds raw `SessionNotification`
-objects into ACP SDK `SessionAccumulator` when that contrib helper is available.
-The existing terminal renderer still handles updates directly, but the
-accumulated snapshot gives future UI/status work a canonical ACP state source
-without replacing the rendering path in one risky step.
+The `pydantic-ai-slim` distribution installs the framework and provider integrations without the
+Pydantic AI chat CLI. Transitive libraries may use Rich internally; Isaac has no Rich interface.

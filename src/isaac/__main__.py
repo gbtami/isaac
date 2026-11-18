@@ -1,4 +1,4 @@
-from isaac.agent.agent import main_entry
+from isaac.cli import main
 
 if __name__ == "__main__":
-    main_entry()
+    main()

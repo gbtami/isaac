@@ -25,6 +25,6 @@ jobs:
         with:
           enable-cache: true
       - name: Install dependencies
-        run: uv sync --locked --extra test
+        run: uv sync --locked
       - name: Run tests
         run: uv run --locked pytest

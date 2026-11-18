@@ -20,7 +20,7 @@ jobs:
         with:
           enable-cache: true
       - name: Install dependencies
-        run: uv sync --locked --extra test
+        run: uv sync --locked
       - name: Check formatting
         run: uv run --locked ruff format --check .
       - name: Run linter

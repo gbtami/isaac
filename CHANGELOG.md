@@ -5,6 +5,19 @@ All notable changes to Isaac are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## Unreleased
+
+- Added ACP slash commands (`/help`, `/plan`, `/compact`) and native plan-sidebar updates using public capability hooks.
+- Kept Harness plans isolated per ACP session and available across prompt turns.
+- Rebuilt Isaac as an ACP-only coding server using Pydantic AI Harness 0.69.
+- Replaced the custom ACP implementation with Harness's public experimental ACP adapter.
+- Adopted Harness Coder, permissions, planning, skills, compaction, and optional CodeMode.
+- Rooted each session in the ACP client's workspace and connected client-provided MCP servers.
+- Removed the bundled REPL, custom tools and prompt runtime, model catalog, OAuth integrations,
+  session persistence, slash commands, and legacy tests.
+- Switched to `pydantic-ai-slim` provider extras, without the framework's chat CLI.
+- Added stdio integration coverage for startup, model selection, workspace isolation, and approvals.
+
 ## [0.4.0] - 2026-07-10
 
 Isaac 0.4.0 is a major internal modernization of the ACP agent and reference

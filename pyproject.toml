@@ -1,12 +1,12 @@
 [project]
 name = "isaac-acp"
 version = "0.4.0"
-description = "ACP-compliant coding agent and reference client."
+description = "Pydantic AI Harness coding agent served over ACP."
 readme = "README.md"
 license = { text = "MIT" }
 authors = [{ name = "Isaac Contributors" }]
 requires-python = ">=3.11"
-keywords = ["acp", "agent-client-protocol", "agent", "cli", "repl"]
+keywords = ["acp", "agent-client-protocol", "agent", "coding", "pydantic-ai-harness"]
 classifiers = [
     "Development Status :: 3 - Alpha",
     "Environment :: Console",
@@ -22,15 +22,12 @@ classifiers = [
     "Typing :: Typed",
 ]
 dependencies = [
-    "agent-client-protocol>=0.11.0,<0.12.0",
-    "pydantic-ai>=2.5.0,<3.0.0",
-    "aiocache==0.12.3",
-    "prompt-toolkit==3.0.52",
-    "python-dotenv==1.2.2",
-    "platformdirs==4.10.0",
-    "pathspec==1.1.1",
-    "rich==15.0.0",
-    "logfire>=4.16.0",
+    "agent-client-protocol>=0.11.1,<0.12.0",
+    "pydantic-ai-slim[anthropic,google,mcp,openai]>=2.69.0,<3.0.0",
+    "pydantic-ai-harness[acp,coder,code-mode,skills]>=0.69.0,<0.70.0",
+    "fastmcp-slim>=4.2.0,<5.0.0",
+    "python-dotenv==1.2.4",
+    "platformdirs==4.14.5",
 ]
 
 [project.urls]
@@ -40,56 +37,35 @@ Issues = "https://github.com/gbtami/isaac/issues"
 ACP-Spec = "https://agentclientprotocol.com/protocol/"
 
 [project.scripts]
-isaac = "isaac.agent:main_entry"
+isaac = "isaac.cli:main"
 
 [build-system]
-requires = ["hatchling"]
+requires = ["hatchling>=1.33.0"]
 build-backend = "hatchling.build"
-
-[project.optional-dependencies]
-harness = [
-    "pydantic-ai-harness[code-mode]>=0.5.0,<0.6.0",
-]
-test = [
-    "ruff==0.15.20",
-    "pytest==9.1.1",
-    "pytest-asyncio==1.4.0",
-    "mypy==2.1.0",
-]
 
 [dependency-groups]
 dev = [
-    "ruff==0.15.20",
-    "pytest==9.1.1",
-    "pytest-asyncio==1.4.0",
-    "mypy==2.1.0",
+    "ruff",
+    "pytest",
+    "pytest-asyncio",
+    "mypy",
 ]
 
 [tool.ruff]
 line-length = 120
+
+[tool.ruff.lint]
+select = ["E4", "E7", "E9", "F", "I", "UP"]
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/isaac"]
 
 [tool.pytest.ini_options]
 pythonpath = ["src"]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
 
 [tool.mypy]
 python_version = "3.11"
-ignore_missing_imports = true
-disallow_untyped_defs = false
-warn_unused_ignores = false
-allow_untyped_globals = true
-exclude = ["\\.venv", "\\.uv-cache"]
+strict = true
 files = ["src", "tests"]
-disable_error_code = [
-    "attr-defined",
-    "assignment",
-    "call-arg",
-    "arg-type",
-    "misc",
-    "return-value",
-    "union-attr",
-    "dict-item",
-    "index",
-]
