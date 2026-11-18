@@ -13,7 +13,10 @@ from isaac.config import Settings, load_environment
 def parse_settings(argv: list[str] | None = None) -> Settings:
     """Read CLI options after loading the shared provider environment."""
     load_environment()
-    parser = argparse.ArgumentParser(description="Serve the Isaac Harness coding agent over ACP stdio.")
+    parser = argparse.ArgumentParser(
+        description="Serve the Isaac Harness coding agent over ACP stdio.",
+        epilog="Run `isaac login` to sign in with your ChatGPT/Codex subscription.",
+    )
     parser.add_argument("--version", action="version", version=f"isaac {__version__}")
     parser.add_argument(
         "--model",
@@ -51,6 +54,24 @@ def parse_settings(argv: list[str] | None = None) -> Settings:
 
 def main(argv: list[str] | None = None) -> None:
     """Reserve stdout for ACP JSON-RPC and send diagnostics to stderr."""
+    argv = list(argv) if argv is not None else sys.argv[1:]
+    if argv and argv[0] == "login":
+        parser = argparse.ArgumentParser(prog="isaac login", description="Sign in to ChatGPT/Codex in a browser.")
+        parser.add_argument("--no-browser", action="store_true", help="Print the login URL without opening a browser.")
+        args = parser.parse_args(argv[1:])
+        from pydantic_ai.exceptions import UserError
+
+        from isaac.auth import login
+
+        load_environment()
+        try:
+            asyncio.run(login(open_browser=not args.no_browser))
+        except (UserError, OSError) as error:
+            print(f"isaac login: {error}", file=sys.stderr)
+            raise SystemExit(1) from None
+        except KeyboardInterrupt:
+            raise SystemExit(130) from None
+        return
     settings = parse_settings(argv)
     logging.basicConfig(stream=sys.stderr, level=logging.WARNING)
 

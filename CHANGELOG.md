@@ -7,6 +7,8 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ## Unreleased
 
+- Added `isaac login` using Pydantic AI's Codex browser OAuth flow, private credential storage,
+  automatic refresh persistence, and ACP model selection without client changes.
 - Added automatic first-prompt session titles, durable title metadata, standard ACP title updates, and `/title`.
 - Added automatic SQLite session saves and standard ACP `session/load`, including Toad's resume picker.
 - Restored conversation history, transcript, selected model, and the session plan across server restarts.

@@ -7,6 +7,7 @@ The old custom agent/client architecture has been removed.
 
 - `uv run isaac` and `uv run python -m isaac` start the same ACP stdio server.
 - Configure `ISAAC_MODEL` in the environment or the shared platform config `.env`, or pass `--model`.
+- `uv run isaac login` signs in to ChatGPT/Codex using core's browser OAuth flow, outside ACP.
 - Use Toad as a client: `cd ~/toad && uv run toad acp "isaac" --project-dir ~/playground`.
 
 ## Design
@@ -14,6 +15,7 @@ The old custom agent/client architecture has been removed.
 - Use Harness `Coder` and public capabilities for coding behavior.
 - Use `pydantic_ai_harness.experimental.acp.run_acp_stdio` for the complete ACP layer.
 - Keep model selection on the adapter's ACP Session Config Options path.
+- Reuse core's Codex OAuth flow/provider and credential-source protocol; keep browser login outside ACP.
 - Bind coding capabilities at agent construction so self-delegation inherits them.
 - Keep planning and its ACP presentation session-local through the session factory.
 - Use public capability hooks for the small plan/slash-command bridge; do not replace the adapter.
@@ -33,6 +35,7 @@ The old custom agent/client architecture has been removed.
 
 - `src/isaac/cli.py`: command line and process startup.
 - `src/isaac/config.py`: shared environment and settings.
+- `src/isaac/auth.py`: core Codex browser-login bridge and private, atomic credential storage.
 - `src/isaac/server.py`: Harness composition and ACP launch.
 - `src/isaac/mcp.py`: ACP MCP transport configuration.
 - `src/isaac/session_ui.py`: session-local plan projection and slash commands over Harness operations.

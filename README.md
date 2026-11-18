@@ -39,7 +39,7 @@ ANTHROPIC_API_KEY=...
 OpenAI, Anthropic, Google, and OpenAI-compatible providers such as OpenRouter are included.
 Use the provider environment variables and model identifiers documented by Pydantic AI.
 Other providers may require installing their `pydantic-ai-slim` extras into the same environment.
-Isaac has no separate model catalog or subscription/OAuth implementation.
+Isaac uses Pydantic AI's providers directly, without a separate model catalog.
 
 You can override the model with `--model`. Repeat it to populate the ACP `model` session config option;
 the first is the default for each new session:
@@ -49,6 +49,38 @@ isaac --model anthropic:claude-sonnet-4-6 --model openai:gpt-5.4
 ```
 
 Credentials are needed when prompting, not for initialization or creating a session.
+
+### ChatGPT/Codex browser login
+
+Use Pydantic AI's Codex provider with your ChatGPT/Codex subscription:
+
+```bash
+isaac login
+```
+
+This opens a browser and waits up to five minutes for Pydantic AI's localhost callback at
+`http://localhost:1455/auth/callback`. The browser must be able to reach the machine running
+Isaac on that port. Use `isaac login --no-browser` to open the printed URL yourself.
+Login does not require `ISAAC_MODEL` and runs separately from the ACP server.
+
+Then set a model in the shared environment, or pass it to the server:
+
+```dotenv
+ISAAC_MODEL=openai-codex:gpt-5.4
+```
+
+Start Isaac from Toad as usual. No Toad changes or client-specific authentication UI are needed.
+Run `isaac login` again to replace the saved login, then restart existing Isaac processes.
+Codex authentication does not use `OPENAI_API_KEY`.
+
+Isaac stores credentials in the platform config directory, such as
+`~/.config/isaac/auth/openai-codex.json` on Linux. This is an unencrypted file with private
+`0600` permissions in a `0700` directory. Pydantic AI handles token refresh and writes rotated
+credentials through Isaac's atomic file store. Tokens are separate from saved conversations.
+
+Without an Isaac login, Pydantic AI can reuse an existing Codex CLI login from
+`~/.codex/auth.json` (or `$CODEX_HOME/auth.json`). This fallback never writes that file;
+refreshed tokens last only for the server process. Use `isaac login` for Isaac-owned persistence.
 
 ## Use with Toad
 

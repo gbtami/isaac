@@ -20,6 +20,7 @@ from pydantic_ai_harness.planning import Planning, SqlitePlanStore
 from pydantic_ai_harness.skills import Skills
 
 from isaac import __version__
+from isaac.auth import model_resolver
 from isaac.config import Settings, session_database
 from isaac.mcp import mcp_capabilities
 from isaac.session_store import SqliteSessionStore
@@ -72,6 +73,7 @@ async def serve(settings: Settings) -> None:
             name="isaac",
             version=__version__,
             models=settings.models,
+            model_resolver=model_resolver(),
             session_config=partial(configure_session, store=store),
             session_store=store,
             mcp_capabilities=schema.McpCapabilities(http=True, sse=True),

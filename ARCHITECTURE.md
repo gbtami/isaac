@@ -16,6 +16,7 @@ Toad / any ACP client
 
 - `isaac.cli`: argparse, shared environment loading, stderr logging, and event-loop startup.
 - `isaac.config`: immutable settings and the platform config `.env` path.
+- `isaac.auth`: browser login and atomic credential storage for core's Codex OAuth provider.
 - `isaac.server`: binds Harness capabilities and serves the agent with the public ACP adapter.
 - `isaac.mcp`: converts ACP MCP descriptors into public Pydantic AI MCP toolset capabilities.
 - `isaac.session_ui`: advertises slash commands and projects Harness plans through standard ACP updates.
@@ -68,6 +69,17 @@ usage. A resumed session republishes its saved title using ACP `session_info_upd
 whether to display it; Isaac does not access client databases or modify client implementations.
 
 ## Boundaries
+
+`isaac login` runs independently of ACP. Core's `OpenAICodexOAuthFlow` owns PKCE, state
+validation, the localhost callback, and token exchange. Isaac opens the browser and persists
+the resulting credentials as a private, atomically replaced JSON file in its config directory.
+The adapter's public `model_resolver` hook supplies an `OpenAICodexModel` backed by a shared
+`OpenAICodexProvider` for Codex selections, leaving all other model IDs to core. Provider creation
+is lazy, so initialization and model selection require no credentials. Core handles expiry,
+refresh, and saving rotated tokens through the public `OpenAICodexCredentialSource` protocol.
+Sharing the provider also shares core's refresh lock across sessions and models within a server;
+separate processes retain core's best-effort coordination through storage. Without an Isaac
+credential file, the provider can use core's read-only Codex CLI credential fallback.
 
 All coding behavior is provided by Harness capabilities. Do not copy CLAI2's UI, plugins, model
 resolvers, OAuth clients, or session infrastructure. Add a Harness capability when new agent behavior
