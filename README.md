@@ -111,8 +111,10 @@ Stdout carries ACP JSON-RPC only; diagnostics go to stderr.
 - Repository instructions: Harness loads `AGENTS.md` / `CLAUDE.md` through Coder's `RepoContext`.
 - Planning: Harness's `write_plan` tool, with a separate persisted plan per ACP session and native plan sidebar updates.
 - Skills: `.agents/skills` in the session workspace. Repeat `--skill-dir` to choose other libraries.
-- Context management: Coder's tool-result clearing, followed by tiered summarization
-  and truncation at 85% of the model's context window. `--context-window TOKENS` overrides window resolution.
+- Context management: Coder clears older tool results. Automatic compaction uses the provider's
+  inline support on Codex, OpenAI Responses, and supported Claude models on the Anthropic API.
+  It targets 85% of the context window. Harness summarizes and trims on other endpoints or when
+  the conversation is already near the limit. `--context-window TOKENS` overrides window resolution.
 - Permissions: Harness `Permissions`, with approval decisions handled by the ACP client.
 - MCP: ACP-provided stdio, HTTP, and SSE servers, with server-prefixed tool names.
 - Optional `--code-mode`: Harness's Monty-backed `CodeMode` exposes eligible tools through `run_code`.
@@ -132,8 +134,13 @@ through the upstream adapter. A small session capability adds standard ACP plan 
 - `/help`: list the agent commands.
 - `/plan`: show the current session's plan and refresh the client's plan sidebar.
 - `/title`: show the saved session title.
-- `/compact [focus]`: summarize history with Harness compaction, falling back to truncation if summarization fails.
-  An optional focus says what the summary should preserve. Summarization may use the selected model.
+- `/compact`: use native compaction on supported OpenAI Responses and Anthropic endpoints. If native
+  compaction is unavailable or fails, use Harness summarization and fall back to trimming.
+- `/compact <focus>`: use Harness summarization and tell it what to preserve.
+
+Codex subscription and Gemini models use Harness for manual `/compact`. Anthropic conversations
+with a signed native `/compact` block also use Harness for automatic compaction while the block is
+in history, because the API rejects the inline compaction edit alongside it.
 
 The commands are advertised to ACP clients and handled through public capability hooks. Ordinary prompts,
 including unknown slash commands and messages with attachments, continue through the normal agent path.

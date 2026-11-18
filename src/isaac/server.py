@@ -9,11 +9,6 @@ from pydantic_ai.models import Model
 from pydantic_ai.workspaces import LocalWorkspaceBackend
 from pydantic_ai_harness.code_mode import CodeMode
 from pydantic_ai_harness.coder import Coder
-from pydantic_ai_harness.compaction import (
-    SlidingWindowCompaction,
-    SummarizingCompaction,
-    TieredCompaction,
-)
 from pydantic_ai_harness.experimental.acp import ACPSession, ACPSessionConfig, run_acp_stdio
 from pydantic_ai_harness.permissions import Permissions
 from pydantic_ai_harness.planning import Planning, SqlitePlanStore
@@ -21,6 +16,7 @@ from pydantic_ai_harness.skills import Skills
 
 from isaac import __version__
 from isaac.auth import model_resolver
+from isaac.compaction import AutomaticCompaction
 from isaac.config import Settings, session_database
 from isaac.mcp import mcp_capabilities
 from isaac.session_store import SqliteSessionStore
@@ -33,11 +29,7 @@ def build_agent(settings: Settings, *, model: Model | str | None = None) -> Agen
     capabilities: list[AbstractCapability[None]] = [
         Coder(),
         Permissions(settings.permissions),
-        TieredCompaction(
-            tiers=[SummarizingCompaction(), SlidingWindowCompaction(keep_messages=20)],
-            target_fraction=0.85,
-            context_window=settings.context_window,
-        ),
+        AutomaticCompaction(settings.context_window),
     ]
     if settings.skill_dirs:
         capabilities.append(Skills(settings.skill_dirs, missing_directories="skip"))

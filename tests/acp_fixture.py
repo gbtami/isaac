@@ -8,8 +8,18 @@ from functools import partial
 from uuid import uuid4
 
 from pydantic_ai.exceptions import ModelHTTPError
-from pydantic_ai.messages import ModelMessage, ModelRequest, ModelResponse, TextPart, ToolReturnPart, UserPromptPart
+from pydantic_ai.messages import (
+    CompactionPart,
+    ModelMessage,
+    ModelRequest,
+    ModelResponse,
+    TextPart,
+    ToolReturnPart,
+    UserPromptPart,
+)
+from pydantic_ai.models import ModelRequestContext
 from pydantic_ai.models.function import AgentInfo, DeltaToolCall, FunctionModel
+from pydantic_ai.usage import RequestUsage
 from pydantic_ai_harness.experimental.acp import run_acp_stdio
 
 from isaac.config import Settings, session_database
@@ -40,6 +50,15 @@ async def stream(messages: list[ModelMessage], _info: AgentInfo) -> AsyncIterato
                 if tool == "history_length":
                     yield str(len(messages))
                     return
+                if tool == "check_compaction":
+                    restored = any(
+                        isinstance(part, CompactionPart)
+                        and (part.provider_details or {}).get("encrypted_content") == "fixture-opaque-state"
+                        for previous in messages
+                        for part in previous.parts
+                    )
+                    yield "compaction restored" if restored else "compaction missing"
+                    return
                 if tool not in {definition.name for definition in _info.function_tools}:
                     keywords = ", ".join(f"{key}={value!r}" for key, value in arguments.items())
                     arguments = {"code": f"print(await {tool}({keywords}))"}
@@ -61,6 +80,24 @@ def summarize(_messages: list[ModelMessage], _info: AgentInfo) -> ModelResponse:
     return ModelResponse(parts=[TextPart("Fixture summary.")])
 
 
+class NativeCompactionModel(FunctionModel):
+    async def compact_messages(
+        self, request_context: ModelRequestContext, *, instructions: str | None = None
+    ) -> ModelResponse:
+        assert isinstance(request_context.messages[-1], ModelResponse), "Exclude the /compact command from history"
+        if "--fail-native-compact" in sys.argv:
+            raise ModelHTTPError(status_code=404, model_name=self.model_name, body="Compaction unavailable.")
+        return ModelResponse(
+            parts=[
+                CompactionPart(
+                    provider_name=self.system, provider_details={"encrypted_content": "fixture-opaque-state"}
+                )
+            ],
+            provider_name=self.system,
+            usage=RequestUsage(input_tokens=10, output_tokens=3),
+        )
+
+
 async def main() -> None:
     settings = Settings(
         models=("fixture:primary", "fixture:secondary"),
@@ -68,7 +105,8 @@ async def main() -> None:
         skill_dirs=(),
         code_mode="--code-mode" in sys.argv,
     )
-    model = FunctionModel(function=summarize, stream_function=stream)
+    model_class = NativeCompactionModel if "--native-compact" in sys.argv else FunctionModel
+    model = model_class(function=summarize, stream_function=stream)
     agent = build_agent(settings, model=model)
     store = SqliteSessionStore(session_database())
     async with agent:

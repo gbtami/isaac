@@ -1,13 +1,15 @@
 """Small ACP presentation bridge over public Harness capabilities."""
 
-from dataclasses import dataclass, field
+import logging
+from dataclasses import dataclass, field, replace
 
 from acp import schema
 from pydantic_ai import RunContext
 from pydantic_ai.capabilities import AbstractCapability, WrapModelRequestHandler, on_event
-from pydantic_ai.exceptions import FallbackExceptionGroup, ModelAPIError, UnexpectedModelBehavior
-from pydantic_ai.messages import FunctionToolResultEvent, ModelResponse, TextPart
+from pydantic_ai.exceptions import FallbackExceptionGroup, ModelAPIError, UnexpectedModelBehavior, UserError
+from pydantic_ai.messages import CompactionPart, FunctionToolResultEvent, ModelResponse, TextPart
 from pydantic_ai.models import ModelRequestContext
+from pydantic_ai.models.openai_codex import OpenAICodexModel
 from pydantic_ai_harness.compaction import (
     FallbackCompaction,
     SlidingWindowCompaction,
@@ -20,13 +22,15 @@ from pydantic_ai_harness.planning import PlanStore, TaskStatus, render_plan
 
 from isaac.session_store import SqliteSessionStore
 
+logger = logging.getLogger(__name__)
+
 COMMANDS = (
     schema.AvailableCommand(name="help", description="Show Isaac's agent commands."),
     schema.AvailableCommand(name="plan", description="Show the current session's plan."),
     schema.AvailableCommand(name="title", description="Show the saved session title."),
     schema.AvailableCommand(
         name="compact",
-        description="Compact conversation history using Harness; optionally say what to preserve.",
+        description="Compact conversation history. Add a focus to say what the summary should preserve.",
         input=schema.AvailableCommandInput(root=schema.UnstructuredCommandInput(hint="optional focus for the summary")),
     ),
 )
@@ -112,6 +116,15 @@ class SessionUI(AbstractCapability[None]):
         tokens = sum(estimate_message_tokens(history))
         if not tokens:
             return "Nothing to compact: the conversation is empty."
+        if focus is None:
+            native = await compact_native(ctx, replace(request, messages=history))
+            if native is not None:
+                # Core replays from the boundary on compatible providers. Keep the prefix so
+                # a provider that cannot read the artifact still sees the preceding history.
+                ctx.messages[:] = [*history, native, *current]
+                request.messages = list(ctx.messages)
+                return f"Compacted conversation history using native compaction on {request.model.model_name}."
+
         tail = min(50_000, tokens // 2)
         strategy: FallbackCompaction[None] = FallbackCompaction(
             fallback_chain=[
@@ -135,3 +148,27 @@ class SessionUI(AbstractCapability[None]):
         ctx.messages[:] = [*compacted, *current]
         request.messages = list(ctx.messages)
         return f"Compacted {len(history)} messages to {len(compacted)}; approximately {saved:,} tokens saved."
+
+
+async def compact_native(ctx: RunContext[None], request: ModelRequestContext) -> ModelResponse | None:
+    # The Codex subscription backend returns 404 for OpenAI's standalone /responses/compact.
+    if isinstance(request.model, OpenAICodexModel):
+        return None
+    try:
+        response = await request.model.compact_messages(request)
+    except NotImplementedError:
+        return None
+    except (ModelAPIError, FallbackExceptionGroup, UnexpectedModelBehavior, UserError) as error:
+        logger.debug("Native compaction unavailable for %s (%s)", request.model.model_name, type(error).__name__)
+        return None
+
+    ctx.usage.requests += 1
+    ctx.usage.incr(response.usage)
+    if any(
+        isinstance(part, CompactionPart)
+        and (part.has_content() or bool((part.provider_details or {}).get("encrypted_content")))
+        and request.model.accepts_stateless_artifacts(response, part)
+        for part in response.parts
+    ):
+        return response
+    return None

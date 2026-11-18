@@ -175,12 +175,16 @@ async def test_plan_sidebar_and_commands(tmp_path: Path, code_mode: bool) -> Non
         assert plans()[-1].entries == []
 
 
-@pytest.mark.parametrize("fail_summary", [False, True])
-async def test_compact_commits_history_for_next_turn(tmp_path: Path, fail_summary: bool) -> None:
+@pytest.mark.parametrize("mode", ["focus", "fail-summary", "fail-native"])
+async def test_compact_commits_history_for_next_turn(tmp_path: Path, mode: str) -> None:
     """The command uses Harness compaction and the adapter commits the resulting history."""
     client = RecordingClient()
     fixture = Path(__file__).with_name("acp_fixture.py")
-    args = [str(fixture), *(["--fail-summary"] if fail_summary else [])]
+    args = [str(fixture), "--native-compact"]
+    if mode == "fail-summary":
+        args.append("--fail-summary")
+    if mode == "fail-native":
+        args.append("--fail-native-compact")
     (tmp_path / "long.txt").write_text("abcdefghij " * 1000)
     async with (
         asyncio.timeout(30),
@@ -205,9 +209,41 @@ async def test_compact_commits_history_for_next_turn(tmp_path: Path, fail_summar
             await prompt(json.dumps({"tool": "read_file", "args": {"path": "long.txt"}}))
         inspect = json.dumps({"tool": "history_length", "args": {}})
         before = int(await prompt(inspect))
-        assert "Compacted" in await prompt("/compact preserve the current task")
+        command = "/compact" if mode == "fail-native" else "/compact preserve the current task"
+        assert "tokens saved" in await prompt(command)
         after = int(await prompt(inspect))
         assert after < before
+
+
+async def test_native_compaction_survives_process_restart(tmp_path: Path) -> None:
+    fixture = Path(__file__).with_name("acp_fixture.py")
+    args = [sys.executable, str(fixture), "--native-compact"]
+    client = RecordingClient()
+    async with asyncio.timeout(30), acp.spawn_agent_process(cast(Client, client), *args) as (connection, _process):
+        await connection.initialize(protocol_version=acp.PROTOCOL_VERSION)
+        session = await connection.new_session(cwd=str(tmp_path), mcp_servers=[])
+        await connection.prompt(session_id=session.session_id, prompt=[acp.text_block("remember the build task")])
+        response = await connection.prompt(session_id=session.session_id, prompt=[acp.text_block("/compact")])
+        assert response.stop_reason == "end_turn"
+        updates = [update for _, update in client.updates if isinstance(update, schema.AgentMessageChunk)]
+        assert any(
+            isinstance(update.content, schema.TextContentBlock) and "using native compaction" in update.content.text
+            for update in updates
+        )
+
+    client = RecordingClient()
+    async with asyncio.timeout(30), acp.spawn_agent_process(cast(Client, client), *args) as (connection, _process):
+        await connection.initialize(protocol_version=acp.PROTOCOL_VERSION)
+        await connection.load_session(session_id=session.session_id, cwd=str(tmp_path), mcp_servers=[])
+        check = json.dumps({"tool": "check_compaction", "args": {}})
+        response = await connection.prompt(session_id=session.session_id, prompt=[acp.text_block(check)])
+        assert response.stop_reason == "end_turn"
+        assert any(
+            isinstance(update, schema.AgentMessageChunk)
+            and isinstance(update.content, schema.TextContentBlock)
+            and "compaction restored" in update.content.text
+            for _, update in client.updates
+        )
 
 
 async def test_session_load_after_process_restart(tmp_path: Path) -> None:

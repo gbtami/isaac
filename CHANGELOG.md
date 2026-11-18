@@ -7,6 +7,8 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ## Unreleased
 
+- Added provider-native `/compact` through Pydantic AI Core, with Harness fallback for unsupported endpoints.
+- Enabled automatic inline compaction on Codex, OpenAI Responses, and supported Anthropic models.
 - Added `isaac login` using Pydantic AI's Codex browser OAuth flow, private credential storage,
   automatic refresh persistence, and ACP model selection without client changes.
 - Added automatic first-prompt session titles, durable title metadata, standard ACP title updates, and `/title`.

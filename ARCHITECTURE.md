@@ -17,6 +17,7 @@ Toad / any ACP client
 - `isaac.cli`: argparse, shared environment loading, stderr logging, and event-loop startup.
 - `isaac.config`: immutable settings and the platform config `.env` path.
 - `isaac.auth`: browser login and atomic credential storage for core's Codex OAuth provider.
+- `isaac.compaction`: provider-aware automatic compaction with Harness fallback.
 - `isaac.server`: binds Harness capabilities and serves the agent with the public ACP adapter.
 - `isaac.mcp`: converts ACP MCP descriptors into public Pydantic AI MCP toolset capabilities.
 - `isaac.session_ui`: advertises slash commands and projects Harness plans through standard ACP updates.
@@ -37,8 +38,16 @@ the adapter's recorded transcript.
 The upstream adapter owns protocol negotiation, sessions, history, cancellation, text/thinking/tool
 updates, permission requests, and the `model` session config option. Isaac does not subclass the adapter
 or implement protocol endpoints. The session capability handles `/help`, `/plan`, `/title`, and `/compact` through
-the public `wrap_model_request` hook, returning normal streamed/history-recorded responses. Manual compaction
-uses Harness `compact_now`; history updates still commit through the adapter's normal turn lifecycle.
+the public `wrap_model_request` hook, returning normal streamed/history-recorded responses. Plain `/compact`
+tries core's `Model.compact_messages()` and stores the native response at the compaction boundary. Compatible
+models resume from that boundary. The preceding messages remain available to a model that can't replay it.
+Focused, unsupported, or failed native compaction uses Harness `compact_now`. The Codex subscription
+endpoint lacks the standalone compaction route, so it uses Harness directly. The adapter commits all history
+updates through its normal turn lifecycle. Automatic compaction applies core's `OpenAICompaction` or
+`AnthropicCompaction` settings on the supported first-party endpoints, based on the selected request model.
+The inline trigger is 85% of the resolved context window. Harness handles other endpoints, unsupported
+inline settings, and estimated windows above 95% where the provider may reject the request before it can
+compact. Anthropic's signed on-demand blocks and inline threshold edits cannot be sent together.
 Local Harness file and shell tools operate on the agent host;
 client-native filesystem/terminal tools are not attached alongside Coder's tools.
 
