@@ -28,6 +28,9 @@ Toad / any ACP client
 Coding capabilities are bound at agent construction so Coder's self-delegation inherits them. The shared
 agent has no fixed workspace. Harness calls `configure_session` with each client's `cwd`, and the
 returned workspace backend is passed to every run in that session. There is no process-wide `chdir`.
+Coder's `TaskControl` gives each run a Harness task owner and lets the model manage background delegates.
+Harness cancels and drains tasks when the owning run ends. Optional `agent_folders` are read through the
+session workspace and produce instruction-only delegates. Self-delegation carries the coding tools and permissions.
 MCP tools are also created separately for each session. MCP commands start in that session's directory.
 Each session owns an upstream `SqlitePlanStore` shared by its `Planning` and `SessionUI` capabilities.
 After tool results, the UI capability publishes changed full-plan snapshots, including reordered or empty plans.

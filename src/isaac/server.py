@@ -15,6 +15,7 @@ from pydantic_ai_harness.experimental.acp import ACPSession, ACPSessionConfig, P
 from pydantic_ai_harness.permissions import Permissions
 from pydantic_ai_harness.planning import Planning, SqlitePlanStore
 from pydantic_ai_harness.skills import Skills
+from pydantic_ai_harness.sub_agents import TaskControl
 
 from isaac import __version__
 from isaac.auth import model_resolver
@@ -30,7 +31,7 @@ from isaac.session_ui import SessionUI
 def build_agent(settings: Settings, *, model: Model | str | None = None) -> Agent[SessionSettings, str]:
     """Bind capabilities at construction so Harness self-delegates inherit them."""
     capabilities: list[AbstractCapability[SessionSettings]] = [
-        Coder(),
+        Coder(agent_folders=settings.agent_dirs or None, task_control=TaskControl()),
         Permissions(lambda ctx: ctx.deps.permissions),
         AutomaticCompaction(settings.context_window),
     ]

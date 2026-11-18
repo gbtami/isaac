@@ -41,6 +41,9 @@ def parse_settings(argv: list[str] | None = None) -> Settings:
         help="Skill library in each session's workspace; repeat as needed (default: .agents/skills).",
     )
     parser.add_argument(
+        "--agent-dir", action="append", help="Folder of named delegate definitions in each workspace. Repeat as needed."
+    )
+    parser.add_argument(
         "--context-window", type=int, help="Override the model context window in tokens for compaction."
     )
     args = parser.parse_args(argv)
@@ -52,6 +55,7 @@ def parse_settings(argv: list[str] | None = None) -> Settings:
             code_mode=args.code_mode,
             skill_dirs=tuple(args.skill_dir) if args.skill_dir is not None else (".agents/skills",),
             context_window=args.context_window,
+            agent_dirs=tuple(args.agent_dir or ()),
         )
     except ValueError as error:
         parser.error(str(error))

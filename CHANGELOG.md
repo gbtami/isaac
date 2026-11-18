@@ -7,6 +7,7 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ## Unreleased
 
+- Enabled Harness task controls for background delegates and added `--agent-dir` for named delegates.
 - Added a live context usage meter for ACP clients such as Toad using Harness measurements.
 - Added `/models`, `/model`, and `/permissions` for model selection and live session permission changes.
 - Enabled Code Mode by default and added `--no-code-mode` for direct tool calls.

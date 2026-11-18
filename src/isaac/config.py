@@ -27,6 +27,7 @@ class Settings:
     code_mode: bool = True
     skill_dirs: tuple[str, ...] = (".agents/skills",)
     context_window: int | None = None
+    agent_dirs: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
         if not self.models or any(not model.strip() for model in self.models):

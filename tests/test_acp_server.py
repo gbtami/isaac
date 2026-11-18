@@ -106,6 +106,70 @@ async def test_context_usage_is_reported_over_acp(tmp_path: Path) -> None:
         assert 0 < readings[-1].used < readings[-1].size
 
 
+async def test_background_delegate_can_be_listed_steered_and_cancelled(tmp_path: Path) -> None:
+    """Manage a real Harness self-delegate through the default Code Mode tool."""
+    fixture = Path(__file__).with_name("acp_fixture.py")
+    client = RecordingClient()
+    code = (
+        "receipt = await delegate_task(agent_name='self', task='fixture block until cancelled', background=True)\n"
+        "print(receipt)\n"
+        "task_id = receipt.split()[1]\n"
+        "print(await list_tasks())\n"
+        "print(await message_task(task_id=task_id, message='Check another file.'))\n"
+        "print(await cancel_task(task_id=task_id, force=True))\n"
+        "print(await list_tasks())"
+    )
+    async with (
+        asyncio.timeout(30),
+        acp.spawn_agent_process(cast(Client, client), sys.executable, str(fixture)) as (connection, _process),
+    ):
+        await connection.initialize(protocol_version=acp.PROTOCOL_VERSION)
+        session = await connection.new_session(cwd=str(tmp_path), mcp_servers=[])
+        prompt = acp.text_block(json.dumps({"tool": "run_code", "args": {"code": code}}))
+        assert (await connection.prompt(session_id=session.session_id, prompt=[prompt])).stop_reason == "end_turn"
+        output = "".join(
+            update.content.text
+            for _, update in client.updates
+            if isinstance(update, schema.AgentMessageChunk) and isinstance(update.content, schema.TextContentBlock)
+        )
+        assert "running in the background" in output
+        assert "self, running, background" in output
+        assert "Message sent to task" in output
+        assert "self, finished: cancelled" in output
+
+
+async def test_named_delegate_loads_from_session_workspace(tmp_path: Path) -> None:
+    fixture = Path(__file__).with_name("acp_fixture.py")
+    client = RecordingClient()
+    agents = tmp_path / ".agents" / "agents"
+    agents.mkdir(parents=True)
+    (agents / "reviewer.md").write_text(
+        "---\nname: reviewer\ndescription: A fixture review delegate.\n---\nfixture_named_agent_instructions\n",
+        encoding="utf-8",
+    )
+    async with (
+        asyncio.timeout(30),
+        acp.spawn_agent_process(
+            cast(Client, client), sys.executable, str(fixture), "--named-delegates", "--no-code-mode"
+        ) as (
+            connection,
+            _process,
+        ),
+    ):
+        await connection.initialize(protocol_version=acp.PROTOCOL_VERSION)
+        session = await connection.new_session(cwd=str(tmp_path), mcp_servers=[])
+        prompt = acp.text_block(
+            json.dumps({"tool": "delegate_task", "args": {"agent_name": "reviewer", "task": "Review this change."}})
+        )
+        assert (await connection.prompt(session_id=session.session_id, prompt=[prompt])).stop_reason == "end_turn"
+        output = "".join(
+            update.content.text
+            for _, update in client.updates
+            if isinstance(update, schema.AgentMessageChunk) and isinstance(update.content, schema.TextContentBlock)
+        )
+        assert "Named delegate used" in output
+
+
 async def test_model_commands_share_acp_selection_and_resume(tmp_path: Path) -> None:
     fixture = Path(__file__).with_name("acp_fixture.py")
     inspect = json.dumps({"tool": "model_name", "args": {}})

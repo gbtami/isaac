@@ -22,6 +22,7 @@ from pydantic_ai.messages import (
 from pydantic_ai.models import ModelRequestContext
 from pydantic_ai.models.function import AgentInfo, DeltaToolCall, FunctionModel
 from pydantic_ai.usage import RequestUsage
+from pydantic_ai_harness.sub_agents import is_task_report
 
 from isaac.config import Settings
 from isaac.server import build_acp_adapter, build_agent
@@ -31,11 +32,17 @@ async def stream(
     messages: list[ModelMessage], _info: AgentInfo, *, model_id: str
 ) -> AsyncIterator[str | dict[int, DeltaToolCall]]:
     """Call the tool named by a JSON user prompt, then return its output."""
+    if "fixture_named_agent_instructions" in (_info.instructions or ""):
+        yield f"Named delegate used {model_id}"
+        return
     if isinstance(messages[-1], ModelRequest):
         for part in reversed(messages[-1].parts):
             if isinstance(part, ToolReturnPart):
                 yield str(part.content)
                 return
+        if any(is_task_report(part) for part in messages[-1].parts):
+            yield "Task report received."
+            return
     for message in reversed(messages):
         if not isinstance(message, ModelRequest):
             continue
@@ -44,6 +51,9 @@ async def stream(
                 continue
             contents = [part.content] if isinstance(part.content, str) else part.content
             for content in contents:
+                if content == "fixture block until cancelled":
+                    await asyncio.Future[None]()
+                    return
                 if not isinstance(content, str) or not content.startswith('{"tool":'):
                     continue
                 command = json.loads(content)
@@ -77,6 +87,8 @@ async def stream(
 
 
 def summarize(_messages: list[ModelMessage], _info: AgentInfo) -> ModelResponse:
+    if "fixture_named_agent_instructions" in (_info.instructions or ""):
+        return ModelResponse(parts=[TextPart("Named delegate used its disk instructions.")])
     if any(
         "concise title" in (message.instructions or "") for message in _messages if isinstance(message, ModelRequest)
     ):
@@ -112,6 +124,7 @@ async def main() -> None:
         permissions="read-only",
         skill_dirs=(),
         context_window=50_000 if "--known-context-window" in sys.argv else None,
+        agent_dirs=(".agents/agents",) if "--named-delegates" in sys.argv else (),
     )
     if "--no-code-mode" in sys.argv:
         settings = replace(settings, code_mode=False)

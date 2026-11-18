@@ -112,6 +112,9 @@ Stdout carries ACP JSON-RPC only; diagnostics go to stderr.
 ## Coding capabilities
 
 - `Coder`: `read_file`, `write_file`, `edit_file`, `list_files`, `grep`, persistent `shell`, and self-delegation.
+- Delegation: Harness lets the model run delegates in the background, list them, send instructions,
+  answer their questions, and cancel them. Repeat `--agent-dir` to load named delegates from folders
+  in each session's workspace.
 - Repository instructions: Harness loads `AGENTS.md` / `CLAUDE.md` through Coder's `RepoContext`.
 - Planning: Harness's `write_plan` tool, with a separate persisted plan per ACP session and native plan sidebar updates.
 - Skills: `.agents/skills` in the session workspace. Repeat `--skill-dir` to choose other libraries.
@@ -132,9 +135,18 @@ commands matching its built-in sensitive-command patterns. `--permissions read-o
 file change and shell command. `--permissions full` allows those operations without asking.
 These are Harness policies, not an OS sandbox. File tools are rooted at the workspace; shell commands
 run locally with the server process's privileges. MCP tools follow their server's own behavior.
-Delegates inherit the coding agent's capabilities; the main session owns its plan and command UI.
+Self-delegates inherit the coding agent's capabilities. The main session owns its plan and command UI.
 A delegate that needs approval stops and reports back to
 the parent; the parent can perform that operation through ACP approval.
+
+Background tasks belong to the current agent run. The parent can work while they run and can act
+on their reports before finishing. Cancelling the run stops its delegates. A direct ACP approval
+can end that run and start another, so tasks do not carry across that pause or a resumed session.
+
+For example, `isaac --agent-dir .agents/agents` loads Harness's [Markdown and TOML delegate definitions](https://pydantic.dev/docs/ai/harness/subagents/#loading-sub-agents-from-disk).
+Named delegates use the current model and the instructions in their definition. They have no tools of
+their own and can ask the parent questions through `ask_parent`. The model can delegate to `self` for
+work that uses Isaac's coding tools.
 
 ACP supports streaming, cancellation, concurrent sessions, tool presentation, and model config options
 through the upstream adapter. A small session capability adds standard ACP plan updates and these commands:
