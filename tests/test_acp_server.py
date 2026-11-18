@@ -43,7 +43,7 @@ class RecordingClient:
 async def test_cli_initialization_and_model_selection(tmp_path: Path) -> None:
     """The installed entrypoint starts without provider credentials or a prompt."""
     client = RecordingClient()
-    models = ("openai-codex:gpt-5.4", "anthropic:claude-sonnet-4-6")
+    models = ("openai-codex:gpt-5.6-luna", "anthropic:claude-sonnet-4-6")
     async with (
         asyncio.timeout(30),
         acp.spawn_agent_process(
