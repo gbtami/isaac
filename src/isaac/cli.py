@@ -29,7 +29,12 @@ def parse_settings(argv: list[str] | None = None) -> Settings:
         default="auto",
         help="Harness permission mode (default: auto).",
     )
-    parser.add_argument("--code-mode", action="store_true", help="Expose tools through Harness's Monty CodeMode.")
+    parser.add_argument(
+        "--code-mode",
+        action=argparse.BooleanOptionalAction,
+        default=Settings.code_mode,
+        help="Expose eligible tools through Harness's Monty Code Mode (default: enabled).",
+    )
     parser.add_argument(
         "--skill-dir",
         action="append",

@@ -17,6 +17,9 @@ class RecordingClient:
     def __init__(self) -> None:
         self.updates: list[tuple[str, object]] = []
         self.approvals: list[schema.ToolCallUpdate] = []
+        self.approval_kinds: list[set[str]] = []
+        self.permission_started = asyncio.Event()
+        self.permission_gate: asyncio.Event | None = None
         self.allow = True
 
     def on_connect(self, _connection: object) -> None:
@@ -33,6 +36,10 @@ class RecordingClient:
         **_kwargs: object,
     ) -> schema.RequestPermissionResponse:
         self.approvals.append(tool_call)
+        self.approval_kinds.append({option.kind for option in options})
+        self.permission_started.set()
+        if self.permission_gate is not None:
+            await self.permission_gate.wait()
         kind = "allow_once" if self.allow else "reject_once"
         option = next(option for option in options if option.kind == kind)
         return schema.RequestPermissionResponse(
@@ -78,7 +85,10 @@ async def test_workspace_tools_and_permission_denial_over_stdio(tmp_path: Path) 
     fixture = Path(__file__).with_name("acp_fixture.py")
     async with (
         asyncio.timeout(30),
-        acp.spawn_agent_process(cast(Client, client), sys.executable, str(fixture)) as (connection, _process),
+        acp.spawn_agent_process(cast(Client, client), sys.executable, str(fixture), "--no-code-mode") as (
+            connection,
+            _process,
+        ),
     ):
         await connection.initialize(protocol_version=acp.PROTOCOL_VERSION)
         sessions = [await connection.new_session(cwd=str(path), mcp_servers=[]) for path in (first, second)]
@@ -116,12 +126,65 @@ async def test_workspace_tools_and_permission_denial_over_stdio(tmp_path: Path) 
         assert len(client.approvals) == 3
 
 
+async def test_code_mode_approvals_over_stdio(tmp_path: Path) -> None:
+    """The nested write waits for ACP, and denial or cancellation leaves it unexecuted."""
+    client = RecordingClient()
+    fixture = Path(__file__).with_name("acp_fixture.py")
+    async with (
+        asyncio.timeout(30),
+        acp.spawn_agent_process(cast(Client, client), sys.executable, str(fixture)) as (connection, _process),
+    ):
+        await connection.initialize(protocol_version=acp.PROTOCOL_VERSION)
+        session = await connection.new_session(cwd=str(tmp_path), mcp_servers=[])
+
+        async def write(name: str) -> schema.PromptResponse:
+            code = f"print(write_file(path={name!r}, content='sample'))"
+            prompt = acp.text_block(json.dumps({"tool": "run_code", "args": {"code": code}}))
+            return await connection.prompt(session_id=session.session_id, prompt=[prompt])
+
+        client.permission_gate = asyncio.Event()
+        pending = asyncio.create_task(write("approved.txt"))
+        await client.permission_started.wait()
+        assert not (tmp_path / "approved.txt").exists()
+        assert client.approval_kinds[-1] == {"allow_once", "reject_once"}
+        approved = client.approvals[-1]
+        assert approved.title == "Write approved.txt"
+        assert approved.content and isinstance(diff := approved.content[0], schema.FileEditToolCallContent)
+        assert diff.path == str(tmp_path / "approved.txt") and diff.new_text == "sample"
+        client.permission_gate.set()
+        assert (await pending).stop_reason == "end_turn"
+        assert (tmp_path / "approved.txt").read_text() == "sample"
+
+        client.permission_gate = None
+        client.allow = False
+        assert (await write("denied.txt")).stop_reason == "end_turn"
+        assert len(client.approvals) == 2
+        assert not (tmp_path / "denied.txt").exists()
+
+        client.allow = True
+        client.permission_started.clear()
+        client.permission_gate = asyncio.Event()
+        pending = asyncio.create_task(write("cancelled.txt"))
+        await client.permission_started.wait()
+        await connection.cancel(session_id=session.session_id)
+        assert (await pending).stop_reason == "cancelled"
+        # A late approval for the cancelled call must not execute it.
+        client.permission_gate.set()
+        assert (await write("after-cancel.txt")).stop_reason == "end_turn"
+        assert (tmp_path / "after-cancel.txt").is_file()
+        assert not (tmp_path / "cancelled.txt").exists()
+
+        shell = acp.text_block(json.dumps({"tool": "shell", "args": {"command": "pwd"}}))
+        assert (await connection.prompt(session_id=session.session_id, prompt=[shell])).stop_reason == "end_turn"
+        assert client.approval_kinds[-1] == {"allow_once", "reject_once", "allow_always", "reject_always"}
+
+
 @pytest.mark.parametrize("code_mode", [False, True])
 async def test_plan_sidebar_and_commands(tmp_path: Path, code_mode: bool) -> None:
     """Native plan snapshots follow whole-plan edits across turns, including CodeMode."""
     client = RecordingClient()
     fixture = Path(__file__).with_name("acp_fixture.py")
-    args = [str(fixture), *(["--code-mode"] if code_mode else [])]
+    args = [str(fixture), *([] if code_mode else ["--no-code-mode"])]
     async with (
         asyncio.timeout(30),
         acp.spawn_agent_process(cast(Client, client), sys.executable, *args) as (connection, _process),

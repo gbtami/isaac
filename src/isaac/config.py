@@ -15,7 +15,7 @@ class Settings:
 
     models: tuple[str, ...]
     permissions: PermissionMode = "auto"
-    code_mode: bool = False
+    code_mode: bool = True
     skill_dirs: tuple[str, ...] = (".agents/skills",)
     context_window: int | None = None
 

@@ -7,6 +7,8 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ## Unreleased
 
+- Enabled Code Mode by default and added `--no-code-mode` for direct tool calls.
+- Forwarded Harness permission checks inside Code Mode to ACP clients for one-time approval or rejection.
 - Added provider-native `/compact` through Pydantic AI Core, with Harness fallback for unsupported endpoints.
 - Enabled automatic inline compaction on Codex, OpenAI Responses, and supported Anthropic models.
 - Added `isaac login` using Pydantic AI's Codex browser OAuth flow, private credential storage,
@@ -18,7 +20,7 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 - Kept Harness plans isolated per ACP session and available across prompt turns.
 - Rebuilt Isaac as an ACP-only coding server using Pydantic AI Harness 0.69.
 - Replaced the custom ACP implementation with Harness's public experimental ACP adapter.
-- Adopted Harness Coder, permissions, planning, skills, compaction, and optional CodeMode.
+- Adopted Harness Coder, permissions, planning, skills, compaction, and Code Mode.
 - Rooted each session in the ACP client's workspace and connected client-provided MCP servers.
 - Removed the bundled REPL, custom tools and prompt runtime, model catalog, OAuth integrations,
   legacy session/command infrastructure, and obsolete tests.

@@ -117,7 +117,10 @@ Stdout carries ACP JSON-RPC only; diagnostics go to stderr.
   the conversation is already near the limit. `--context-window TOKENS` overrides window resolution.
 - Permissions: Harness `Permissions`, with approval decisions handled by the ACP client.
 - MCP: ACP-provided stdio, HTTP, and SSE servers, with server-prefixed tool names.
-- Optional `--code-mode`: Harness's Monty-backed `CodeMode` exposes eligible tools through `run_code`.
+- Code Mode: Harness exposes eligible tools through Monty's `run_code` by default. Pass
+  `--no-code-mode` to use direct tool calls.
+  When a nested operation needs Harness approval, the ACP client offers **Allow once** or **Reject**
+  before the operation runs.
 
 The default `--permissions auto` permits file changes and ordinary shell commands; Harness asks about
 commands matching its built-in sensitive-command patterns. `--permissions read-only` asks before every

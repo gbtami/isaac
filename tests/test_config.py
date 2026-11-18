@@ -26,3 +26,11 @@ def test_missing_model_fails_before_starting_server(tmp_path: Path, monkeypatch:
     with pytest.raises(SystemExit) as raised:
         parse_settings([])
     assert raised.value.code == 2
+
+
+def test_code_mode_is_enabled_unless_disabled(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
+    args = ["--model", "openai:example"]
+    assert parse_settings(args).code_mode
+    assert parse_settings([*args, "--code-mode"]).code_mode
+    assert not parse_settings([*args, "--no-code-mode"]).code_mode

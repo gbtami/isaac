@@ -4,6 +4,7 @@ import asyncio
 import json
 import sys
 from collections.abc import AsyncIterator
+from dataclasses import replace
 from functools import partial
 from uuid import uuid4
 
@@ -61,7 +62,10 @@ async def stream(messages: list[ModelMessage], _info: AgentInfo) -> AsyncIterato
                     return
                 if tool not in {definition.name for definition in _info.function_tools}:
                     keywords = ", ".join(f"{key}={value!r}" for key, value in arguments.items())
-                    arguments = {"code": f"print(await {tool}({keywords}))"}
+                    call = f"{tool}({keywords})"
+                    if tool == "write_plan":
+                        call = f"await {call}"
+                    arguments = {"code": f"print({call})"}
                     tool = "run_code"
                 yield {0: DeltaToolCall(name=tool, json_args=json.dumps(arguments), tool_call_id=uuid4().hex)}
                 return
@@ -103,8 +107,9 @@ async def main() -> None:
         models=("fixture:primary", "fixture:secondary"),
         permissions="read-only",
         skill_dirs=(),
-        code_mode="--code-mode" in sys.argv,
     )
+    if "--no-code-mode" in sys.argv:
+        settings = replace(settings, code_mode=False)
     model_class = NativeCompactionModel if "--native-compact" in sys.argv else FunctionModel
     model = model_class(function=summarize, stream_function=stream)
     agent = build_agent(settings, model=model)
@@ -113,7 +118,7 @@ async def main() -> None:
         await run_acp_stdio(
             agent,
             name="isaac-fixture",
-            session_config=partial(configure_session, store=store),
+            session_config=partial(configure_session, store=store, code_mode=settings.code_mode),
             session_store=store,
             models=settings.models,
             model_resolver=lambda _name: model,

@@ -19,6 +19,7 @@ from isaac.auth import model_resolver
 from isaac.compaction import AutomaticCompaction
 from isaac.config import Settings, session_database
 from isaac.mcp import mcp_capabilities
+from isaac.session_permissions import code_mode_approvals
 from isaac.session_store import SqliteSessionStore
 from isaac.session_titles import SessionTitles
 from isaac.session_ui import SessionUI
@@ -39,19 +40,28 @@ def build_agent(settings: Settings, *, model: Model | str | None = None) -> Agen
     return Agent(model, name="isaac", capabilities=capabilities, defer_model_check=True)
 
 
-async def configure_session(session: ACPSession, *, store: SqliteSessionStore) -> ACPSessionConfig[None]:
+async def configure_session(
+    session: ACPSession, *, store: SqliteSessionStore, code_mode: bool
+) -> ACPSessionConfig[None]:
     """Use the client's workspace without changing this process's working directory."""
     plan = SqlitePlanStore(str(session_database()), session=session.session_id)
     ui = SessionUI(session, plan, store)
     titles = SessionTitles(session, store)
-    mcp = mcp_capabilities(session)
+    capabilities: list[AbstractCapability[None]] = [
+        Planning(store=plan, tools=["write_plan"]),
+        ui,
+        titles,
+        *mcp_capabilities(session),
+    ]
+    if code_mode:
+        capabilities.append(code_mode_approvals(session))
     await ui.advertise()
     await ui.publish_plan(force=True)
     await titles.restore()
     return ACPSessionConfig(
         deps=None,
         workspace=LocalWorkspaceBackend(session.cwd),
-        capabilities=[Planning(store=plan, tools=["write_plan"]), ui, titles, *mcp],
+        capabilities=capabilities,
     )
 
 
@@ -66,7 +76,7 @@ async def serve(settings: Settings) -> None:
             version=__version__,
             models=settings.models,
             model_resolver=model_resolver(),
-            session_config=partial(configure_session, store=store),
+            session_config=partial(configure_session, store=store, code_mode=settings.code_mode),
             session_store=store,
             mcp_capabilities=schema.McpCapabilities(http=True, sse=True),
         )

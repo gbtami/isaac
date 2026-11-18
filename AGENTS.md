@@ -7,6 +7,7 @@ The old custom agent/client architecture has been removed.
 
 - `uv run isaac` and `uv run python -m isaac` start the same ACP stdio server.
 - Configure `ISAAC_MODEL` in the environment or the shared platform config `.env`, or pass `--model`.
+- Code Mode is on by default. Pass `--no-code-mode` to use direct tool calls.
 - `uv run isaac login` signs in to ChatGPT/Codex using core's browser OAuth flow, outside ACP.
 - Use Toad as a client: `cd ~/toad && uv run toad acp "isaac" --project-dir ~/playground`.
 
@@ -19,6 +20,7 @@ The old custom agent/client architecture has been removed.
 - Bind coding capabilities at agent construction so self-delegation inherits them.
 - Keep planning and its ACP presentation session-local through the session factory.
 - Use public capability hooks for the small plan/slash-command bridge; do not replace the adapter.
+- Forward nested Code Mode permission checks through the session's public deferred-call hook and ACP permission request.
 - Persist conversations through Harness's `SessionStore` protocol and plans through its `SqlitePlanStore`.
 - Keep save/load/replay on the upstream ACP adapter's path; Toad discovers sessions through its own history.
 - Never modify Toad or other client repositories; accommodate their limitations within Isaac.
@@ -39,6 +41,7 @@ The old custom agent/client architecture has been removed.
 - `src/isaac/server.py`: Harness composition and ACP launch.
 - `src/isaac/mcp.py`: ACP MCP transport configuration.
 - `src/isaac/session_ui.py`: session-local plan projection and slash commands over Harness operations.
+- `src/isaac/session_permissions.py`: session-local approval requests for nested Code Mode tools.
 - `src/isaac/session_store.py`: SQLite snapshots for the upstream ACP adapter.
 - `src/isaac/session_titles.py`: first-prompt title generation and standard ACP title notifications.
 
