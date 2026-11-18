@@ -17,6 +17,9 @@ The old custom agent/client architecture has been removed.
 - Bind coding capabilities at agent construction so self-delegation inherits them.
 - Keep planning and its ACP presentation session-local through the session factory.
 - Use public capability hooks for the small plan/slash-command bridge; do not replace the adapter.
+- Persist conversations through Harness's `SessionStore` protocol and plans through its `SqlitePlanStore`.
+- Keep save/load/replay on the upstream ACP adapter's path; Toad discovers sessions through its own history.
+- Never modify Toad or other client repositories; accommodate their limitations within Isaac.
 - Configure each session through `ACPSessionConfig`, with `LocalWorkspaceBackend(session.cwd)`.
 - Attach ACP-provided MCP toolsets through core `Toolset` capabilities.
 - Keep stdout exclusive to ACP JSON-RPC; diagnostics go to stderr.
@@ -33,6 +36,8 @@ The old custom agent/client architecture has been removed.
 - `src/isaac/server.py`: Harness composition and ACP launch.
 - `src/isaac/mcp.py`: ACP MCP transport configuration.
 - `src/isaac/session_ui.py`: session-local plan projection and slash commands over Harness operations.
+- `src/isaac/session_store.py`: SQLite snapshots for the upstream ACP adapter.
+- `src/isaac/session_titles.py`: first-prompt title generation and standard ACP title notifications.
 
 ## Checks
 

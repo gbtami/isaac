@@ -4,6 +4,7 @@ import asyncio
 import json
 import sys
 from collections.abc import AsyncIterator
+from functools import partial
 from uuid import uuid4
 
 from pydantic_ai.exceptions import ModelHTTPError
@@ -11,8 +12,9 @@ from pydantic_ai.messages import ModelMessage, ModelRequest, ModelResponse, Text
 from pydantic_ai.models.function import AgentInfo, DeltaToolCall, FunctionModel
 from pydantic_ai_harness.experimental.acp import run_acp_stdio
 
-from isaac.config import Settings
+from isaac.config import Settings, session_database
 from isaac.server import build_agent, configure_session
+from isaac.session_store import SqliteSessionStore
 
 
 async def stream(messages: list[ModelMessage], _info: AgentInfo) -> AsyncIterator[str | dict[int, DeltaToolCall]]:
@@ -48,6 +50,12 @@ async def stream(messages: list[ModelMessage], _info: AgentInfo) -> AsyncIterato
 
 
 def summarize(_messages: list[ModelMessage], _info: AgentInfo) -> ModelResponse:
+    if any(
+        "concise title" in (message.instructions or "") for message in _messages if isinstance(message, ModelRequest)
+    ):
+        if "--fail-title" in sys.argv:
+            raise ModelHTTPError(status_code=503, model_name="fixture", body="Title model unavailable.")
+        return ModelResponse(parts=[TextPart("Improve session persistence")])
     if "--fail-summary" in sys.argv:
         raise ModelHTTPError(status_code=503, model_name="fixture", body="Summary model unavailable.")
     return ModelResponse(parts=[TextPart("Fixture summary.")])
@@ -55,17 +63,23 @@ def summarize(_messages: list[ModelMessage], _info: AgentInfo) -> ModelResponse:
 
 async def main() -> None:
     settings = Settings(
-        models=("test:fixture",), permissions="read-only", skill_dirs=(), code_mode="--code-mode" in sys.argv
+        models=("fixture:primary", "fixture:secondary"),
+        permissions="read-only",
+        skill_dirs=(),
+        code_mode="--code-mode" in sys.argv,
     )
-    agent = build_agent(
-        settings,
-        model=FunctionModel(
-            function=summarize,
-            stream_function=stream,
-        ),
-    )
+    model = FunctionModel(function=summarize, stream_function=stream)
+    agent = build_agent(settings, model=model)
+    store = SqliteSessionStore(session_database())
     async with agent:
-        await run_acp_stdio(agent, name="isaac-fixture", session_config=configure_session)
+        await run_acp_stdio(
+            agent,
+            name="isaac-fixture",
+            session_config=partial(configure_session, store=store),
+            session_store=store,
+            models=settings.models,
+            model_resolver=lambda _name: model,
+        )
 
 
 if __name__ == "__main__":

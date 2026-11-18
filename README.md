@@ -75,7 +75,7 @@ Stdout carries ACP JSON-RPC only; diagnostics go to stderr.
 
 - `Coder`: `read_file`, `write_file`, `edit_file`, `list_files`, `grep`, persistent `shell`, and self-delegation.
 - Repository instructions: Harness loads `AGENTS.md` / `CLAUDE.md` through Coder's `RepoContext`.
-- Planning: Harness's `write_plan` tool, with a separate in-memory plan per ACP session and native plan sidebar updates.
+- Planning: Harness's `write_plan` tool, with a separate persisted plan per ACP session and native plan sidebar updates.
 - Skills: `.agents/skills` in the session workspace. Repeat `--skill-dir` to choose other libraries.
 - Context management: Coder's tool-result clearing, followed by tiered summarization
   and truncation at 85% of the model's context window. `--context-window TOKENS` overrides window resolution.
@@ -97,15 +97,45 @@ through the upstream adapter. A small session capability adds standard ACP plan 
 
 - `/help`: list the agent commands.
 - `/plan`: show the current session's plan and refresh the client's plan sidebar.
+- `/title`: show the saved session title.
 - `/compact [focus]`: summarize history with Harness compaction, falling back to truncation if summarization fails.
   An optional focus says what the summary should preserve. Summarization may use the selected model.
 
 The commands are advertised to ACP clients and handled through public capability hooks. Ordinary prompts,
 including unknown slash commands and messages with attachments, continue through the normal agent path.
 Cancelled plan steps are omitted from the native sidebar because ACP has no cancelled entry status.
-Sessions and plans live in memory for the connection;
-Isaac does not add persistence or advertise `session/load` support.
 The upstream ACP adapter is experimental and is pinned to Harness's 0.69 release series.
+
+## Saved sessions and resume
+
+Sessions save automatically when created, after each completed turn, and when the selected model changes.
+The stored snapshot contains model history, the client-visible transcript, and the selected model.
+Plans use Harness's SQLite plan store and are restored into the native sidebar on load.
+
+On Linux the database is `~/.local/state/isaac/sessions.sqlite3`; other platforms use their standard
+user state directory. Set `ISAAC_STATE_DIR` in the environment or shared `.env` to choose another directory.
+The database is private to your user and contains conversation and tool content.
+
+In **Toad**, press **Ctrl+R** to select a previous session. Isaac advertises `loadSession`, so Toad
+records new Isaac sessions in its own history and reloads them through standard ACP `session/load`.
+Resume restores the conversation without rerunning past tools. Provider credentials must still be
+available, and the selected model should remain in the server's configured model list.
+
+Isaac generates a short title from the first coding prompt using one separate, tool-free request to
+the selected model. This request is limited to eight seconds; if it fails, a shortened first prompt
+becomes the title. Local slash commands do not name a session. Titles remain stable across later
+turns and restarts, and older unnamed sessions are named when next used.
+
+Titles are published through standard ACP `session_info_update` notifications. Clients that support
+these notifications can use them in their UI. The current local Toad clone ignores them, so its resume
+picker will still show its own names. Use `/title` to see Isaac's generated name and, if desired,
+Toad's existing `/toad:rename <name>` command to set that name locally. Isaac never modifies Toad's
+source or writes its database.
+
+Saving happens at turn boundaries, so resuming an interrupted process recovers its last saved turn.
+This does not restore running shell jobs or resume an interrupted model request.
+The upstream adapter does not implement `session/list` or the separate `session/resume` method;
+Toad's own history picker supplies discovery and uses `session/load` for continuation.
 
 ## Development
 

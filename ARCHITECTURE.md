@@ -19,18 +19,23 @@ Toad / any ACP client
 - `isaac.server`: binds Harness capabilities and serves the agent with the public ACP adapter.
 - `isaac.mcp`: converts ACP MCP descriptors into public Pydantic AI MCP toolset capabilities.
 - `isaac.session_ui`: advertises slash commands and projects Harness plans through standard ACP updates.
+- `isaac.session_store`: implements Harness's public `SessionStore` protocol using SQLite snapshots.
+- `isaac.session_titles`: generates a stable first-prompt title with a bounded, tool-free model request.
 
 Coding capabilities are bound at agent construction so Coder's self-delegation inherits them. The shared
 agent has no fixed workspace. Harness calls `configure_session` with each client's `cwd`, and the
 returned workspace backend is passed to every run in that session. There is no process-wide `chdir`.
 MCP tools are also created separately for each session. MCP commands start in that session's directory.
-Each session owns an upstream `InMemoryPlanStore` shared by its `Planning` and `SessionUI` capabilities.
+Each session owns an upstream `SqlitePlanStore` shared by its `Planning` and `SessionUI` capabilities.
 After tool results, the UI capability publishes changed full-plan snapshots, including reordered or empty plans.
 The main session owns this plan; delegate runs do not overwrite its sidebar.
+Plans are keyed by ACP session ID in the same database as conversation snapshots. The session factory
+restores the sidebar when a client reloads a session, even though presentation updates are sent outside
+the adapter's recorded transcript.
 
 The upstream adapter owns protocol negotiation, sessions, history, cancellation, text/thinking/tool
 updates, permission requests, and the `model` session config option. Isaac does not subclass the adapter
-or implement protocol endpoints. The session capability handles `/help`, `/plan`, and `/compact` through
+or implement protocol endpoints. The session capability handles `/help`, `/plan`, `/title`, and `/compact` through
 the public `wrap_model_request` hook, returning normal streamed/history-recorded responses. Manual compaction
 uses Harness `compact_now`; history updates still commit through the adapter's normal turn lifecycle.
 Local Harness file and shell tools operate on the agent host;
@@ -38,7 +43,29 @@ client-native filesystem/terminal tools are not attached alongside Coder's tools
 
 The adapter's defaults determine advertised capabilities. MCP HTTP/SSE support is enabled because
 the session factory connects both transports. Text prompts are supported by default; Isaac does not
-claim image/audio support across its selectable models. Persistence is absent.
+claim image/audio support across its selectable models. Passing `SqliteSessionStore` enables the adapter's
+`loadSession` capability, autosave, and `session/load` replay without custom protocol endpoints.
+
+## Persistence
+
+The adapter decides when to save and what history, transcript, and selected model to include. Isaac
+serializes the upstream `StoredSession` value with Pydantic and atomically replaces its SQLite row.
+Each operation uses a short-lived connection on a worker thread. The database lives in the platform
+state directory, or `ISAAC_STATE_DIR`, with private file permissions. Corrupt snapshots raise on load;
+they are not silently replaced by empty sessions. The adapter reports save/load errors according to
+its own policy.
+
+Toad records session IDs when `loadSession` is advertised, and its history picker invokes `session/load`.
+The server does not add its own discovery UI or implement unsupported `session/list` / `session/resume`
+methods. Completed conversation turns and plans persist; in-flight runs, shell jobs, and remembered
+permission decisions are not restored.
+
+Session titles use a separate SQLite table so updating a conversation snapshot never replaces its name.
+A session-local capability captures the first coding prompt and names it after a successful coding run,
+using the selected model independently of the foreground history. Naming uses a single request with
+an eight-second timeout, with a shortened-prompt fallback. Auxiliary usage is included in the turn's
+usage. A resumed session republishes its saved title using ACP `session_info_update`. Clients decide
+whether to display it; Isaac does not access client databases or modify client implementations.
 
 ## Boundaries
 

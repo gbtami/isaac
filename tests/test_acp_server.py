@@ -56,10 +56,10 @@ async def test_cli_initialization_and_model_selection(tmp_path: Path) -> None:
         assert initialized.agent_capabilities is not None
         assert initialized.agent_capabilities.mcp_capabilities is not None
         assert initialized.agent_capabilities.mcp_capabilities.http
-        assert not initialized.agent_capabilities.load_session
+        assert initialized.agent_capabilities.load_session
         session = await connection.new_session(cwd=str(tmp_path), mcp_servers=[])
         commands = [update for _, update in client.updates if isinstance(update, schema.AvailableCommandsUpdate)]
-        assert {command.name for command in commands[-1].available_commands} == {"help", "plan", "compact"}
+        assert {command.name for command in commands[-1].available_commands} == {"help", "plan", "title", "compact"}
         assert session.config_options is not None
         assert session.config_options[0].current_value == models[0]
         selected = await connection.set_config_option(session_id=session.session_id, config_id="model", value=models[1])
@@ -208,3 +208,133 @@ async def test_compact_commits_history_for_next_turn(tmp_path: Path, fail_summar
         assert "Compacted" in await prompt("/compact preserve the current task")
         after = int(await prompt(inspect))
         assert after < before
+
+
+async def test_session_load_after_process_restart(tmp_path: Path) -> None:
+    """Autosave survives process exit; load replays history and restores model and plan, without tools running again."""
+    fixture = Path(__file__).with_name("acp_fixture.py")
+    client = RecordingClient()
+    async with (
+        asyncio.timeout(30),
+        acp.spawn_agent_process(cast(Client, client), sys.executable, str(fixture)) as (connection, _process),
+    ):
+        initialized = await connection.initialize(protocol_version=acp.PROTOCOL_VERSION)
+        assert initialized.agent_capabilities is not None and initialized.agent_capabilities.load_session
+        session = await connection.new_session(cwd=str(tmp_path), mcp_servers=[])
+        untouched = await connection.new_session(cwd=str(tmp_path), mcp_servers=[])
+        for tool, arguments in (
+            ("write_file", {"path": "saved.txt", "content": "original"}),
+            ("write_plan", {"items": [{"id": "next", "content": "Continue the task", "status": "in_progress"}]}),
+        ):
+            response = await connection.prompt(
+                session_id=session.session_id,
+                prompt=[acp.text_block(json.dumps({"tool": tool, "args": arguments}))],
+            )
+            assert response.stop_reason == "end_turn"
+        await connection.set_config_option(session_id=session.session_id, config_id="model", value="fixture:secondary")
+
+    assert (tmp_path / "saved.txt").read_text() == "original"
+    (tmp_path / "saved.txt").unlink()
+    resumed = RecordingClient()
+    async with (
+        asyncio.timeout(30),
+        acp.spawn_agent_process(cast(Client, resumed), sys.executable, str(fixture)) as (connection, _process),
+    ):
+        await connection.initialize(protocol_version=acp.PROTOCOL_VERSION)
+        loaded = await connection.load_session(session_id=session.session_id, cwd=str(tmp_path), mcp_servers=[])
+        assert loaded is not None and loaded.config_options is not None
+        assert loaded.config_options[0].current_value == "fixture:secondary"
+        assert not (tmp_path / "saved.txt").exists()
+        assert resumed.approvals == []
+        assert any(isinstance(update, schema.UserMessageChunk) for _, update in resumed.updates)
+        assert any(isinstance(update, schema.AgentMessageChunk) for _, update in resumed.updates)
+        assert any(isinstance(update, schema.ToolCallStart) for _, update in resumed.updates)
+        plans = [update for _, update in resumed.updates if isinstance(update, schema.AgentPlanUpdate)]
+        assert [(entry.content, entry.status) for entry in plans[-1].entries] == [("Continue the task", "in_progress")]
+
+        start = len(resumed.updates)
+        response = await connection.prompt(session_id=session.session_id, prompt=[acp.text_block("/plan")])
+        assert response.stop_reason == "end_turn"
+        assert any(
+            isinstance(update, schema.AgentMessageChunk)
+            and isinstance(update.content, schema.TextContentBlock)
+            and "Continue the task" in update.content.text
+            for _, update in resumed.updates[start:]
+        )
+        start = len(resumed.updates)
+        response = await connection.prompt(
+            session_id=session.session_id,
+            prompt=[acp.text_block(json.dumps({"tool": "history_length", "args": {}}))],
+        )
+        assert response.stop_reason == "end_turn"
+        length = "".join(
+            update.content.text
+            for _, update in resumed.updates[start:]
+            if isinstance(update, schema.AgentMessageChunk) and isinstance(update.content, schema.TextContentBlock)
+        )
+        assert int(length) > 2  # The model received the saved conversation, not just the new prompt.
+        # An empty session is saved at creation too, and restoring it must not inherit the other plan/model.
+        empty = await connection.load_session(session_id=untouched.session_id, cwd=str(tmp_path), mcp_servers=[])
+        assert empty is not None and empty.config_options is not None
+        assert empty.config_options[0].current_value == "fixture:primary"
+        # The SDK dispatches session notifications independently of the request response.
+        await asyncio.sleep(0)
+        plans = [
+            update
+            for received, update in resumed.updates
+            if received == untouched.session_id and isinstance(update, schema.AgentPlanUpdate)
+        ]
+        assert plans[-1].entries == []
+
+
+@pytest.mark.parametrize("fail_title", [False, True])
+async def test_automatic_session_title_and_resume(tmp_path: Path, fail_title: bool) -> None:
+    """The first coding prompt gets a stable title; naming failures never fail the turn."""
+    fixture = Path(__file__).with_name("acp_fixture.py")
+    args = [str(fixture), *(["--fail-title"] if fail_title else [])]
+    first_prompt = "Please improve session persistence so old conversations can resume"
+    expected = (
+        "Please improve session persistence so old conversations can" if fail_title else "Improve session persistence"
+    )
+    client = RecordingClient()
+    async with (
+        asyncio.timeout(30),
+        acp.spawn_agent_process(cast(Client, client), sys.executable, *args) as (connection, _process),
+    ):
+        await connection.initialize(protocol_version=acp.PROTOCOL_VERSION)
+        session = await connection.new_session(cwd=str(tmp_path), mcp_servers=[])
+        for command in ("/help", "/plan", "/title"):
+            response = await connection.prompt(session_id=session.session_id, prompt=[acp.text_block(command)])
+            assert response.stop_reason == "end_turn"
+        assert not any(isinstance(update, schema.SessionInfoUpdate) for _, update in client.updates)
+
+        response = await connection.prompt(session_id=session.session_id, prompt=[acp.text_block(first_prompt)])
+        assert response.stop_reason == "end_turn"
+        titles = [update.title for _, update in client.updates if isinstance(update, schema.SessionInfoUpdate)]
+        assert titles == [expected]
+        response = await connection.prompt(
+            session_id=session.session_id, prompt=[acp.text_block("Now investigate a completely different task")]
+        )
+        assert response.stop_reason == "end_turn"
+        titles = [update.title for _, update in client.updates if isinstance(update, schema.SessionInfoUpdate)]
+        assert titles == [expected]
+
+    resumed = RecordingClient()
+    async with (
+        asyncio.timeout(30),
+        acp.spawn_agent_process(cast(Client, resumed), sys.executable, *args) as (connection, _process),
+    ):
+        await connection.initialize(protocol_version=acp.PROTOCOL_VERSION)
+        await connection.load_session(session_id=session.session_id, cwd=str(tmp_path), mcp_servers=[])
+        start = len(resumed.updates)
+        response = await connection.prompt(session_id=session.session_id, prompt=[acp.text_block("/title")])
+        assert response.stop_reason == "end_turn"
+        text = "".join(
+            update.content.text
+            for _, update in resumed.updates[start:]
+            if isinstance(update, schema.AgentMessageChunk) and isinstance(update.content, schema.TextContentBlock)
+        )
+        # The SDK may still be dispatching transcript replay when load_session returns.
+        assert text.endswith(expected)
+        titles = [update.title for _, update in resumed.updates if isinstance(update, schema.SessionInfoUpdate)]
+        assert titles == [expected]

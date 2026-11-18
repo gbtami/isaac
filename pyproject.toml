@@ -26,6 +26,7 @@ dependencies = [
     "pydantic-ai-slim[anthropic,google,mcp,openai]>=2.69.0,<3.0.0",
     "pydantic-ai-harness[acp,coder,code-mode,skills]>=0.69.0,<0.70.0",
     "fastmcp-slim>=4.2.0,<5.0.0",
+    "pydantic>=2.14.3,<3.0.0",
     "python-dotenv==1.2.4",
     "platformdirs==4.14.5",
 ]

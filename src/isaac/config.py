@@ -1,10 +1,11 @@
 """Process configuration; workspace configuration comes from the ACP client."""
 
+import os
 from dataclasses import dataclass
 from pathlib import Path
 
 from dotenv import load_dotenv
-from platformdirs import user_config_path
+from platformdirs import user_config_path, user_state_path
 from pydantic_ai_harness.permissions import PermissionMode
 
 
@@ -33,3 +34,10 @@ def env_file() -> Path:
 def load_environment() -> None:
     """Explicit process environment takes precedence over the shared .env."""
     load_dotenv(env_file(), override=False)
+
+
+def session_database() -> Path:
+    """Keep saved sessions outside workspaces, with an optional state-directory override."""
+    override = os.environ.get("ISAAC_STATE_DIR")
+    directory = Path(override).expanduser() if override else user_state_path("isaac", appauthor=False)
+    return directory / "sessions.sqlite3"

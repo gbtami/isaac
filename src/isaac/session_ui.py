@@ -16,11 +16,14 @@ from pydantic_ai_harness.compaction import (
     estimate_message_tokens,
 )
 from pydantic_ai_harness.experimental.acp import ACPSession
-from pydantic_ai_harness.planning import InMemoryPlanStore, TaskStatus, render_plan
+from pydantic_ai_harness.planning import PlanStore, TaskStatus, render_plan
+
+from isaac.session_store import SqliteSessionStore
 
 COMMANDS = (
     schema.AvailableCommand(name="help", description="Show Isaac's agent commands."),
     schema.AvailableCommand(name="plan", description="Show the current session's plan."),
+    schema.AvailableCommand(name="title", description="Show the saved session title."),
     schema.AvailableCommand(
         name="compact",
         description="Compact conversation history using Harness; optionally say what to preserve.",
@@ -34,7 +37,8 @@ class SessionUI(AbstractCapability[None]):
     """Keep presentation session-local; Harness still owns turns, locks, and cancellation."""
 
     session: ACPSession
-    plan: InMemoryPlanStore
+    plan: PlanStore
+    store: SqliteSessionStore
     last_entries: list[schema.PlanEntry] = field(default_factory=list, init=False)
 
     async def advertise(self) -> None:
@@ -95,6 +99,8 @@ class SessionUI(AbstractCapability[None]):
             await self.publish_plan(force=True)
             items = await self.plan.get_items()
             reply = render_plan(items) if items else "No plan yet."
+        elif command == "/title":
+            reply = await self.store.get_title(self.session.session_id) or "No title yet. Send a coding request first."
         else:
             reply = await self.compact(ctx, request_context, arguments.strip() or None)
         # A public short-circuit response still passes through Harness's streaming/history path.

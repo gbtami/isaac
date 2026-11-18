@@ -1,5 +1,7 @@
 """Compose Harness capabilities and expose them through its upstream ACP adapter."""
 
+from functools import partial
+
 from acp import schema
 from pydantic_ai import Agent
 from pydantic_ai.capabilities import AbstractCapability
@@ -14,12 +16,14 @@ from pydantic_ai_harness.compaction import (
 )
 from pydantic_ai_harness.experimental.acp import ACPSession, ACPSessionConfig, run_acp_stdio
 from pydantic_ai_harness.permissions import Permissions
-from pydantic_ai_harness.planning import InMemoryPlanStore, Planning
+from pydantic_ai_harness.planning import Planning, SqlitePlanStore
 from pydantic_ai_harness.skills import Skills
 
 from isaac import __version__
-from isaac.config import Settings
+from isaac.config import Settings, session_database
 from isaac.mcp import mcp_capabilities
+from isaac.session_store import SqliteSessionStore
+from isaac.session_titles import SessionTitles
 from isaac.session_ui import SessionUI
 
 
@@ -42,28 +46,33 @@ def build_agent(settings: Settings, *, model: Model | str | None = None) -> Agen
     return Agent(model, name="isaac", capabilities=capabilities, defer_model_check=True)
 
 
-async def configure_session(session: ACPSession) -> ACPSessionConfig[None]:
+async def configure_session(session: ACPSession, *, store: SqliteSessionStore) -> ACPSessionConfig[None]:
     """Use the client's workspace without changing this process's working directory."""
-    plan = InMemoryPlanStore()
-    ui = SessionUI(session, plan)
+    plan = SqlitePlanStore(str(session_database()), session=session.session_id)
+    ui = SessionUI(session, plan, store)
+    titles = SessionTitles(session, store)
     mcp = mcp_capabilities(session)
     await ui.advertise()
+    await ui.publish_plan(force=True)
+    await titles.restore()
     return ACPSessionConfig(
         deps=None,
         workspace=LocalWorkspaceBackend(session.cwd),
-        capabilities=[Planning(store=plan, tools=["write_plan"]), ui, *mcp],
+        capabilities=[Planning(store=plan, tools=["write_plan"]), ui, titles, *mcp],
     )
 
 
 async def serve(settings: Settings) -> None:
     """Let Harness own the complete ACP lifecycle and the agent's tool lifecycle."""
     agent = build_agent(settings)
+    store = SqliteSessionStore(session_database())
     async with agent:
         await run_acp_stdio(
             agent,
             name="isaac",
             version=__version__,
             models=settings.models,
-            session_config=configure_session,
+            session_config=partial(configure_session, store=store),
+            session_store=store,
             mcp_capabilities=schema.McpCapabilities(http=True, sse=True),
         )

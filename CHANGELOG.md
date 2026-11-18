@@ -7,6 +7,9 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ## Unreleased
 
+- Added automatic first-prompt session titles, durable title metadata, standard ACP title updates, and `/title`.
+- Added automatic SQLite session saves and standard ACP `session/load`, including Toad's resume picker.
+- Restored conversation history, transcript, selected model, and the session plan across server restarts.
 - Added ACP slash commands (`/help`, `/plan`, `/compact`) and native plan-sidebar updates using public capability hooks.
 - Kept Harness plans isolated per ACP session and available across prompt turns.
 - Rebuilt Isaac as an ACP-only coding server using Pydantic AI Harness 0.69.
@@ -14,7 +17,7 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 - Adopted Harness Coder, permissions, planning, skills, compaction, and optional CodeMode.
 - Rooted each session in the ACP client's workspace and connected client-provided MCP servers.
 - Removed the bundled REPL, custom tools and prompt runtime, model catalog, OAuth integrations,
-  session persistence, slash commands, and legacy tests.
+  legacy session/command infrastructure, and obsolete tests.
 - Switched to `pydantic-ai-slim` provider extras, without the framework's chat CLI.
 - Added stdio integration coverage for startup, model selection, workspace isolation, and approvals.
 
