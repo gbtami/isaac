@@ -119,6 +119,7 @@ Stdout carries ACP JSON-RPC only; diagnostics go to stderr.
   inline support on Codex, OpenAI Responses, and supported Claude models on the Anthropic API.
   It targets 85% of the context window. Harness summarizes and trims on other endpoints or when
   the conversation is already near the limit. `--context-window TOKENS` overrides window resolution.
+  Toad's status line shows estimated context usage before model requests when the window size is known.
 - Permissions: Harness `Permissions`, with approval decisions handled by the ACP client.
 - MCP: ACP-provided stdio, HTTP, and SSE servers, with server-prefixed tool names.
 - Code Mode: Harness exposes eligible tools through Monty's `run_code` by default. Pass

@@ -11,6 +11,7 @@ from pydantic_ai.messages import CompactionPart, FunctionToolResultEvent, ModelR
 from pydantic_ai.models import ModelRequestContext
 from pydantic_ai.models.openai_codex import OpenAICodexModel
 from pydantic_ai_harness.compaction import (
+    ContextUsageMeasuredEvent,
     FallbackCompaction,
     SlidingWindowCompaction,
     SummarizingCompaction,
@@ -97,6 +98,16 @@ class SessionUI(AbstractCapability[SessionSettings]):
         # Publish after the tool completes, once per snapshot. This also catches pure reorders,
         # which do not emit per-item Harness plan events.
         await self.publish_plan()
+
+    @on_event(ContextUsageMeasuredEvent)
+    async def context_usage(self, _ctx: RunContext[SessionSettings], event: ContextUsageMeasuredEvent) -> None:
+        if event.resolved:
+            await self.session.client.session_update(
+                session_id=self.session.session_id,
+                update=schema.UsageUpdate(
+                    session_update="usage_update", used=event.used_tokens, size=event.window_tokens
+                ),
+            )
 
     async def wrap_model_request(
         self,

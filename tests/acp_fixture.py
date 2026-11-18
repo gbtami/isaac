@@ -111,6 +111,7 @@ async def main() -> None:
         models=("fixture:primary", "fixture:secondary"),
         permissions="read-only",
         skill_dirs=(),
+        context_window=50_000 if "--known-context-window" in sys.argv else None,
     )
     if "--no-code-mode" in sys.argv:
         settings = replace(settings, code_mode=False)

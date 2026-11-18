@@ -10,6 +10,7 @@ from pydantic_ai.models import Model
 from pydantic_ai.workspaces import LocalWorkspaceBackend
 from pydantic_ai_harness.code_mode import CodeMode
 from pydantic_ai_harness.coder import Coder
+from pydantic_ai_harness.compaction import ReportContextUsage
 from pydantic_ai_harness.experimental.acp import ACPSession, ACPSessionConfig, PydanticAIACPAgent
 from pydantic_ai_harness.permissions import Permissions
 from pydantic_ai_harness.planning import Planning, SqlitePlanStore
@@ -54,6 +55,7 @@ def build_acp_adapter(
         titles = SessionTitles(session, store)
         capabilities: list[AbstractCapability[SessionSettings]] = [
             Planning(store=plan, tools=["write_plan"]),
+            ReportContextUsage(context_window=settings.context_window),
             ui,
             titles,
             *mcp_capabilities(session),

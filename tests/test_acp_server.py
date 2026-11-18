@@ -82,6 +82,30 @@ async def test_cli_initialization_and_model_selection(tmp_path: Path) -> None:
         assert selected.config_options[0].current_value == models[1]
 
 
+async def test_context_usage_is_reported_over_acp(tmp_path: Path) -> None:
+    client = RecordingClient()
+    fixture = Path(__file__).with_name("acp_fixture.py")
+    async with (
+        asyncio.timeout(30),
+        acp.spawn_agent_process(cast(Client, client), sys.executable, str(fixture), "--known-context-window") as (
+            connection,
+            _process,
+        ),
+    ):
+        await connection.initialize(protocol_version=acp.PROTOCOL_VERSION)
+        session = await connection.new_session(cwd=str(tmp_path), mcp_servers=[])
+        result = await connection.prompt(session_id=session.session_id, prompt=[acp.text_block("Check this project.")])
+        assert result.stop_reason == "end_turn"
+        readings = [
+            update
+            for sid, update in client.updates
+            if sid == session.session_id and isinstance(update, schema.UsageUpdate)
+        ]
+        assert readings
+        assert readings[-1].size == 50_000
+        assert 0 < readings[-1].used < readings[-1].size
+
+
 async def test_model_commands_share_acp_selection_and_resume(tmp_path: Path) -> None:
     fixture = Path(__file__).with_name("acp_fixture.py")
     inspect = json.dumps({"tool": "model_name", "args": {}})

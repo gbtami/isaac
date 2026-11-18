@@ -20,7 +20,7 @@ Toad / any ACP client
 - `isaac.compaction`: provider-aware automatic compaction with Harness fallback.
 - `isaac.server`: binds Harness capabilities and serves the agent with the public ACP adapter.
 - `isaac.mcp`: converts ACP MCP descriptors into public Pydantic AI MCP toolset capabilities.
-- `isaac.session_ui`: advertises slash commands and projects Harness plans through standard ACP updates.
+- `isaac.session_ui`: advertises slash commands and publishes Harness plan and context usage updates over ACP.
 - `isaac.session_permissions`: forwards Harness approvals from inside `run_code` to the ACP client.
 - `isaac.session_store`: implements Harness's public `SessionStore` protocol using SQLite snapshots.
 - `isaac.session_titles`: generates a stable first-prompt title with a bounded, tool-free model request.
@@ -52,6 +52,8 @@ updates through its normal turn lifecycle. Automatic compaction applies core's `
 The inline trigger is 85% of the resolved context window. Harness handles other endpoints, unsupported
 inline settings, and estimated windows above 95% where the provider may reject the request before it can
 compact. Anthropic's signed on-demand blocks and inline threshold edits cannot be sent together.
+Harness `ReportContextUsage` measures each session request after automatic compaction. The session
+capability forwards readings with a known context window as standard ACP `usage_update` notifications.
 
 With Code Mode enabled, the session factory attaches Core's `HandleDeferredToolCalls` capability.
 Harness's `ask_permissions` resolves nested `run_code` approvals using the client's
