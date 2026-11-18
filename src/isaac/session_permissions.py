@@ -9,8 +9,10 @@ from pydantic_ai.capabilities import HandleDeferredToolCalls
 from pydantic_ai_harness.experimental.acp import ACPSession, ToolCallPresentation, default_coding_presenter
 from pydantic_ai_harness.permissions import PermissionDecision, PermissionRequest, ask_permissions
 
+from isaac.config import SessionSettings
 
-def code_mode_approvals(session: ACPSession) -> HandleDeferredToolCalls[None]:
+
+def code_mode_approvals(session: ACPSession) -> HandleDeferredToolCalls[SessionSettings]:
     """Handle only nested Harness approvals. The adapter owns direct tool approvals."""
 
     async def approve(request: PermissionRequest) -> PermissionDecision:
@@ -46,7 +48,7 @@ def code_mode_approvals(session: ACPSession) -> HandleDeferredToolCalls[None]:
             approved=isinstance(outcome, schema.AllowedOutcome) and outcome.option_id == "allow_once"
         )
 
-    async def handle(ctx: RunContext[None], requests: DeferredToolRequests) -> DeferredToolResults | None:
+    async def handle(ctx: RunContext[SessionSettings], requests: DeferredToolRequests) -> DeferredToolResults | None:
         if ctx.tool_name != "run_code":
             return None
         return await ask_permissions(requests, approve)

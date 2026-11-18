@@ -7,6 +7,7 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ## Unreleased
 
+- Added `/models`, `/model`, and `/permissions` for model selection and live session permission changes.
 - Enabled Code Mode by default and added `--no-code-mode` for direct tool calls.
 - Forwarded Harness permission checks inside Code Mode to ACP clients for one-time approval or rejection.
 - Added provider-native `/compact` through Pydantic AI Core, with Harness fallback for unsupported endpoints.

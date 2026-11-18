@@ -8,10 +8,12 @@ from pydantic_ai.capabilities import Toolset
 from pydantic_ai.mcp import MCPToolset
 from pydantic_ai_harness.experimental.acp import ACPSession
 
+from isaac.config import SessionSettings
 
-def mcp_capabilities(session: ACPSession) -> list[Toolset[None]]:
+
+def mcp_capabilities(session: ACPSession) -> list[Toolset[SessionSettings]]:
     """Keep MCP connections and tool names separate for each session and server."""
-    capabilities: list[Toolset[None]] = []
+    capabilities: list[Toolset[SessionSettings]] = []
     prefixes: set[str] = set()
     for server in session.mcp_servers:
         prefix = re.sub(r"[^a-zA-Z0-9_]", "_", server.name)
@@ -34,6 +36,6 @@ def mcp_capabilities(session: ACPSession) -> list[Toolset[None]]:
             transport = SSETransport(server.url, headers={entry.name: entry.value for entry in server.headers})
         else:
             raise ValueError(f"Unsupported MCP transport for {server.name!r}.")
-        toolset = MCPToolset[None](transport, id=server.name).prefixed(prefix)
+        toolset = MCPToolset[SessionSettings](transport, id=server.name).prefixed(prefix)
         capabilities.append(Toolset(toolset))
     return capabilities

@@ -9,6 +9,7 @@ from typing import cast
 import acp
 import pytest
 from acp import Client, schema
+from acp.client.connection import ClientSideConnection
 
 
 class RecordingClient:
@@ -66,11 +67,105 @@ async def test_cli_initialization_and_model_selection(tmp_path: Path) -> None:
         assert initialized.agent_capabilities.load_session
         session = await connection.new_session(cwd=str(tmp_path), mcp_servers=[])
         commands = [update for _, update in client.updates if isinstance(update, schema.AvailableCommandsUpdate)]
-        assert {command.name for command in commands[-1].available_commands} == {"help", "plan", "title", "compact"}
+        assert {command.name for command in commands[-1].available_commands} == {
+            "help",
+            "plan",
+            "title",
+            "compact",
+            "model",
+            "models",
+            "permissions",
+        }
         assert session.config_options is not None
         assert session.config_options[0].current_value == models[0]
         selected = await connection.set_config_option(session_id=session.session_id, config_id="model", value=models[1])
         assert selected.config_options[0].current_value == models[1]
+
+
+async def test_model_commands_share_acp_selection_and_resume(tmp_path: Path) -> None:
+    fixture = Path(__file__).with_name("acp_fixture.py")
+    inspect = json.dumps({"tool": "model_name", "args": {}})
+
+    async def prompt(connection: ClientSideConnection, client: RecordingClient, session_id: str, text: str) -> str:
+        start = len(client.updates)
+        response = await connection.prompt(session_id=session_id, prompt=[acp.text_block(text)])
+        assert response.stop_reason == "end_turn"
+        return "".join(
+            update.content.text
+            for received_session, update in client.updates[start:]
+            if received_session == session_id
+            and isinstance(update, schema.AgentMessageChunk)
+            and isinstance(update.content, schema.TextContentBlock)
+        )
+
+    client = RecordingClient()
+    async with (
+        asyncio.timeout(30),
+        acp.spawn_agent_process(cast(Client, client), sys.executable, str(fixture)) as (connection, _process),
+    ):
+        await connection.initialize(protocol_version=acp.PROTOCOL_VERSION)
+        session = await connection.new_session(cwd=str(tmp_path), mcp_servers=[])
+
+        async def send(text: str) -> str:
+            return await prompt(connection, client, session.session_id, text)
+
+        assert await send("/models") == "- fixture:primary (current)\n- fixture:secondary"
+        assert "Unknown model" in await send("/model fixture:unknown")
+        assert await send(inspect) == "fixture:primary"
+        assert "Model set to fixture:secondary" in await send("/model fixture:secondary")
+        assert await send(inspect) == "fixture:secondary"
+        updates = [update for _, update in client.updates if isinstance(update, schema.ConfigOptionUpdate)]
+        assert updates[-1].config_options[0].current_value == "fixture:secondary"
+        await connection.set_config_option(session_id=session.session_id, config_id="model", value="fixture:primary")
+        assert "Current model is fixture:primary" in await send("/model")
+        await send("/model fixture:secondary")
+        await send("/permissions full")
+
+    resumed = RecordingClient()
+    async with (
+        asyncio.timeout(30),
+        acp.spawn_agent_process(cast(Client, resumed), sys.executable, str(fixture)) as (connection, _process),
+    ):
+        await connection.initialize(protocol_version=acp.PROTOCOL_VERSION)
+        loaded = await connection.load_session(session_id=session.session_id, cwd=str(tmp_path), mcp_servers=[])
+        assert loaded is not None and loaded.config_options is not None
+        assert loaded.config_options[0].current_value == "fixture:secondary"
+        assert (await prompt(connection, resumed, session.session_id, inspect)).endswith("fixture:secondary")
+        assert "Permission mode is read-only" in await prompt(connection, resumed, session.session_id, "/permissions")
+
+
+async def test_permissions_command_changes_only_its_live_session(tmp_path: Path) -> None:
+    fixture = Path(__file__).with_name("acp_fixture.py")
+    client = RecordingClient()
+    client.allow = False
+    async with (
+        asyncio.timeout(30),
+        acp.spawn_agent_process(cast(Client, client), sys.executable, str(fixture)) as (connection, _process),
+    ):
+        await connection.initialize(protocol_version=acp.PROTOCOL_VERSION)
+        first, second = [await connection.new_session(cwd=str(tmp_path), mcp_servers=[]) for _ in range(2)]
+
+        async def send(session_id: str, text: str) -> None:
+            response = await connection.prompt(session_id=session_id, prompt=[acp.text_block(text)])
+            assert response.stop_reason == "end_turn"
+
+        async def write(session_id: str, filename: str) -> None:
+            await send(session_id, json.dumps({"tool": "write_file", "args": {"path": filename, "content": "sample"}}))
+
+        await send(first.session_id, "/permissions full")
+        await write(first.session_id, "full.txt")
+        assert (tmp_path / "full.txt").read_text() == "sample"
+        assert not client.approvals
+
+        await write(second.session_id, "denied.txt")
+        assert not (tmp_path / "denied.txt").exists()
+        assert len(client.approvals) == 1
+
+        await send(first.session_id, "/permissions read-only")
+        await send(first.session_id, "/permissions invalid")
+        await write(first.session_id, "read-only.txt")
+        assert not (tmp_path / "read-only.txt").exists()
+        assert len(client.approvals) == 2
 
 
 async def test_workspace_tools_and_permission_denial_over_stdio(tmp_path: Path) -> None:

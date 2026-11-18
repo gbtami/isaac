@@ -7,7 +7,7 @@ import os
 import sys
 
 from isaac import __version__
-from isaac.config import Settings, load_environment
+from isaac.config import PERMISSION_MODES, Settings, load_environment
 
 
 def parse_settings(argv: list[str] | None = None) -> Settings:
@@ -25,7 +25,7 @@ def parse_settings(argv: list[str] | None = None) -> Settings:
     )
     parser.add_argument(
         "--permissions",
-        choices=("auto", "read-only", "full"),
+        choices=PERMISSION_MODES,
         default="auto",
         help="Harness permission mode (default: auto).",
     )

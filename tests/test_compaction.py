@@ -41,7 +41,7 @@ async def test_inline_openai_retries_without_rejected_compaction_edit(base_url: 
             raise ModelHTTPError(status_code=400, model_name=model.model_name, body="Unknown context_management field")
         return ModelResponse(parts=[TextPart("Continue.")])
 
-    result = await AutomaticCompaction(100_000).wrap_model_request(ctx, request_context=request, handler=handler)
+    result = await AutomaticCompaction[None](100_000).wrap_model_request(ctx, request_context=request, handler=handler)
     assert result.parts == [TextPart("Continue.")]
     if base_url == "https://api.openai.com/v1":
         assert attempts == [[{"type": "compaction", "compact_threshold": 85_000}], None]
@@ -70,4 +70,4 @@ async def test_anthropic_inline_edit_is_compatible_with_history(signed: bool) ->
             }
         return ModelResponse(parts=[TextPart("Continue.")])
 
-    await AutomaticCompaction(100_000).wrap_model_request(ctx, request_context=request, handler=handler)
+    await AutomaticCompaction[None](100_000).wrap_model_request(ctx, request_context=request, handler=handler)

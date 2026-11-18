@@ -49,6 +49,10 @@ isaac --model anthropic:claude-sonnet-4-6 --model openai:gpt-5.4
 ```
 
 Credentials are needed when prompting, not for initialization or creating a session.
+In clients such as Toad, `/models` lists the configured choices and `/model <id>` selects one for
+the session. Model selection is shared with the ACP config option and saved for resume.
+The adapter initializes the current model before processing commands. If its provider setup fails,
+start Isaac with a working model first.
 
 ### ChatGPT/Codex browser login
 
@@ -137,6 +141,10 @@ through the upstream adapter. A small session capability adds standard ACP plan 
 - `/help`: list the agent commands.
 - `/plan`: show the current session's plan and refresh the client's plan sidebar.
 - `/title`: show the saved session title.
+- `/models`: list the configured model IDs and mark the current model.
+- `/model [id]`: show the current model or switch to one of the listed IDs for subsequent turns.
+- `/permissions [auto|read-only|full]`: show or change Harness permissions for the live session.
+  On resume the permission mode starts from `--permissions` again.
 - `/compact`: use native compaction on supported OpenAI Responses and Anthropic endpoints. If native
   compaction is unavailable or fails, use Harness summarization and fall back to trimming.
 - `/compact <focus>`: use Harness summarization and tell it what to preserve.

@@ -8,6 +8,7 @@ from dataclasses import replace
 from functools import partial
 from uuid import uuid4
 
+import acp
 from pydantic_ai.exceptions import ModelHTTPError
 from pydantic_ai.messages import (
     CompactionPart,
@@ -21,14 +22,14 @@ from pydantic_ai.messages import (
 from pydantic_ai.models import ModelRequestContext
 from pydantic_ai.models.function import AgentInfo, DeltaToolCall, FunctionModel
 from pydantic_ai.usage import RequestUsage
-from pydantic_ai_harness.experimental.acp import run_acp_stdio
 
-from isaac.config import Settings, session_database
-from isaac.server import build_agent, configure_session
-from isaac.session_store import SqliteSessionStore
+from isaac.config import Settings
+from isaac.server import build_acp_adapter, build_agent
 
 
-async def stream(messages: list[ModelMessage], _info: AgentInfo) -> AsyncIterator[str | dict[int, DeltaToolCall]]:
+async def stream(
+    messages: list[ModelMessage], _info: AgentInfo, *, model_id: str
+) -> AsyncIterator[str | dict[int, DeltaToolCall]]:
     """Call the tool named by a JSON user prompt, then return its output."""
     if isinstance(messages[-1], ModelRequest):
         for part in reversed(messages[-1].parts):
@@ -50,6 +51,9 @@ async def stream(messages: list[ModelMessage], _info: AgentInfo) -> AsyncIterato
                 arguments = command["args"]
                 if tool == "history_length":
                     yield str(len(messages))
+                    return
+                if tool == "model_name":
+                    yield model_id
                     return
                 if tool == "check_compaction":
                     restored = any(
@@ -111,18 +115,14 @@ async def main() -> None:
     if "--no-code-mode" in sys.argv:
         settings = replace(settings, code_mode=False)
     model_class = NativeCompactionModel if "--native-compact" in sys.argv else FunctionModel
-    model = model_class(function=summarize, stream_function=stream)
-    agent = build_agent(settings, model=model)
-    store = SqliteSessionStore(session_database())
+    models = {
+        name: model_class(function=summarize, stream_function=partial(stream, model_id=name), model_name=name)
+        for name in settings.models
+    }
+    agent = build_agent(settings)
+    adapter = build_acp_adapter(settings, agent, resolve_model=models.__getitem__)
     async with agent:
-        await run_acp_stdio(
-            agent,
-            name="isaac-fixture",
-            session_config=partial(configure_session, store=store, code_mode=settings.code_mode),
-            session_store=store,
-            models=settings.models,
-            model_resolver=lambda _name: model,
-        )
+        await acp.run_agent(adapter, use_unstable_protocol=True)
 
 
 if __name__ == "__main__":

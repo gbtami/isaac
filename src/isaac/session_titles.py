@@ -15,6 +15,7 @@ from pydantic_ai.run import AgentRunResult
 from pydantic_ai.usage import UsageLimits
 from pydantic_ai_harness.experimental.acp import ACPSession
 
+from isaac.config import SessionSettings
 from isaac.session_store import SqliteSessionStore
 
 logger = logging.getLogger(__name__)
@@ -32,7 +33,7 @@ def short_title(text: str) -> str:
 
 
 @dataclass
-class SessionTitles(AbstractCapability[None]):
+class SessionTitles(AbstractCapability[SessionSettings]):
     session: ACPSession
     store: SqliteSessionStore
     title: str | None = field(default=None, init=False)
@@ -56,11 +57,11 @@ class SessionTitles(AbstractCapability[None]):
             update=schema.SessionInfoUpdate(session_update="session_info_update", title=self.title),
         )
 
-    async def before_run(self, ctx: RunContext[None]) -> None:
+    async def before_run(self, ctx: RunContext[SessionSettings]) -> None:
         if not self.title and not self.first_prompt:
             self.first_prompt = prompt_text(ctx.prompt)
 
-    async def after_run(self, ctx: RunContext[None], *, result: AgentRunResult[Any]) -> AgentRunResult[Any]:
+    async def after_run(self, ctx: RunContext[SessionSettings], *, result: AgentRunResult[Any]) -> AgentRunResult[Any]:
         if (
             self.title
             or not self.first_prompt

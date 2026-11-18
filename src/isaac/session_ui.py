@@ -5,7 +5,7 @@ from dataclasses import dataclass, field, replace
 
 from acp import schema
 from pydantic_ai import RunContext
-from pydantic_ai.capabilities import AbstractCapability, WrapModelRequestHandler, on_event
+from pydantic_ai.capabilities import AbstractCapability, CapabilityOrdering, WrapModelRequestHandler, on_event
 from pydantic_ai.exceptions import FallbackExceptionGroup, ModelAPIError, UnexpectedModelBehavior, UserError
 from pydantic_ai.messages import CompactionPart, FunctionToolResultEvent, ModelResponse, TextPart
 from pydantic_ai.models import ModelRequestContext
@@ -17,9 +17,11 @@ from pydantic_ai_harness.compaction import (
     compact_now,
     estimate_message_tokens,
 )
-from pydantic_ai_harness.experimental.acp import ACPSession
+from pydantic_ai_harness.experimental.acp import ACPSession, PydanticAIACPAgent
 from pydantic_ai_harness.planning import PlanStore, TaskStatus, render_plan
 
+from isaac.compaction import AutomaticCompaction
+from isaac.config import PERMISSION_MODES, SessionSettings
 from isaac.session_store import SqliteSessionStore
 
 logger = logging.getLogger(__name__)
@@ -28,6 +30,17 @@ COMMANDS = (
     schema.AvailableCommand(name="help", description="Show Isaac's agent commands."),
     schema.AvailableCommand(name="plan", description="Show the current session's plan."),
     schema.AvailableCommand(name="title", description="Show the saved session title."),
+    schema.AvailableCommand(name="models", description="List the models configured for Isaac."),
+    schema.AvailableCommand(
+        name="model",
+        description="Show the current model or select one from /models.",
+        input=schema.AvailableCommandInput(root=schema.UnstructuredCommandInput(hint="optional model ID")),
+    ),
+    schema.AvailableCommand(
+        name="permissions",
+        description="Show or change the permission mode for this session.",
+        input=schema.AvailableCommandInput(root=schema.UnstructuredCommandInput(hint="auto | read-only | full")),
+    ),
     schema.AvailableCommand(
         name="compact",
         description="Compact conversation history. Add a focus to say what the summary should preserve.",
@@ -37,13 +50,18 @@ COMMANDS = (
 
 
 @dataclass
-class SessionUI(AbstractCapability[None]):
+class SessionUI(AbstractCapability[SessionSettings]):
     """Keep presentation session-local; Harness still owns turns, locks, and cancellation."""
 
     session: ACPSession
     plan: PlanStore
     store: SqliteSessionStore
+    adapter: PydanticAIACPAgent[SessionSettings, str]
     last_entries: list[schema.PlanEntry] = field(default_factory=list, init=False)
+
+    def get_ordering(self) -> CapabilityOrdering:
+        # Local commands can be answered before automatic history compaction makes a request.
+        return CapabilityOrdering(wraps=[AutomaticCompaction])
 
     async def advertise(self) -> None:
         await self.session.client.session_update(
@@ -75,14 +93,14 @@ class SessionUI(AbstractCapability[None]):
             self.last_entries = entries
 
     @on_event(FunctionToolResultEvent)
-    async def tool_finished(self, _ctx: RunContext[None], _event: FunctionToolResultEvent) -> None:
+    async def tool_finished(self, _ctx: RunContext[SessionSettings], _event: FunctionToolResultEvent) -> None:
         # Publish after the tool completes, once per snapshot. This also catches pure reorders,
         # which do not emit per-item Harness plan events.
         await self.publish_plan()
 
     async def wrap_model_request(
         self,
-        ctx: RunContext[None],
+        ctx: RunContext[SessionSettings],
         *,
         request_context: ModelRequestContext,
         handler: WrapModelRequestHandler,
@@ -95,7 +113,7 @@ class SessionUI(AbstractCapability[None]):
         arguments = rest[0] if rest else ""
         if "\n" in text or command not in {f"/{item.name}" for item in COMMANDS}:
             return await handler(request_context)
-        if command != "/compact" and arguments:
+        if arguments and command not in {"/compact", "/model", "/permissions"}:
             reply = f"Usage: {command}"
         elif command == "/help":
             reply = "\n".join(f"/{item.name}: {item.description}" for item in COMMANDS)
@@ -105,12 +123,38 @@ class SessionUI(AbstractCapability[None]):
             reply = render_plan(items) if items else "No plan yet."
         elif command == "/title":
             reply = await self.store.get_title(self.session.session_id) or "No title yet. Send a coding request first."
+        elif command in {"/model", "/models"}:
+            reply = await self.model_command(arguments, list_models=command == "/models")
+        elif command == "/permissions":
+            reply = permission_command(ctx.deps, arguments)
         else:
             reply = await self.compact(ctx, request_context, arguments.strip() or None)
         # A public short-circuit response still passes through Harness's streaming/history path.
         return ModelResponse(parts=[TextPart(reply)], finish_reason="stop")
 
-    async def compact(self, ctx: RunContext[None], request: ModelRequestContext, focus: str | None) -> str:
+    async def model_command(self, model_id: str, *, list_models: bool) -> str:
+        session_id = self.session.session_id
+        option = self.adapter.session_model_option(session_id)
+        if option is None:
+            return "No model choices configured. Set ISAAC_MODEL or pass --model when starting Isaac."
+        models = [entry.value for entry in option.options if isinstance(entry, schema.SessionConfigSelectOption)]
+        if list_models:
+            return "\n".join(f"- {model}{' (current)' if model == option.current_value else ''}" for model in models)
+        if not model_id or model_id == option.current_value:
+            return f"Current model is {option.current_value}. Use /models to see all choices."
+        if model_id not in models:
+            return f"Unknown model {model_id!r}. Use /models to see all choices."
+        updated = await self.adapter.set_config_option(config_id=option.id, session_id=session_id, value=model_id)
+        assert updated is not None
+        await self.session.client.session_update(
+            session_id=session_id,
+            update=schema.ConfigOptionUpdate(
+                session_update="config_option_update", config_options=updated.config_options
+            ),
+        )
+        return f"Model set to {model_id} for this session."
+
+    async def compact(self, ctx: RunContext[SessionSettings], request: ModelRequestContext, focus: str | None) -> str:
         # Keep the current command request outside the summary so its reply remains paired with it.
         history, current = ctx.messages[:-1], ctx.messages[-1:]
         tokens = sum(estimate_message_tokens(history))
@@ -150,7 +194,16 @@ class SessionUI(AbstractCapability[None]):
         return f"Compacted {len(history)} messages to {len(compacted)}; approximately {saved:,} tokens saved."
 
 
-async def compact_native(ctx: RunContext[None], request: ModelRequestContext) -> ModelResponse | None:
+def permission_command(settings: SessionSettings, mode: str) -> str:
+    if not mode:
+        return f"Permission mode is {settings.permissions}. Choose auto, read-only, or full with /permissions."
+    if mode not in PERMISSION_MODES:
+        return "Usage: /permissions [auto|read-only|full]"
+    settings.permissions = mode
+    return f"Permission mode set to {mode} for this session."
+
+
+async def compact_native(ctx: RunContext[SessionSettings], request: ModelRequestContext) -> ModelResponse | None:
     # The Codex subscription backend returns 404 for OpenAI's standalone /responses/compact.
     if isinstance(request.model, OpenAICodexModel):
         return None

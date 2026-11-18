@@ -8,6 +8,15 @@ from dotenv import load_dotenv
 from platformdirs import user_config_path, user_state_path
 from pydantic_ai_harness.permissions import PermissionMode
 
+PERMISSION_MODES: tuple[PermissionMode, ...] = ("auto", "read-only", "full")
+
+
+@dataclass
+class SessionSettings:
+    """Settings editable within one live ACP session, shared with its delegates."""
+
+    permissions: PermissionMode
+
 
 @dataclass(frozen=True)
 class Settings:

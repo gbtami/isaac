@@ -4,7 +4,7 @@ Isaac is a stdio ACP server. Its runtime is Pydantic AI Harness, with no bundled
 
 ```text
 Toad / any ACP client
-    -> Harness run_acp_stdio
+    -> Harness PydanticAIACPAgent over ACP stdio
         -> Pydantic AI Agent
             -> Harness Coder + Permissions + Skills + compaction
             -> per-session Harness Planning + SessionUI
@@ -38,8 +38,11 @@ the adapter's recorded transcript.
 
 The upstream adapter owns protocol negotiation, sessions, history, cancellation, text/thinking/tool
 updates, permission requests, and the `model` session config option. Isaac does not subclass the adapter
-or implement protocol endpoints. The session capability handles `/help`, `/plan`, `/title`, and `/compact` through
-the public `wrap_model_request` hook, returning normal streamed/history-recorded responses. Plain `/compact`
+or implement protocol endpoints. Isaac keeps the public adapter instance and serves it with `acp.run_agent`,
+the same stdio runner used by `run_acp_stdio`. The session capability handles slash commands through the
+public `wrap_model_request` hook. `/model` uses the adapter's `set_config_option` path and publishes a standard
+config update. `/permissions` edits the live session's dependencies, which Harness reads per tool call and
+passes to self-delegates. It starts from the CLI mode on open or resume. Plain `/compact`
 tries core's `Model.compact_messages()` and stores the native response at the compaction boundary. Compatible
 models resume from that boundary. The preceding messages remain available to a model that can't replay it.
 Focused, unsupported, or failed native compaction uses Harness `compact_now`. The Codex subscription

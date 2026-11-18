@@ -2,6 +2,7 @@
 
 import logging
 from dataclasses import replace
+from typing import TypeVar
 from urllib.parse import urlsplit
 
 from pydantic_ai import RunContext
@@ -23,12 +24,13 @@ from pydantic_ai_harness.compaction import (
 
 logger = logging.getLogger(__name__)
 _TARGET_FRACTION = 0.85
+DepsT = TypeVar("DepsT")
 
 
-class AutomaticCompaction(AbstractCapability[None]):
+class AutomaticCompaction(AbstractCapability[DepsT]):
     def __init__(self, context_window: int | None = None) -> None:
         self.context_window = context_window
-        self.harness = TieredCompaction[None](
+        self.harness = TieredCompaction[DepsT](
             tiers=[SummarizingCompaction(), SlidingWindowCompaction(keep_messages=20)],
             target_fraction=_TARGET_FRACTION,
             context_window=context_window,
@@ -36,7 +38,7 @@ class AutomaticCompaction(AbstractCapability[None]):
 
     async def wrap_model_request(
         self,
-        ctx: RunContext[None],
+        ctx: RunContext[DepsT],
         *,
         request_context: ModelRequestContext,
         handler: WrapModelRequestHandler,
@@ -66,12 +68,12 @@ class AutomaticCompaction(AbstractCapability[None]):
         return await handler(await self.harness.before_model_request(ctx, request_context))
 
 
-def _native_settings(ctx: RunContext[None], request: ModelRequestContext, threshold: int) -> ModelSettings | None:
+def _native_settings(ctx: RunContext[DepsT], request: ModelRequestContext, threshold: int) -> ModelSettings | None:
     model = request.model
     endpoint = urlsplit(model.base_url or "")
     if endpoint.scheme != "https":
         return None
-    capability: AbstractCapability[None]
+    capability: AbstractCapability[DepsT]
     if isinstance(model, OpenAIResponsesModel) and endpoint.hostname in {"api.openai.com", "chatgpt.com"}:
         capability = OpenAICompaction(token_threshold=max(1, threshold))
     elif (

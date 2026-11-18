@@ -14,7 +14,7 @@ The old custom agent/client architecture has been removed.
 ## Design
 
 - Use Harness `Coder` and public capabilities for coding behavior.
-- Use `pydantic_ai_harness.experimental.acp.run_acp_stdio` for the complete ACP layer.
+- Serve the public Harness `PydanticAIACPAgent` over stdio with `acp.run_agent` so slash commands can share the adapter's model selection.
 - Keep model selection on the adapter's ACP Session Config Options path.
 - Reuse core's Codex OAuth flow/provider and credential-source protocol; keep browser login outside ACP.
 - Bind coding capabilities at agent construction so self-delegation inherits them.
