@@ -6,6 +6,7 @@ import sys
 from collections.abc import AsyncIterator
 from dataclasses import replace
 from functools import partial
+from pathlib import Path
 from uuid import uuid4
 
 import acp
@@ -38,6 +39,11 @@ async def stream(
     if isinstance(messages[-1], ModelRequest):
         for part in reversed(messages[-1].parts):
             if isinstance(part, ToolReturnPart):
+                if part.tool_name in {"read_file", "run_code"} and "checkpoint evidence" in str(part.content):
+                    tool = "run_code" if part.tool_name == "run_code" else "checkpoint_probe"
+                    args = {"code": "await checkpoint_probe()"} if tool == "run_code" else {}
+                    yield {0: DeltaToolCall(name=tool, json_args=json.dumps(args), tool_call_id="checkpoint-probe")}
+                    return
                 yield str(part.content)
                 return
         if any(is_task_report(part) for part in messages[-1].parts):
@@ -53,6 +59,19 @@ async def stream(
             for content in contents:
                 if content == "fixture block until cancelled":
                     await asyncio.Future[None]()
+                    return
+                if content == "fixture continue from checkpoint":
+                    returns = [
+                        part for message in messages for part in message.parts if isinstance(part, ToolReturnPart)
+                    ]
+                    if any("checkpoint evidence" in str(part.content) for part in returns) and any(
+                        part.tool_call_id == "checkpoint-probe"
+                        and (part.metadata or {}).get("pydantic_ai_synthesized_tool_return")
+                        for part in returns
+                    ):
+                        yield "Restored evidence and closed the unfinished call."
+                    else:
+                        yield "Checkpoint context missing."
                     return
                 if not isinstance(content, str) or not content.startswith('{"tool":'):
                     continue
@@ -134,6 +153,16 @@ async def main() -> None:
         for name in settings.models
     }
     agent = build_agent(settings)
+    if "--checkpoint-probe" in sys.argv:
+        effect_path = Path(sys.argv[sys.argv.index("--checkpoint-probe") + 1])
+
+        @agent.tool_plain
+        async def checkpoint_probe() -> None:
+            """Record a side effect, then wait for the test to terminate the server."""
+            with effect_path.open("a") as file:
+                file.write("started\n")
+            await asyncio.Future[None]()
+
     adapter = build_acp_adapter(settings, agent, resolve_model=models.__getitem__)
     async with agent:
         await acp.run_agent(adapter, use_unstable_protocol=True)

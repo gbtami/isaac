@@ -492,6 +492,67 @@ async def test_native_compaction_survives_process_restart(tmp_path: Path) -> Non
         )
 
 
+@pytest.mark.parametrize(("has_completed_turn", "code_mode"), [(False, True), (True, False)])
+async def test_session_load_recovers_checkpoint_after_process_kill(
+    tmp_path: Path, has_completed_turn: bool, code_mode: bool
+) -> None:
+    fixture = Path(__file__).with_name("acp_fixture.py")
+    effect = tmp_path / "partial-effect.txt"
+    (tmp_path / "evidence.txt").write_text("checkpoint evidence")
+    args = [sys.executable, str(fixture), "--checkpoint-probe", str(effect)]
+    if not code_mode:
+        args.append("--no-code-mode")
+
+    async with asyncio.timeout(30):
+        async with acp.spawn_agent_process(cast(Client, RecordingClient()), *args) as (connection, process):
+            await connection.initialize(protocol_version=acp.PROTOCOL_VERSION)
+            session = await connection.new_session(cwd=str(tmp_path), mcp_servers=[])
+            session_id = session.session_id
+            if has_completed_turn:
+                await connection.prompt(session_id=session_id, prompt=[acp.text_block("Initial completed turn")])
+            if code_mode:
+                command = json.dumps(
+                    {"tool": "run_code", "args": {"code": "print(await read_file(path='evidence.txt'))"}}
+                )
+            else:
+                command = json.dumps({"tool": "read_file", "args": {"path": "evidence.txt"}})
+            pending = asyncio.create_task(connection.prompt(session_id=session_id, prompt=[acp.text_block(command)]))
+            try:
+                while not effect.exists() or not effect.stat().st_size:
+                    assert not pending.done(), "The agent finished before the probe reached its side effect"
+                    await asyncio.sleep(0.01)
+                process.kill()
+                await process.wait()
+            finally:
+                pending.cancel()
+                await asyncio.gather(pending, return_exceptions=True)
+
+        resumed = RecordingClient()
+        async with acp.spawn_agent_process(cast(Client, resumed), *args) as (connection, _process):
+            await connection.initialize(protocol_version=acp.PROTOCOL_VERSION)
+            await connection.load_session(session_id=session_id, cwd=str(tmp_path), mcp_servers=[])
+            assert effect.read_text() == "started\n"
+            assert resumed.approvals == []
+            response = await connection.prompt(
+                session_id=session_id, prompt=[acp.text_block("fixture continue from checkpoint")]
+            )
+            assert response.stop_reason == "end_turn"
+            assert effect.read_text() == "started\n"
+            assert any(
+                isinstance(update, schema.AgentMessageChunk)
+                and isinstance(update.content, schema.TextContentBlock)
+                and "Recovered a checkpoint" in update.content.text
+                and ("run_code" if code_mode else "checkpoint_probe") in update.content.text
+                for _, update in resumed.updates
+            )
+            assert any(
+                isinstance(update, schema.AgentMessageChunk)
+                and isinstance(update.content, schema.TextContentBlock)
+                and "Restored evidence and closed the unfinished call." in update.content.text
+                for _, update in resumed.updates
+            )
+
+
 async def test_session_load_after_process_restart(tmp_path: Path) -> None:
     """Autosave survives process exit; load replays history and restores model and plan, without tools running again."""
     fixture = Path(__file__).with_name("acp_fixture.py")
@@ -531,6 +592,12 @@ async def test_session_load_after_process_restart(tmp_path: Path) -> None:
         assert any(isinstance(update, schema.UserMessageChunk) for _, update in resumed.updates)
         assert any(isinstance(update, schema.AgentMessageChunk) for _, update in resumed.updates)
         assert any(isinstance(update, schema.ToolCallStart) for _, update in resumed.updates)
+        assert not any(
+            isinstance(update, schema.AgentMessageChunk)
+            and isinstance(update.content, schema.TextContentBlock)
+            and "Recovered a checkpoint" in update.content.text
+            for _, update in resumed.updates
+        )
         plans = [update for _, update in resumed.updates if isinstance(update, schema.AgentPlanUpdate)]
         assert [(entry.content, entry.status) for entry in plans[-1].entries] == [("Continue the task", "in_progress")]
 

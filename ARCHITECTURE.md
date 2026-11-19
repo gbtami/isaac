@@ -82,7 +82,10 @@ its own policy.
 Toad records session IDs when `loadSession` is advertised, and its history picker invokes `session/load`.
 The server does not add its own discovery UI or implement unsupported `session/list` / `session/resume`
 methods. Completed conversation turns and plans persist; in-flight runs, shell jobs, and remembered
-permission decisions are not restored.
+permission decisions are not restarted. Harness `StepPersistence` saves run checkpoints in the same
+database. On load after an interruption, the session store can restore an uncommitted run's checkpoint
+as model history and append a recovery notice to the transcript. Core closes unresolved tool calls so
+the next prompt can continue using the recovered context without replaying tool calls.
 
 Session titles use a separate SQLite table so updating a conversation snapshot never replaces its name.
 A session-local capability captures the first coding prompt and names it after a successful coding run,

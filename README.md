@@ -197,8 +197,10 @@ picker will still show its own names. Use `/title` to see Isaac's generated name
 Toad's existing `/toad:rename <name>` command to set that name locally. Isaac never modifies Toad's
 source or writes its database.
 
-Saving happens at turn boundaries, so resuming an interrupted process recovers its last saved turn.
-This does not restore running shell jobs or resume an interrupted model request.
+Harness also saves checkpoints during a turn. If Isaac exits before the turn is saved, reopening
+the session restores the latest available checkpoint into the model's context and shows a recovery notice.
+Ask Isaac to continue when ready. Check the workspace for partial changes before retrying writes
+or commands. Reopening a session does not rerun tools or restart shell jobs.
 The upstream adapter does not implement `session/list` or the separate `session/resume` method;
 Toad's own history picker supplies discovery and uses `session/load` for continuation.
 

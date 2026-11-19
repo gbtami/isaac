@@ -60,6 +60,10 @@ class SessionUI(AbstractCapability[SessionSettings]):
     adapter: PydanticAIACPAgent[SessionSettings, str]
     last_entries: list[schema.PlanEntry] = field(default_factory=list, init=False)
 
+    def get_default_conversation_id(self, run_id: str) -> str:
+        # Give the first run a stable lookup key even if it never commits a turn.
+        return self.session.session_id
+
     def get_ordering(self) -> CapabilityOrdering:
         # Local commands can be answered before automatic history compaction makes a request.
         return CapabilityOrdering(wraps=[AutomaticCompaction])
