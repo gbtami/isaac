@@ -1,7 +1,7 @@
 # Isaac
 
-Isaac is an ACP coding server built on Pydantic AI Harness. It has no bundled client.
-The old custom agent/client architecture has been removed.
+Isaac is a standalone ACP coding server built on Pydantic AI Harness. The independently
+installable terminal client lives in `client/`. The two components communicate over ACP.
 
 ## Runtime
 
@@ -27,7 +27,9 @@ The old custom agent/client architecture has been removed.
 - Configure each session through `ACPSessionConfig`, with `LocalWorkspaceBackend(session.cwd)`.
 - Attach ACP-provided MCP toolsets through core `Toolset` capabilities.
 - Keep stdout exclusive to ACP JSON-RPC; diagnostics go to stderr.
-- Do not reintroduce custom tools, ACP handlers, prompt runners, model catalogs, or a client UI.
+- Keep the server free of custom tools, ACP handlers, prompt runners, model catalogs, and client UI.
+- Keep the terminal client free of server imports and model/provider dependencies. Drive its UI
+  through SDK callbacks and capabilities advertised by the agent.
 - Do not depend on or copy CLAI2-specific code. Its Harness composition can be studied in
   `~/pydantic-ai/src/pydantic_clai2`; upstream ACP documentation is in
   `~/pydantic-ai/docs/harness/acp.md`.
@@ -57,6 +59,9 @@ uv run mypy src tests
 uv run pytest
 uv build --wheel
 ```
+
+Run client checks with `uv run --directory client --locked pytest`,
+`uv run --directory client --locked mypy`, and `uv build --project client --wheel`.
 
 For local Toad testing, build a fresh wheel and install it with
 `uv tool install --force --reinstall dist/isaac_acp-0.4.0-py3-none-any.whl`.

@@ -1,12 +1,13 @@
 # Isaac
 
 Isaac is an ACP coding server built on [Pydantic AI Harness](https://pydantic.dev/docs/ai/harness/).
-Use it from [Toad](https://github.com/batrachianai/toad) or another ACP client.
+Use it from [Toad](https://github.com/batrachianai/toad), [Isaac Terminal Client](client/), or another ACP client.
 
 The agent is Harness's `Coder`, assembled with Harness planning, skills, permissions, and compaction.
 Harness's [ACP adapter](https://pydantic.dev/docs/ai/harness/acp/) handles the protocol.
 Isaac supplies process configuration and connects the client's workspace and MCP servers.
-There is no bundled chat client, CLAI2 dependency, plugin framework, or custom ACP implementation.
+The server and terminal client are independently installable. They communicate over ACP stdio,
+so each can be used with a compatible implementation of the other side.
 
 ## Install
 
@@ -108,6 +109,19 @@ Toad supplies each session's working directory. All file, shell, repository-inst
 operations use that session's workspace, even when Isaac starts in another directory.
 Stdout carries ACP JSON-RPC only; diagnostics go to stderr.
 `python -m isaac` starts the same server.
+
+## Use with Isaac Terminal Client
+
+Install the client separately from this checkout and pass the agent command to launch.
+
+```bash
+uv tool install ./client
+isaac-client --project-dir ~/playground isaac
+```
+
+Use `/client:model` to select from the models Isaac advertises. Run the same command with
+`--resume` before the agent command to choose a named session. See the [client guide](client/README.md)
+for the client's supported ACP features and an example with another agent.
 
 ## Coding capabilities
 

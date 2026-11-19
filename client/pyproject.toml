@@ -1,0 +1,47 @@
+[project]
+name = "isaac-acp-client"
+version = "0.1.0"
+description = "Standalone terminal client for Agent Client Protocol servers."
+readme = "README.md"
+license = "MIT"
+requires-python = ">=3.11"
+dependencies = [
+    "agent-client-protocol>=0.11.1,<0.12.0",
+    "platformdirs>=4.14.5,<5.0.0",
+    "prompt-toolkit>=3.0.52,<4.0.0",
+    "pydantic>=2.14.3,<3.0.0",
+    "rich>=15.0.0,<16.0.0",
+]
+
+[project.scripts]
+isaac-client = "isaac_client.cli:main"
+
+[project.urls]
+Repository = "https://github.com/gbtami/isaac"
+ACP-Spec = "https://agentclientprotocol.com/protocol/"
+
+[build-system]
+requires = ["hatchling>=1.33.0"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/isaac_client"]
+
+[dependency-groups]
+dev = ["mypy", "pytest", "pytest-asyncio", "ruff"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 120
+
+[tool.ruff.lint]
+select = ["E4", "E7", "E9", "F", "I", "UP"]
+
+[tool.mypy]
+python_version = "3.11"
+strict = true
+files = ["src", "tests"]

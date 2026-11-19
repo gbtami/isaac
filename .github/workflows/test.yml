@@ -28,3 +28,6 @@ jobs:
         run: uv sync --locked
       - name: Run tests
         run: uv run --locked pytest
+      - name: Run standalone client tests
+        working-directory: client
+        run: uv run --locked pytest

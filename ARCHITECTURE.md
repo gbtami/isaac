@@ -1,9 +1,11 @@
 # Architecture
 
-Isaac is a stdio ACP server. Its runtime is Pydantic AI Harness, with no bundled client.
+Isaac is a stdio ACP server built on Pydantic AI Harness. The terminal client in `client/` is a
+separate Python distribution. Each executable has its own dependencies and state directory, and
+communicates with the other side through the official ACP SDK over stdio.
 
 ```text
-Toad / any ACP client
+Toad / Isaac Terminal Client / any compatible ACP client
     -> Harness PydanticAIACPAgent over ACP stdio
         -> Pydantic AI Agent
             -> Harness Coder + Permissions + Skills + compaction
@@ -11,6 +13,10 @@ Toad / any ACP client
             -> per-session LocalWorkspaceBackend
             -> per-session MCP toolset capabilities
 ```
+
+The terminal client launches the specified agent command, negotiates capabilities, and renders its
+ACP requests and updates. Its resume picker stores session identifiers and titles locally and loads
+transcripts through `session/load`. Project and model behavior belong to the agent it launches.
 
 ## Modules
 
