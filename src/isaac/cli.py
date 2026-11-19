@@ -5,6 +5,7 @@ import asyncio
 import logging
 import os
 import sys
+import warnings
 
 from isaac import __version__
 from isaac.config import PERMISSION_MODES, Settings, load_environment
@@ -84,7 +85,17 @@ def main(argv: list[str] | None = None) -> None:
     settings = parse_settings(argv)
     logging.basicConfig(stream=sys.stderr, level=logging.WARNING)
 
-    from isaac.server import serve
+    # Harness ACP is intentionally experimental; suppress only its import-time notice.
+    # Other Harness experimental warnings remain visible.
+    from pydantic_ai_harness.experimental import HarnessExperimentalWarning
+
+    with warnings.catch_warnings():
+        warnings.filterwarnings(
+            "ignore",
+            message=r"^'pydantic_ai_harness\.experimental\.acp' is experimental",
+            category=HarnessExperimentalWarning,
+        )
+        from isaac.server import serve
 
     try:
         asyncio.run(serve(settings))
