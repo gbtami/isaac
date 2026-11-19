@@ -190,7 +190,7 @@ in history, because the API rejects the inline compaction edit alongside it.
 The commands are advertised to ACP clients and handled through public capability hooks. Ordinary prompts,
 including unknown slash commands and messages with attachments, continue through the normal agent path.
 Cancelled plan steps are omitted from the native sidebar because ACP has no cancelled entry status.
-The upstream ACP adapter is experimental and is pinned to Harness's 0.69 release series.
+The upstream ACP adapter is experimental and is pinned to Harness's 0.71 release series.
 
 ## Saved sessions and resume
 
