@@ -1,4 +1,10 @@
-# Isaac
+# 🍏 Isaac ACP 🍏 (`isaac-acp`)
+
+[![PyPI version](https://img.shields.io/pypi/v/isaac-acp)](https://pypi.org/project/isaac-acp/)
+[![PyPI - Python Version](https://img.shields.io/pypi/pyversions/isaac-acp)](https://pypi.org/project/isaac-acp/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![Lint](https://github.com/gbtami/isaac/actions/workflows/lint.yml/badge.svg)](https://github.com/gbtami/isaac/actions/workflows/lint.yml)
+[![Tests](https://github.com/gbtami/isaac/actions/workflows/test.yml/badge.svg)](https://github.com/gbtami/isaac/actions/workflows/test.yml)
 
 Isaac is an ACP coding server built on [Pydantic AI Harness](https://pydantic.dev/docs/ai/harness/).
 Use it from [Toad](https://github.com/batrachianai/toad), [Isaac Terminal Client](client/), or another ACP client.
