@@ -2,6 +2,7 @@
 
 import asyncio
 from collections import Counter
+from dataclasses import dataclass, field
 from time import monotonic
 
 from acp import schema
@@ -15,18 +16,24 @@ ConfigOption = schema.SessionConfigOptionSelect | schema.SessionConfigOptionBool
 ToolContent = schema.ContentToolCallContent | schema.FileEditToolCallContent | schema.TerminalToolCallContent
 
 
+@dataclass
+class SessionState:
+    session_id: str | None = None
+    title: str | None = None
+    options: list[ConfigOption] = field(default_factory=list)
+    modes: schema.SessionModeState | None = None
+    commands: list[schema.AvailableCommand] = field(default_factory=list)
+    usage: schema.UsageUpdate | None = None
+    plan: list[schema.PlanEntry] = field(default_factory=list)
+    loading: bool = False
+
+
 class TerminalClient:
     def __init__(self, terminal: Terminal) -> None:
         self.terminal = terminal
         self.history: SessionHistory | None = None
-        self.session_id: str | None = None
+        self.session = SessionState()
         self.agent = "ACP agent"
-        self.title: str | None = None
-        self.options: list[ConfigOption] = []
-        self.modes: schema.SessionModeState | None = None
-        self.commands: list[schema.AvailableCommand] = []
-        self.usage: schema.UsageUpdate | None = None
-        self.plan: list[schema.PlanEntry] = []
         self._tools: dict[str, tuple[str, str | None]] = {}
         self._routine_tools: Counter[str] = Counter()
         self._turn_started: float | None = None
@@ -36,8 +43,8 @@ class TerminalClient:
         self._question_menus: set[asyncio.Task[schema.CreateElicitationResponse]] = set()
 
     def remember(self) -> None:
-        if self.history is not None and self.session_id is not None:
-            self.history.remember(self.session_id, self.title)
+        if self.history is not None and self.session.session_id is not None and not self.session.loading:
+            self.history.remember(self.session.session_id, self.session.title)
 
     def toolbar(self) -> str:
         fields = []
@@ -53,20 +60,21 @@ class TerminalClient:
             else:
                 status = "Working"
             fields.append(f"{status} ({int(monotonic() - self._turn_started)}s)")
-        if self.plan:
-            completed = sum(item.status == "completed" for item in self.plan)
-            fields.append(f"Plan {completed}/{len(self.plan)}")
-        if self.usage:
-            fields.append(f"Context {self.usage.used:,}/{self.usage.size:,}")
-        fields.append(self.title or self.agent)
-        for option in self.options:
+        session = self.session
+        if session.plan:
+            completed = sum(item.status == "completed" for item in session.plan)
+            fields.append(f"Plan {completed}/{len(session.plan)}")
+        if session.usage:
+            fields.append(f"Context {session.usage.used:,}/{session.usage.size:,}")
+        fields.append(session.title or self.agent)
+        for option in session.options:
             value = next(
                 (item.name for item in self.choices(option) if item.value == option.current_value),
                 str(option.current_value),
             )
             fields.append(f"{option.name} {value}")
-        if self.modes and not any(self.is_option(option, "mode") for option in self.options):
-            fields.append(f"Mode {self.modes.current_mode_id}")
+        if session.modes and not any(self.is_option(option, "mode") for option in session.options):
+            fields.append(f"Mode {session.modes.current_mode_id}")
         return visible("  ·  ".join(fields)).replace("\n", " ")
 
     async def request_permission(
@@ -76,7 +84,7 @@ class TerminalClient:
         options: list[schema.PermissionOption],
         **_: object,
     ) -> schema.RequestPermissionResponse:
-        if session_id == self.session_id and not self.cancelling:
+        if session_id == self.session.session_id and not self.cancelling:
             self.finish_output()
             stored = self._tools.get(tool_call.tool_call_id)
             title = tool_call.title or (stored[0] if stored else tool_call.tool_call_id)
@@ -106,7 +114,7 @@ class TerminalClient:
         cancelled = schema.CancelElicitationResponse(action="cancel")
         if self.cancelling or not self.terminal.interactive:
             return cancelled
-        if isinstance(mode, schema.ElicitationFormSessionMode) and mode.session_id != self.session_id:
+        if isinstance(mode, schema.ElicitationFormSessionMode) and mode.session_id != self.session.session_id:
             return cancelled
         if not isinstance(mode, schema.ElicitationFormSessionMode | schema.ElicitationFormRequestMode):
             return schema.DeclineElicitationResponse(action="decline")
@@ -129,21 +137,22 @@ class TerminalClient:
             menu.cancel()
 
     async def session_update(self, session_id: str, update: object, **_: object) -> None:
-        if self.session_id is not None and session_id != self.session_id:
+        session = self.session
+        if session.session_id is not None and session_id != session.session_id:
             return
         if isinstance(update, schema.SessionInfoUpdate):
             if update.title:
-                self.title = " ".join(visible(update.title).split())[:160] or self.title
+                session.title = " ".join(visible(update.title).split())[:160] or session.title
                 self.remember()
         elif isinstance(update, schema.UsageUpdate):
-            self.usage = update
+            session.usage = update
         elif isinstance(update, schema.ConfigOptionUpdate):
-            self.options = update.config_options
+            session.options = update.config_options
         elif isinstance(update, schema.CurrentModeUpdate):
-            if self.modes:
-                self.modes.current_mode_id = update.current_mode_id
+            if session.modes:
+                session.modes.current_mode_id = update.current_mode_id
         elif isinstance(update, schema.AvailableCommandsUpdate):
-            self.commands = update.available_commands
+            session.commands = update.available_commands
         elif isinstance(update, (schema.UserMessageChunk, schema.AgentMessageChunk, schema.AgentThoughtChunk)):
             if not isinstance(update.content, schema.TextContentBlock):
                 return
@@ -170,7 +179,7 @@ class TerminalClient:
         elif isinstance(update, schema.ToolCallProgress):
             self._update_tool(update)
         elif isinstance(update, schema.AgentPlanUpdate):
-            self.plan = update.entries
+            session.plan = update.entries
 
     def _update_tool(self, update: schema.ToolCallProgress) -> None:
         title, kind = self._tools.get(update.tool_call_id, (update.tool_call_id, None))
@@ -245,11 +254,15 @@ class TerminalClient:
     async def select_config(
         self, connection: ClientSideConnection, session_id: str, category: str | None = None
     ) -> None:
-        options = [option for option in self.options if category is None or self.is_option(option, category)]
+        options = [option for option in self.session.options if category is None or self.is_option(option, category)]
         if not options:
             self.terminal.write("The agent offered no matching session settings.")
             return
-        index = 0 if len(options) == 1 else await self.terminal.choose("Setting", [option.name for option in options])
+        index = (
+            0
+            if len(options) == 1
+            else await self.terminal.choose("Setting", [option.name for option in options], search=True)
+        )
         if index is None:
             return
         option = options[index]
@@ -263,10 +276,10 @@ class TerminalClient:
             f"{label} (current)" if value == option.current_value else label
             for label, value in zip(labels, values, strict=True)
         ]
-        selected = await self.terminal.choose(option.name, labels)
+        selected = await self.terminal.choose(option.name, labels, search=True)
         if selected is not None:
             response = await connection.set_config_option(
                 session_id=session_id, config_id=option.id, value=values[selected]
             )
-            self.options = response.config_options
+            self.session.options = response.config_options
             self.terminal.write(f"{option.name}: {labels[selected]}")

@@ -59,7 +59,14 @@ class DemoAgent:
             session_id="demo",
             update=schema.AvailableCommandsUpdate(
                 session_update="available_commands_update",
-                available_commands=[schema.AvailableCommand(name="demo", description="Run the demo")],
+                available_commands=[
+                    schema.AvailableCommand(name="demo", description="Run the demo"),
+                    schema.AvailableCommand(
+                        name="model",
+                        description="Select an agent model",
+                        input=schema.AvailableCommandInput(root=schema.UnstructuredCommandInput(hint="model ID")),
+                    ),
+                ],
             ),
         )
         return schema.NewSessionResponse(session_id="demo", config_options=options(self.model, self.verbose))
@@ -119,8 +126,13 @@ class DemoAgent:
             await asyncio.sleep(0.15)
             await self.client.session_update(session_id, acp.update_agent_message(acp.text_block("Turn finished")))
             return schema.PromptResponse(stop_reason="end_turn")
-        if isinstance(first, schema.TextContentBlock) and first.text.startswith("Echo "):
+        if isinstance(first, schema.TextContentBlock) and first.text.startswith(("Echo ", "/model ")):
             await self.client.session_update(session_id, acp.update_agent_message(first))
+            return schema.PromptResponse(stop_reason="end_turn")
+        if isinstance(first, schema.TextContentBlock) and first.text == "Report session":
+            await self.client.session_update(
+                session_id, acp.update_agent_message(acp.text_block(f"Current session is {session_id}."))
+            )
             return schema.PromptResponse(stop_reason="end_turn")
         if isinstance(first, schema.TextContentBlock) and first.text == "Fail the turn":
             raise acp.RequestError.internal_error({"details": "Set the provider credentials and try again."})

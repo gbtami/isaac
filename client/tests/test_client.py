@@ -6,17 +6,17 @@ import os
 import sys
 from collections.abc import Callable
 from pathlib import Path
-from unittest.mock import AsyncMock
 
 import pytest
 from prompt_toolkit.application import create_app_session
 from prompt_toolkit.data_structures import Size
+from prompt_toolkit.document import Document
 from prompt_toolkit.input import create_pipe_input
 from prompt_toolkit.output.vt100 import Vt100_Output
 from rich.console import Console
 
 from isaac_client import cli
-from isaac_client.display import Terminal
+from isaac_client.display import CommandSource, Terminal
 from isaac_client.history import SessionHistory
 
 
@@ -39,11 +39,12 @@ class ScriptedTerminal(Terminal):
         self,
         label: str,
         *,
-        commands: list[str] | None = None,
+        commands: CommandSource | None = None,
         toolbar: Callable[[], str] | None = None,
-        default: str = "",
+        default: str | Document = "",
+        multiline: bool = False,
     ) -> str:
-        if label.startswith("Queue"):
+        if toolbar and "Enter queues" in toolbar():
             return await asyncio.Future[str]()
         if toolbar:
             self.toolbars.append(toolbar())
@@ -54,6 +55,11 @@ class ScriptedTerminal(Terminal):
     ) -> int | None:
         self.menus[label] = choices
         return next(self.selections, None)
+
+
+async def wait_for_output(transcript: io.StringIO, text: str) -> None:
+    while text not in transcript.getvalue():
+        await asyncio.sleep(0.01)
 
 
 async def test_config_approval_and_named_resume(
@@ -95,29 +101,102 @@ async def test_preserves_streamed_lines_across_interactive_turns(
     terminal.console = Console(file=transcript, force_terminal=True, color_system="standard")
     monkeypatch.setattr(cli, "Terminal", lambda: terminal)
 
-    async def wait_for_output(text: str) -> None:
-        while text not in transcript.getvalue():
-            await asyncio.sleep(0.01)
-
     with create_pipe_input() as pipe, create_app_session(input=pipe, output=output):
         async with asyncio.timeout(15), asyncio.TaskGroup() as tasks:
             client = tasks.create_task(cli.run_client(command, tmp_path, []))
-            await wait_for_output("❯")
+            await wait_for_output(transcript, "❯")
             pipe.send_text("Wait then end\n")
-            await wait_for_output("SDK Demo: Turn started")
+            await wait_for_output(transcript, "SDK Demo: Turn started")
             prefix = "\x1b[1mSDK Demo: \x1b[0m"
-            await wait_for_output(f"{prefix}Turn startedTurn finished\n")
+            await wait_for_output(transcript, f"{prefix}Turn startedTurn finished\n")
             pipe.send_text("Echo second\n")
-            await wait_for_output(f"{prefix}Echo second\n")
+            await wait_for_output(transcript, f"{prefix}Echo second\n")
             pipe.send_text("/client:quit\n")
             assert await client == 0
 
 
-async def test_resume_filters_choices_by_title(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_slash_palette_and_multiline_composer(
+    command: list[str], tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    transcript = io.StringIO()
+    output = Vt100_Output(transcript, lambda: Size(rows=24, columns=100), enable_cpr=False)
     terminal = Terminal()
     terminal.interactive = True
-    monkeypatch.setattr(terminal, "read", AsyncMock(side_effect=["BUILD", "1"]))
-    assert await terminal.choose("Resume session", ["Write docs", "Fix the build"], search=True) == 1
+    terminal.console = Console(file=transcript, color_system=None)
+    monkeypatch.setattr(cli, "Terminal", lambda: terminal)
+
+    with create_pipe_input() as pipe, create_app_session(input=pipe, output=output):
+        async with asyncio.timeout(8), asyncio.TaskGroup() as tasks:
+            client = tasks.create_task(cli.run_client(command, tmp_path, []))
+            await wait_for_output(transcript, "❯")
+            pipe.send_text("/mo")
+            await wait_for_output(transcript, "[model ID] Select an agent model")
+            pipe.send_text("\x1b[B\r")
+            await wait_for_output(transcript, "/model ")
+            pipe.send_text("two\r")
+            await wait_for_output(transcript, "SDK Demo: /model two\n")
+            pipe.send_text("Echo first\x1b\r  second\r")
+            await wait_for_output(transcript, "SDK Demo: Echo first\n")
+            await wait_for_output(transcript, "  second\n")
+            pipe.send_text("\x1b[200~Echo pasted\n  indentation\x1b[201~")
+            await wait_for_output(transcript, "indentation")
+            assert "SDK Demo: Echo pasted" not in transcript.getvalue()
+            pipe.send_text("\r")
+            await wait_for_output(transcript, "SDK Demo: Echo pasted\n")
+            await wait_for_output(transcript, "  indentation\n")
+            pipe.send_text("/quit\r")
+            assert await client == 0
+
+
+async def test_picker_keeps_multiline_draft_and_cursor() -> None:
+    transcript = io.StringIO()
+    output = Vt100_Output(transcript, lambda: Size(rows=24, columns=100), enable_cpr=False)
+    terminal = Terminal()
+    terminal.interactive = True
+
+    with create_pipe_input() as pipe, create_app_session(input=pipe, output=output):
+        async with asyncio.timeout(8), asyncio.TaskGroup() as tasks:
+            editor = tasks.create_task(terminal.edit("❯ ", commands=None, toolbar=lambda: ""))
+            await wait_for_output(transcript, "❯")
+            pipe.send_text("First line\x1b\rsecond\x1b[D")
+            await wait_for_output(transcript, "second")
+            chooser = tasks.create_task(terminal.choose("Permission", ["Allow", "Reject"]))
+            await wait_for_output(transcript, "2. Reject")
+            pipe.send_text("\x1b[B\x1b[B\r")
+            assert await chooser == 1
+            pipe.send_text("X\r")
+            assert await editor == "First line\nseconXd"
+
+
+async def test_resume_from_composer(command: list[str], tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    transcript = io.StringIO()
+    output = Vt100_Output(transcript, lambda: Size(rows=24, columns=100), enable_cpr=False)
+    terminal = Terminal()
+    terminal.interactive = True
+    terminal.console = Console(file=transcript, color_system=None)
+    monkeypatch.setattr(cli, "Terminal", lambda: terminal)
+    agent_command = [*command, "--list-sessions"]
+    SessionHistory(agent_command, tmp_path).remember("missing", "Stale session")
+
+    with create_pipe_input() as pipe, create_app_session(input=pipe, output=output):
+        async with asyncio.timeout(8), asyncio.TaskGroup() as tasks:
+            client = tasks.create_task(cli.run_client(agent_command, tmp_path, []))
+            await wait_for_output(transcript, "❯")
+            pipe.send_text("/resume\r")
+            await wait_for_output(transcript, "Stale session")
+            pipe.send_text("STALE\r")
+            await wait_for_output(transcript, "Invalid params")
+            pipe.send_text("Report session\r")
+            await wait_for_output(transcript, "Current session is demo.\n")
+            pipe.send_text("/resume\r")
+            await wait_for_output(transcript, "Old session")
+            pipe.send_text("OLD\r")
+            await wait_for_output(transcript, "Session remote-old\n")
+            assert "Session history replayed over ACP." in transcript.getvalue()
+            pipe.send_text("Report session\r")
+            await wait_for_output(transcript, "Current session is remote-old.\n")
+            pipe.send_text("/quit\r")
+            assert await client == 0
 
 
 async def test_back_to_back_menus_take_priority_over_the_editor(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -136,7 +215,7 @@ async def test_back_to_back_menus_take_priority_over_the_editor(monkeypatch: pyt
     monkeypatch.setattr(terminal, "read", read)
     async with asyncio.timeout(5):
         async with terminal.menu():
-            editor = asyncio.create_task(terminal.edit("Queue ❯ ", commands=[], toolbar=lambda: ""))
+            editor = asyncio.create_task(terminal.edit("Queue ❯ ", commands=None, toolbar=lambda: ""))
             await asyncio.sleep(0)
             menu = asyncio.create_task(another_menu())
             await asyncio.sleep(0)
@@ -236,18 +315,19 @@ async def test_can_queue_or_cancel_a_busy_turn(
             self,
             label: str,
             *,
-            commands: list[str] | None = None,
+            commands: CommandSource | None = None,
             toolbar: Callable[[], str] | None = None,
-            default: str = "",
+            default: str | Document = "",
+            multiline: bool = False,
         ) -> str:
             nonlocal seen_input
-            if label.startswith("Queue") and not seen_input:
+            if toolbar and "Enter queues" in toolbar() and not seen_input:
                 await started.wait()
                 seen_input = True
                 if cancel:
                     raise KeyboardInterrupt
                 return "Echo queued follow-up"
-            return await super().read(label, commands=commands, toolbar=toolbar, default=default)
+            return await super().read(label, commands=commands, toolbar=toolbar, default=default, multiline=multiline)
 
     prompts = ["Wait for cancel", "Echo after cancellation"] if cancel else ["Wait then end"]
     terminal = BusyTerminal(prompts, [])

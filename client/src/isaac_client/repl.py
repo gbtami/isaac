@@ -2,60 +2,90 @@
 
 import asyncio
 from collections import deque
+from collections.abc import Awaitable, Callable
 from contextlib import suppress
 
 import acp
 from acp.client.connection import ClientSideConnection
 
 from isaac_client.client import TerminalClient
-from isaac_client.display import InputInterrupted
+from isaac_client.display import CommandSource, InputInterrupted, SlashCommand, visible
 
 COMMANDS = {
     "/client:model": "Choose the model offered by the agent",
     "/client:config": "Change an advertised session setting",
     "/client:plan": "Show the latest agent plan",
+    "/client:resume": "Resume another session in this workspace",
     "/client:help": "List client and agent commands",
     "/client:quit": "Exit",
 }
 
 
-async def interactive_loop(connection: ClientSideConnection, session_id: str, client: TerminalClient) -> None:
+def command_catalog(client: TerminalClient) -> dict[str, SlashCommand]:
+    commands = {
+        f"/{item.name}": SlashCommand(f"/{item.name}", item.description, item.input.root.hint if item.input else "")
+        for item in client.session.commands
+        if item.name and visible(item.name) == item.name and not any(char.isspace() for char in item.name)
+    }
+    for name, description in COMMANDS.items():
+        if name == "/client:resume" and (client.history is None or not client.terminal.interactive):
+            continue
+        alias = "/" + name.removeprefix("/client:")
+        commands.setdefault(alias, SlashCommand(alias, description, local=name))
+        commands[name] = SlashCommand(name, description, local=name)
+    return commands
+
+
+async def interactive_loop(
+    connection: ClientSideConnection, client: TerminalClient, resume_session: Callable[[], Awaitable[None]]
+) -> None:
     terminal = client.terminal
     queued: deque[str] = deque()
+
+    def commands() -> list[SlashCommand]:
+        return list(command_catalog(client).values())
+
     while True:
-        commands = [*COMMANDS, *(f"/{item.name}" for item in client.commands)]
+        from_queue = bool(queued)
         try:
             line = (
-                queued.popleft()
-                if queued
-                else (await terminal.edit("❯ ", commands=commands, toolbar=client.toolbar)).strip()
+                queued.popleft() if from_queue else await terminal.edit("❯ ", commands=commands, toolbar=client.toolbar)
             )
         except EOFError:
             return
         except InputInterrupted:
             continue
-        if not line:
+        if not terminal.interactive:
+            line = line.strip()
+        if not line.strip():
             continue
 
-        command = line.split(maxsplit=1)[0]
-        if command == "/client:quit":
+        entry = command_catalog(client).get(line.split(maxsplit=1)[0]) if "\n" not in line else None
+        local = entry.local if entry else None
+        if local == "/client:quit":
             return
 
+        session_id = client.session.session_id
+        assert session_id is not None
         try:
-            if command in {"/client:config", "/client:model"}:
-                await client.select_config(connection, session_id, "model" if command == "/client:model" else None)
-            elif command == "/client:plan":
-                terminal.plan(client.plan)
-            elif command == "/client:help":
-                for name, description in COMMANDS.items():
-                    terminal.write(f"{name}  {description}")
-                for item in client.commands:
-                    terminal.write(f"/{item.name}  {item.description}")
+            if local in {"/client:config", "/client:model"}:
+                await client.select_config(connection, session_id, "model" if local == "/client:model" else None)
+            elif local == "/client:plan":
+                terminal.plan(client.session.plan)
+            elif local == "/client:resume":
+                if from_queue:
+                    terminal.write("Run /client:resume from the idle prompt.", style="yellow")
+                else:
+                    await resume_session()
+            elif local == "/client:help":
+                for item in commands():
+                    hint = f" [{item.hint}]" if item.hint else ""
+                    terminal.write(f"{item.name}{hint}  {item.description}")
             else:
-                if client.title is None and not line.startswith("/"):
-                    client.title = " ".join(line.split())[:80]
+                if client.session.title is None and not line.lstrip().startswith("/"):
+                    client.session.title = " ".join(line.split())[:80]
                     client.remember()
-                await send_turn(connection, session_id, client, line, queued)
+                await send_turn(connection, session_id, client, line, queued, commands)
         except acp.RequestError as exc:
             client.finish_message()
             details = exc.data.get("details") if isinstance(exc.data, dict) else None
@@ -65,11 +95,16 @@ async def interactive_loop(connection: ClientSideConnection, session_id: str, cl
 
 
 async def send_turn(
-    connection: ClientSideConnection, session_id: str, client: TerminalClient, line: str, queued: deque[str]
+    connection: ClientSideConnection,
+    session_id: str,
+    client: TerminalClient,
+    line: str,
+    queued: deque[str],
+    commands: CommandSource,
 ) -> None:
     client.start_turn()
     editor = (
-        asyncio.create_task(collect_followups(connection, session_id, client, queued))
+        asyncio.create_task(collect_followups(connection, session_id, client, queued, commands))
         if client.terminal.interactive
         else None
     )
@@ -92,14 +127,18 @@ async def send_turn(
 
 
 async def collect_followups(
-    connection: ClientSideConnection, session_id: str, client: TerminalClient, queued: deque[str]
+    connection: ClientSideConnection,
+    session_id: str,
+    client: TerminalClient,
+    queued: deque[str],
+    commands: CommandSource,
 ) -> None:
     def toolbar() -> str:
-        return f"Ctrl+C stops  ·  Queued {len(queued)}  ·  {client.toolbar()}"
+        return f"Queued {len(queued)}  ·  Enter queues  ·  Ctrl+C stops  ·  {client.toolbar()}"
 
     while True:
         try:
-            line = (await client.terminal.edit("Queue ❯ ", commands=[], toolbar=toolbar)).strip()
+            line = await client.terminal.edit("❯ ", commands=commands, toolbar=toolbar)
         except EOFError:
             return
         except InputInterrupted:
@@ -112,7 +151,7 @@ async def collect_followups(
             except (acp.RequestError, OSError) as exc:
                 client.terminal.write(str(exc), style="red")
             return
-        if line:
+        if line.strip():
             queued.append(line)
             client.finish_message()
             client.terminal.write(f"Queued follow-up {len(queued)}.", style="dim")

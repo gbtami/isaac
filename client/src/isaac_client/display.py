@@ -3,17 +3,24 @@
 import asyncio
 import difflib
 import sys
-from collections.abc import AsyncIterator, Callable
+from collections.abc import AsyncIterator, Callable, Iterable
 from contextlib import asynccontextmanager
+from dataclasses import dataclass
 
 from acp import schema
 from prompt_toolkit import PromptSession
-from prompt_toolkit.application import get_app, in_terminal
-from prompt_toolkit.completion import WordCompleter
+from prompt_toolkit.application import get_app, get_app_or_none, in_terminal
+from prompt_toolkit.completion import CompleteEvent, Completer, Completion, DummyCompleter
+from prompt_toolkit.document import Document
+from prompt_toolkit.enums import DEFAULT_BUFFER
+from prompt_toolkit.filters import Condition, has_completions, has_focus, is_multiline
+from prompt_toolkit.key_binding import KeyBindings, KeyPressEvent
 from rich.console import Console, RenderableType
 from rich.syntax import Syntax
 from rich.table import Table
 from rich.text import Text
+
+from isaac_client.picker import pick
 
 
 class InputInterrupted(Exception):
@@ -29,15 +36,83 @@ def visible(text: str) -> str:
     )
 
 
+@dataclass(frozen=True)
+class SlashCommand:
+    name: str
+    description: str
+    hint: str = ""
+    local: str | None = None
+
+
+CommandSource = Callable[[], Iterable[SlashCommand]]
+
+
+def slash_prefix(document: Document) -> str | None:
+    text = document.text
+    if document.is_cursor_at_the_end and text.startswith("/") and not any(char.isspace() for char in text):
+        return text.casefold()
+    return None
+
+
+class SlashCompleter(Completer):
+    def __init__(self, commands: CommandSource) -> None:
+        self.commands = commands
+
+    def get_completions(self, document: Document, complete_event: CompleteEvent) -> Iterable[Completion]:
+        prefix = slash_prefix(document)
+        if prefix is None:
+            return
+        for command in self.commands():
+            if command.name.casefold().startswith(prefix):
+                detail = f"[{command.hint}]  {command.description}" if command.hint else command.description
+                yield Completion(
+                    command.name + (" " if command.hint else ""),
+                    start_position=-len(document.text),
+                    display=command.name,
+                    display_meta=" ".join(visible(detail).split()),
+                )
+
+
+_prompt_keys = KeyBindings()
+
+
+@_prompt_keys.add("escape", filter=has_completions)
+def _dismiss_commands(event: KeyPressEvent) -> None:
+    event.current_buffer.cancel_completion()
+
+
+@_prompt_keys.add("escape", "enter", filter=has_focus(DEFAULT_BUFFER) & is_multiline)
+def _insert_newline(event: KeyPressEvent) -> None:
+    event.current_buffer.cancel_completion()
+    event.current_buffer.newline()
+
+
+@_prompt_keys.add("enter", filter=has_focus(DEFAULT_BUFFER) & (has_completions | is_multiline))
+def _submit_draft(event: KeyPressEvent) -> None:
+    buffer = event.current_buffer
+    state = buffer.complete_state
+    if state is None:
+        buffer.validate_and_handle()
+        return
+    selected = state.current_completion
+    if selected is None and any(item.text.rstrip() == buffer.text for item in state.completions):
+        buffer.validate_and_handle()
+        return
+    completion = selected or state.completions[0]
+    buffer.apply_completion(completion)
+    if selected is not None and not completion.text.endswith(" "):
+        buffer.validate_and_handle()
+
+
 class Terminal:
     def __init__(self) -> None:
         self.console = Console(markup=False, highlight=False)
         self.interactive = sys.stdin.isatty()
-        self._prompt: PromptSession[str] | None = None
+        self._composer: PromptSession[str] | None = None
         self._menu_lock = asyncio.Lock()
         self._pending_menus = 0
         self._editor: asyncio.Task[str] | None = None
-        self._draft = ""
+        self._draft = Document()
         self._line = Text()
         self._output: list[RenderableType] = []
         self._output_task: asyncio.Task[None] | None = None
@@ -55,13 +130,15 @@ class Terminal:
             self._print(self._line)
             self._line = Text()
         self._line.append(tail, style)
-        if self._prompt is not None and self._output_task is None:
-            self._prompt.app.invalidate()
+        app = get_app_or_none()
+        if app is not None and self._output_task is None:
+            app.invalidate()
 
     def _print(self, renderable: RenderableType) -> None:
         self._output.append(renderable)
         if self._output_task is None:
-            if self._prompt is not None and self._prompt.app.is_running:
+            app = get_app_or_none()
+            if self.interactive and app is not None and app.is_running:
                 self._output_task = asyncio.create_task(self._print_above_prompt())
             else:
                 self._print_output()
@@ -87,9 +164,10 @@ class Terminal:
         self,
         label: str,
         *,
-        commands: list[str] | None = None,
+        commands: CommandSource | None = None,
         toolbar: Callable[[], str] | None = None,
-        default: str = "",
+        default: str | Document = "",
+        multiline: bool = False,
     ) -> str:
         if not self.interactive:
             line: str = await asyncio.to_thread(sys.stdin.readline)
@@ -97,10 +175,14 @@ class Terminal:
                 raise EOFError
             return line.rstrip("\r\n")
         await self.flush()
-        if self._prompt is None:
-            self._prompt = PromptSession()
-        self._prompt.app.erase_when_done = False
-        completer = WordCompleter(commands, sentence=True) if commands else None
+        if multiline:
+            if self._composer is None:
+                self._composer = PromptSession()
+            prompt = self._composer
+            prompt.app.erase_when_done = False
+        else:
+            prompt = PromptSession()
+        completer = SlashCompleter(commands) if commands else DummyCompleter()
 
         def message() -> str:
             app = get_app()
@@ -119,22 +201,28 @@ class Terminal:
                 return toolbar()[:width]
             return ""
 
-        return await self._prompt.prompt_async(
+        return await prompt.prompt_async(
             message,
             completer=completer,
+            complete_while_typing=Condition(
+                lambda: commands is not None and slash_prefix(get_app().current_buffer.document) is not None
+            ),
+            reserve_space_for_menu=6,
+            key_bindings=_prompt_keys,
+            multiline=multiline,
             bottom_toolbar=toolbar or "",
             rprompt=status_fallback,
             default=default,
             refresh_interval=0.25 if toolbar else 0,
         )
 
-    async def edit(self, label: str, *, commands: list[str], toolbar: Callable[[], str]) -> str:
+    async def edit(self, label: str, *, commands: CommandSource | None, toolbar: Callable[[], str]) -> str:
         if not self.interactive:
             return await self.read(label, commands=commands, toolbar=toolbar)
 
         async def read_draft() -> str:
             try:
-                return await self.read(label, commands=commands, toolbar=toolbar, default=self._draft)
+                return await self.read(label, commands=commands, toolbar=toolbar, default=self._draft, multiline=True)
             except KeyboardInterrupt as exc:
                 raise InputInterrupted from exc
 
@@ -145,7 +233,7 @@ class Terminal:
                 editor = self._editor = asyncio.create_task(read_draft())
                 try:
                     line = await asyncio.shield(editor)
-                    self._draft = ""
+                    self._draft = Document()
                     return line
                 except asyncio.CancelledError:
                     task = asyncio.current_task()
@@ -153,7 +241,7 @@ class Terminal:
                         raise
                     # An approval or question temporarily took over the terminal.
                 except (InputInterrupted, EOFError):
-                    self._draft = ""
+                    self._draft = Document()
                     raise
                 finally:
                     self._stop_editor()
@@ -162,9 +250,10 @@ class Terminal:
 
     def _stop_editor(self) -> None:
         if self._editor is not None and not self._editor.done():
-            if self._prompt is not None and self._prompt.app.is_running:
-                self._draft = self._prompt.default_buffer.text
-                self._prompt.app.erase_when_done = True
+            if self._composer is not None and self._composer.app.is_running:
+                self._composer.default_buffer.cancel_completion()
+                self._draft = self._composer.default_buffer.document
+                self._composer.app.erase_when_done = True
             self._editor.cancel()
 
     @asynccontextmanager
@@ -188,27 +277,13 @@ class Terminal:
         if not choices or not self.interactive:
             return None
         async with self.menu():
-            matches = list(enumerate(choices))
-            hint = "number or search, Enter to cancel" if search else "number, Enter to cancel"
-            while True:
-                shown = matches[:20] if search else matches
-                for index, (_, choice) in enumerate(shown, 1):
-                    self.write(f"  {index}. {choice}")
-                if not shown:
-                    self.write("No matches. Try another search.")
-                elif len(shown) < len(matches):
-                    self.write(f"Showing {len(shown)} of {len(matches)}. Type a search to narrow the list.")
-                try:
-                    answer = (await self.read(f"{label} ({hint}) > ", toolbar=toolbar)).strip()
-                except (EOFError, KeyboardInterrupt):
-                    return None
-                if answer.isdecimal() and len(answer) <= len(str(len(shown))):
-                    index = int(answer)
-                    if 1 <= index <= len(shown):
-                        return shown[index - 1][0]
-                if not search or not answer:
-                    return None
-                matches = [(i, choice) for i, choice in enumerate(choices) if answer.casefold() in choice.casefold()]
+            await self.flush()
+            return await pick(
+                " ".join(visible(label).split()),
+                [" ".join(visible(choice).split()) for choice in choices],
+                search=search,
+                toolbar=toolbar,
+            )
 
     def plan(self, entries: list[schema.PlanEntry]) -> None:
         self.write("Plan", style="bold")

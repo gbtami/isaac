@@ -15,9 +15,9 @@ from acp import schema
 from prompt_toolkit.application import create_app_session
 from pydantic import TypeAdapter
 
-from isaac_client.client import TerminalClient
+from isaac_client.client import SessionState, TerminalClient
 from isaac_client.display import Terminal
-from isaac_client.history import SessionHistory
+from isaac_client.history import SessionEntry, SessionHistory
 from isaac_client.repl import interactive_loop
 
 McpServer = schema.McpServerStdio | schema.HttpMcpServer | schema.SseMcpServer | schema.AcpMcpServer
@@ -72,14 +72,19 @@ async def run_client(
             client.history = SessionHistory(command, cwd)
         if (resume or continue_latest or session_id is not None) and client.history is None:
             raise RuntimeError("This agent does not advertise session/load.")
-        if resume or continue_latest:
+
+        async def saved_sessions() -> list[SessionEntry]:
             assert client.history is not None
-            entries = client.history.recent()
             if capabilities.session_capabilities and capabilities.session_capabilities.list is not None:
                 try:
-                    entries = await client.history.discover(connection)
+                    return await client.history.discover(connection)
                 except acp.RequestError as exc:
                     terminal.write(f"Could not list agent sessions: {exc}", style="yellow")
+            return client.history.recent()
+
+        title = None
+        if resume or continue_latest:
+            entries = await saved_sessions()
             if not entries:
                 raise RuntimeError("No sessions saved for this agent command and workspace.")
             if resume and not terminal.interactive:
@@ -92,17 +97,47 @@ async def run_client(
             if choice is None:
                 return 0
             session_id = entries[choice].session_id
-            client.title = entries[choice].title
+            title = entries[choice].title
         elif session_id is not None and client.history is not None:
-            client.title = next(
-                (entry.title for entry in client.history.recent() if entry.session_id == session_id), None
-            )
+            title = next((entry.title for entry in client.history.recent() if entry.session_id == session_id), None)
+
+        async def load_session(target: str, target_title: str | None) -> schema.LoadSessionResponse:
+            client.finish_output()
+            previous = client.session
+            client.session = SessionState(session_id=target, title=target_title, loading=True)
+            try:
+                return await connection.load_session(cwd=str(cwd), session_id=target, mcp_servers=mcp_servers)
+            except BaseException:
+                client.session = previous
+                client.finish_output()
+                raise
+
+        def accept_session(response: schema.NewSessionResponse | schema.LoadSessionResponse) -> None:
+            if isinstance(response, schema.NewSessionResponse):
+                client.session.session_id = response.session_id
+            if response.config_options is not None:
+                client.session.options = response.config_options
+            if response.modes is not None:
+                client.session.modes = response.modes
+            client.session.loading = False
+            client.remember()
+            client.finish_output()
 
         async def open_session() -> schema.NewSessionResponse | schema.LoadSessionResponse:
             if session_id is None:
                 return await connection.new_session(cwd=str(cwd), mcp_servers=mcp_servers)
-            client.session_id = session_id
-            return await connection.load_session(cwd=str(cwd), session_id=session_id, mcp_servers=mcp_servers)
+            return await load_session(session_id, title)
+
+        async def resume_session() -> None:
+            entries = [entry for entry in await saved_sessions() if entry.session_id != client.session.session_id]
+            if not entries:
+                terminal.write("No other saved sessions for this agent and workspace.")
+                return
+            choice = await terminal.choose("Resume session", [entry.label() for entry in entries], search=True)
+            if choice is not None:
+                entry = entries[choice]
+                accept_session(await load_session(entry.session_id, entry.title))
+                terminal.write(f"Session {entry.session_id}", style="dim")
 
         try:
             session = await open_session()
@@ -116,18 +151,11 @@ async def run_client(
             await connection.authenticate(method_id=methods[choice].id)
             session = await open_session()
 
-        if isinstance(session, schema.NewSessionResponse):
-            session_id = session.session_id
-        assert session_id is not None
-        client.session_id = session_id
-        if session.config_options is not None:
-            client.options = session.config_options
-        client.modes = session.modes
-        client.remember()
-        client.finish_output()
+        accept_session(session)
         terminal.write(f"{client.agent} · {cwd}")
-        terminal.write(f"Session {session_id} · /client:help", style="dim")
-        await interactive_loop(connection, session_id, client)
+        hint = "Type / for commands" if terminal.interactive else "/client:help"
+        terminal.write(f"Session {client.session.session_id} · {hint}", style="dim")
+        await interactive_loop(connection, client, resume_session)
     return 0
 
 

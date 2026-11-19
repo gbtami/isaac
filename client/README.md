@@ -41,16 +41,24 @@ above without `--model`.
 
 ## Terminal controls
 
+- Type `/` to see client and agent commands. Use ↑/↓ to select and Enter to confirm. Selecting a
+  command with an argument hint fills in its name so you can enter the arguments.
+- Enter sends the draft, Alt+Enter inserts a newline, and multiline paste stays in the draft until
+  you send it.
 - `/client:model` opens a model selector when the agent advertises a model option.
 - `/client:config` opens all advertised session config options, including grouped choices and toggles.
 - `/client:plan` shows the latest plan. The status line shows plan progress, the active tool, and
   elapsed time. Reads and searches appear in grouped summaries. Failures and edit diffs appear inline.
 - `/client:help` lists client controls and the agent's advertised slash commands.
-- `/client:quit` exits. At the follow-up prompt, Enter queues another turn and Ctrl+C stops the
-  current turn, clears the queue, and returns to the prompt when the agent acknowledges cancellation.
+- `/client:quit` exits. While the agent is working, Enter queues a follow-up. Ctrl+C requests
+  cancellation and clears the queue.
+
+Short names such as `/model` and `/quit` also work when the agent has not advertised those names.
+Use ↑/↓ and Enter in pickers, or type a choice number. Press Esc to close a picker. Model, setting,
+and session pickers filter as you type.
 
 Permission requests show the supplied options and edit diffs when available. Select an option explicitly
-in the terminal. Enter, EOF and scripted input cancel the request.
+in the terminal. Enter with no option selected, EOF and scripted input cancel the request.
 
 When an agent asks a structured question, enter the requested answers and review them before sending.
 You can edit the answers or decline the form. Isaac offers these questions to clients that advertise
@@ -58,13 +66,14 @@ ACP form elicitation.
 
 ## Resume
 
-Run the same agent command from the same project with `--resume` to open the named session picker.
+Use `/client:resume` from the idle prompt to switch to another saved session in the current workspace.
+To open the picker at startup, run the same agent command from the same project with `--resume`.
 
 ```bash
 isaac-client --resume --project-dir ~/playground isaac
 ```
 
-Type part of a title to filter the picker, then choose a result by number. Use `--continue` to
+Type part of a title to filter the picker. Use `--continue` to
 open the latest session for this agent and project, or `--session ID` to open a known session ID.
 Resume requires an agent that advertises
 `session/load`. The client stores session IDs and titles in its own SQLite database under the platform
