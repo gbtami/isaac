@@ -50,8 +50,8 @@ above without `--model`.
 - `/config` opens all advertised session config options, including grouped choices and toggles.
 - `/plan` shows the latest plan. `/help` shows available commands. The client supplies either
   command when the agent does not advertise it.
-- `/quit` exits. While the agent is working, Enter queues a follow-up. Ctrl+C requests
-  cancellation and clears the queue.
+- `/quit` exits. Ctrl+D also exits from an empty idle prompt. While the agent is working, Enter
+  queues a follow-up and Ctrl+C requests cancellation and clears the queue.
 
 Use ↑/↓ and Enter in pickers, or type a choice number. Press Esc to close a picker. Model, setting,
 and session pickers filter as you type.

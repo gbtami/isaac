@@ -17,7 +17,7 @@ COMMANDS = {
     "plan": (None, "Show the latest agent plan"),
     "resume": ("/sessions", "Resume another session in this workspace"),
     "help": (None, "List client and agent commands"),
-    "quit": ("/exit", "Exit"),
+    "quit": ("/exit", "Exit (Ctrl+D at an empty idle prompt)"),
 }
 
 

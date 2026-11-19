@@ -118,7 +118,8 @@ async def test_preserves_streamed_lines_across_interactive_turns(
             await wait_for_output(transcript, f"{prefix}Turn startedTurn finished\n")
             pipe.send_text("Echo second\n")
             await wait_for_output(transcript, f"{prefix}Echo second\n")
-            pipe.send_text("/quit\n")
+            assert "Ctrl+D quit" in transcript.getvalue()
+            pipe.send_text("\x04")
             assert await client == 0
 
 
