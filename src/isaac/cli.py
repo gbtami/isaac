@@ -92,7 +92,7 @@ def main(argv: list[str] | None = None) -> None:
     with warnings.catch_warnings():
         warnings.filterwarnings(
             "ignore",
-            message=r"^'pydantic_ai_harness\.experimental\.acp' is experimental",
+            message=r"^`pydantic_ai_harness\.experimental\.acp` is experimental",
             category=HarnessExperimentalWarning,
         )
         from isaac.server import serve
