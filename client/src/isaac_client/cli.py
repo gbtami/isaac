@@ -12,6 +12,7 @@ from typing import cast
 import acp
 from acp import schema
 from pydantic import TypeAdapter
+from prompt_toolkit.patch_stdout import patch_stdout
 
 from isaac_client.client import TerminalClient
 from isaac_client.display import Terminal
@@ -117,7 +118,13 @@ async def run_client(
         client.finish_output()
         terminal.write(f"{client.agent} · {cwd}")
         terminal.write(f"Session {session_id} · /client:help", style="dim")
-        await interactive_loop(connection, session_id, client)
+        if terminal.interactive:
+            # Keep one stdout proxy alive across prompts and queued-input editors.
+            # Stopping an editor must not discard or reorder streamed agent output.
+            with patch_stdout():
+                await interactive_loop(connection, session_id, client)
+        else:
+            await interactive_loop(connection, session_id, client)
     return 0
 
 

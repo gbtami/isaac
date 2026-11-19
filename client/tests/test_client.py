@@ -3,7 +3,8 @@
 import asyncio
 import os
 import sys
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager
 from pathlib import Path
 from unittest.mock import AsyncMock
 
@@ -77,6 +78,30 @@ async def test_config_approval_and_named_resume(
         assert await cli.run_client(command, tmp_path, [], resume=True) == 0
         assert terminal.menus["Resume session"][0].startswith("Agent-assigned title  [demo]")
         assert "Session history replayed over ACP." in capsys.readouterr().out
+
+
+async def test_one_stdout_proxy_across_interactive_turns(
+    command: list[str], tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    terminal = ScriptedTerminal(["Echo first", "Echo second"], [])
+    monkeypatch.setattr(cli, "Terminal", lambda: terminal)
+    proxy_events: list[str] = []
+
+    @contextmanager
+    def track_stdout_proxy() -> Iterator[None]:
+        proxy_events.append("opened")
+        try:
+            yield
+        finally:
+            proxy_events.append("closed")
+
+    monkeypatch.setattr(cli, "patch_stdout", track_stdout_proxy)
+    async with asyncio.timeout(15):
+        assert await cli.run_client(command, tmp_path, []) == 0
+    assert proxy_events == ["opened", "closed"]
+    output = capsys.readouterr().out
+    assert "SDK Demo: Echo first" in output
+    assert "SDK Demo: Echo second" in output
 
 
 async def test_resume_filters_choices_by_title(monkeypatch: pytest.MonkeyPatch) -> None:

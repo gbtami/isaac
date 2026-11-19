@@ -10,7 +10,6 @@ from acp import schema
 from prompt_toolkit import PromptSession
 from prompt_toolkit.application import get_app
 from prompt_toolkit.completion import WordCompleter
-from prompt_toolkit.patch_stdout import patch_stdout
 from rich.console import Console
 from rich.syntax import Syntax
 from rich.table import Table
@@ -67,15 +66,14 @@ class Terminal:
                 return toolbar()[:width]
             return ""
 
-        with patch_stdout():
-            return await self._prompt.prompt_async(
-                label,
-                completer=completer,
-                bottom_toolbar=toolbar or "",
-                rprompt=status_fallback,
-                default=default,
-                refresh_interval=0.25 if toolbar else 0,
-            )
+        return await self._prompt.prompt_async(
+            label,
+            completer=completer,
+            bottom_toolbar=toolbar or "",
+            rprompt=status_fallback,
+            default=default,
+            refresh_interval=0.25 if toolbar else 0,
+        )
 
     async def edit(self, label: str, *, commands: list[str], toolbar: Callable[[], str]) -> str:
         if not self.interactive:
