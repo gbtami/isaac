@@ -83,6 +83,8 @@ def main(argv: list[str] | None = None) -> None:
             raise SystemExit(130) from None
         return
     settings = parse_settings(argv)
+    # Keep Pydantic AI's first-run banner off ACP clients' interactive terminal.
+    os.environ.setdefault("PYDANTIC_AI_NO_BANNER", "1")
     logging.basicConfig(stream=sys.stderr, level=logging.WARNING)
 
     # Harness ACP is intentionally experimental; suppress only its import-time notice.
