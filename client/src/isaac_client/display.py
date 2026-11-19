@@ -8,9 +8,9 @@ from contextlib import asynccontextmanager
 
 from acp import schema
 from prompt_toolkit import PromptSession
-from prompt_toolkit.application import get_app
+from prompt_toolkit.application import get_app, in_terminal
 from prompt_toolkit.completion import WordCompleter
-from rich.console import Console
+from rich.console import Console, RenderableType
 from rich.syntax import Syntax
 from rich.table import Table
 from rich.text import Text
@@ -38,9 +38,50 @@ class Terminal:
         self._pending_menus = 0
         self._editor: asyncio.Task[str] | None = None
         self._draft = ""
+        self._line = Text()
+        self._output: list[RenderableType] = []
+        self._output_task: asyncio.Task[None] | None = None
 
     def write(self, text: str, *, end: str = "\n", style: str | None = None) -> None:
-        self.console.print(Text(visible(text), style=style or ""), end=end, soft_wrap=True)
+        text = visible(text)
+        if not self.interactive:
+            self.console.print(Text(text, style=style or ""), end=end, soft_wrap=True)
+            return
+        # Keep the unfinished line inside the prompt layout. The transcript
+        # always leaves the cursor at the start of a new line for a redraw.
+        complete, newline, tail = (text + end).rpartition("\n")
+        if newline:
+            self._line.append(complete, style)
+            self._print(self._line)
+            self._line = Text()
+        self._line.append(tail, style)
+        if self._prompt is not None and self._output_task is None:
+            self._prompt.app.invalidate()
+
+    def _print(self, renderable: RenderableType) -> None:
+        self._output.append(renderable)
+        if self._output_task is None:
+            if self._prompt is not None and self._prompt.app.is_running:
+                self._output_task = asyncio.create_task(self._print_above_prompt())
+            else:
+                self._print_output()
+
+    def _print_output(self) -> None:
+        with self.console:
+            for renderable in self._output:
+                self.console.print(renderable, soft_wrap=isinstance(renderable, Text))
+        self._output.clear()
+
+    async def _print_above_prompt(self) -> None:
+        try:
+            async with in_terminal():
+                self._print_output()
+        finally:
+            self._output_task = None
+
+    async def flush(self) -> None:
+        if self._output_task is not None:
+            await asyncio.shield(self._output_task)
 
     async def read(
         self,
@@ -55,9 +96,21 @@ class Terminal:
             if not line:
                 raise EOFError
             return line.rstrip("\r\n")
+        await self.flush()
         if self._prompt is None:
             self._prompt = PromptSession()
+        self._prompt.app.erase_when_done = False
         completer = WordCompleter(commands, sentence=True) if commands else None
+
+        def message() -> str:
+            app = get_app()
+            if self._line and not app.is_done:
+                preview = self._line.plain.expandtabs(self.console.tab_size)
+                limit = 2 * app.output.get_size().columns
+                if len(preview) > limit:
+                    preview = "…" + preview[1 - limit :]
+                return f"{preview}\n{label}"
+            return label
 
         def status_fallback() -> str:
             app = get_app()
@@ -67,7 +120,7 @@ class Terminal:
             return ""
 
         return await self._prompt.prompt_async(
-            label,
+            message,
             completer=completer,
             bottom_toolbar=toolbar or "",
             rprompt=status_fallback,
@@ -111,6 +164,7 @@ class Terminal:
         if self._editor is not None and not self._editor.done():
             if self._prompt is not None and self._prompt.app.is_running:
                 self._draft = self._prompt.default_buffer.text
+                self._prompt.app.erase_when_done = True
             self._editor.cancel()
 
     @asynccontextmanager
@@ -167,7 +221,7 @@ class Terminal:
         for entry in entries:
             style = "green" if entry.status == "completed" else "yellow"
             table.add_row(Text(entry.status.replace("_", " "), style=style), Text(visible(entry.content)))
-        self.console.print(table)
+        self._print(table)
 
     def diff(self, content: schema.FileEditToolCallContent) -> None:
         diff = "".join(
@@ -179,4 +233,4 @@ class Terminal:
             )
         )
         if diff:
-            self.console.print(Syntax(visible(diff), "diff", theme="ansi_dark"))
+            self._print(Syntax(visible(diff), "diff", theme="ansi_dark"))

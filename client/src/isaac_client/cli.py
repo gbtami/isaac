@@ -13,7 +13,6 @@ from typing import cast
 import acp
 from acp import schema
 from prompt_toolkit.application import create_app_session
-from prompt_toolkit.patch_stdout import patch_stdout
 from pydantic import TypeAdapter
 
 from isaac_client.client import TerminalClient
@@ -40,6 +39,8 @@ async def run_client(
         if terminal.interactive:
             # Share this app session with the ACP tasks that open approval and question menus.
             stack.enter_context(create_app_session())
+            stack.push_async_callback(terminal.flush)
+            stack.callback(client.finish_output)
         # The SDK routes unadvertised client operations independently of the required callbacks.
         connection, _process = await stack.enter_async_context(
             acp.spawn_agent_process(
@@ -126,13 +127,7 @@ async def run_client(
         client.finish_output()
         terminal.write(f"{client.agent} · {cwd}")
         terminal.write(f"Session {session_id} · /client:help", style="dim")
-        if terminal.interactive:
-            # Keep one stdout proxy alive across prompts and queued-input editors.
-            # Stopping an editor must not discard or reorder streamed agent output.
-            with patch_stdout():
-                await interactive_loop(connection, session_id, client)
-        else:
-            await interactive_loop(connection, session_id, client)
+        await interactive_loop(connection, session_id, client)
     return 0
 
 

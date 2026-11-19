@@ -1,14 +1,19 @@
 """Exercise client startup, choices, and session replay over real ACP stdio."""
 
 import asyncio
+import io
 import os
 import sys
-from collections.abc import Callable, Iterator
-from contextlib import contextmanager
+from collections.abc import Callable
 from pathlib import Path
 from unittest.mock import AsyncMock
 
 import pytest
+from prompt_toolkit.application import create_app_session
+from prompt_toolkit.data_structures import Size
+from prompt_toolkit.input import create_pipe_input
+from prompt_toolkit.output.vt100 import Vt100_Output
+from rich.console import Console
 
 from isaac_client import cli
 from isaac_client.display import Terminal
@@ -80,28 +85,32 @@ async def test_config_approval_and_named_resume(
         assert "Session history replayed over ACP." in capsys.readouterr().out
 
 
-async def test_one_stdout_proxy_across_interactive_turns(
-    command: list[str], tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+async def test_preserves_streamed_lines_across_interactive_turns(
+    command: list[str], tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    terminal = ScriptedTerminal(["Echo first", "Echo second"], [])
+    transcript = io.StringIO()
+    output = Vt100_Output(transcript, lambda: Size(rows=24, columns=100), enable_cpr=False)
+    terminal = Terminal()
+    terminal.interactive = True
+    terminal.console = Console(file=transcript, force_terminal=True, color_system="standard")
     monkeypatch.setattr(cli, "Terminal", lambda: terminal)
-    proxy_events: list[str] = []
 
-    @contextmanager
-    def track_stdout_proxy() -> Iterator[None]:
-        proxy_events.append("opened")
-        try:
-            yield
-        finally:
-            proxy_events.append("closed")
+    async def wait_for_output(text: str) -> None:
+        while text not in transcript.getvalue():
+            await asyncio.sleep(0.01)
 
-    monkeypatch.setattr(cli, "patch_stdout", track_stdout_proxy)
-    async with asyncio.timeout(15):
-        assert await cli.run_client(command, tmp_path, []) == 0
-    assert proxy_events == ["opened", "closed"]
-    output = capsys.readouterr().out
-    assert "SDK Demo: Echo first" in output
-    assert "SDK Demo: Echo second" in output
+    with create_pipe_input() as pipe, create_app_session(input=pipe, output=output):
+        async with asyncio.timeout(15), asyncio.TaskGroup() as tasks:
+            client = tasks.create_task(cli.run_client(command, tmp_path, []))
+            await wait_for_output("❯")
+            pipe.send_text("Wait then end\n")
+            await wait_for_output("SDK Demo: Turn started")
+            prefix = "\x1b[1mSDK Demo: \x1b[0m"
+            await wait_for_output(f"{prefix}Turn startedTurn finished\n")
+            pipe.send_text("Echo second\n")
+            await wait_for_output(f"{prefix}Echo second\n")
+            pipe.send_text("/client:quit\n")
+            assert await client == 0
 
 
 async def test_resume_filters_choices_by_title(monkeypatch: pytest.MonkeyPatch) -> None:
