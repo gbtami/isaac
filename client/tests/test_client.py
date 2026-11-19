@@ -8,7 +8,9 @@ from collections.abc import Callable
 from pathlib import Path
 
 import pytest
+from acp import schema
 from prompt_toolkit.application import create_app_session
+from prompt_toolkit.completion import CompleteEvent
 from prompt_toolkit.data_structures import Size
 from prompt_toolkit.document import Document
 from prompt_toolkit.input import create_pipe_input
@@ -16,8 +18,10 @@ from prompt_toolkit.output.vt100 import Vt100_Output
 from rich.console import Console
 
 from isaac_client import cli
-from isaac_client.display import CommandSource, Terminal
+from isaac_client.client import TerminalClient
+from isaac_client.display import CommandSource, SlashCompleter, Terminal
 from isaac_client.history import SessionHistory
+from isaac_client.repl import command_catalog
 
 
 @pytest.fixture
@@ -48,7 +52,7 @@ class ScriptedTerminal(Terminal):
             return await asyncio.Future[str]()
         if toolbar:
             self.toolbars.append(toolbar())
-        return next(self.prompts, "/client:quit")
+        return next(self.prompts, "/quit")
 
     async def choose(
         self, label: str, choices: list[str], *, toolbar: Callable[[], str] | None = None, search: bool = False
@@ -66,7 +70,7 @@ async def test_config_approval_and_named_resume(
     command: list[str], tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
     terminal = ScriptedTerminal(
-        ["/client:help", "/client:model", "/client:config", "Demo prompt", "/client:plan"],
+        ["/help", "/pick-model", "/config", "Demo prompt", "/plan"],
         [1, 1, 0, 1],
     )
     monkeypatch.setattr(cli, "Terminal", lambda: terminal)
@@ -75,6 +79,9 @@ async def test_config_approval_and_named_resume(
         assert await cli.run_client(command, tmp_path, []) == 0
         output = capsys.readouterr().out
         assert "/demo  Run the demo" in output
+        assert "/config  Change an advertised session setting" in output
+        assert "/client:config  Change an advertised session setting" not in output
+        assert "/pick-model  Choose the model offered by the agent" in output
         assert "model=two verbose=True choice=reject" in output
         assert "Check the result" in output
         assert "Approve tool call: Edit demo.txt" in output
@@ -111,8 +118,30 @@ async def test_preserves_streamed_lines_across_interactive_turns(
             await wait_for_output(transcript, f"{prefix}Turn startedTurn finished\n")
             pipe.send_text("Echo second\n")
             await wait_for_output(transcript, f"{prefix}Echo second\n")
-            pipe.send_text("/client:quit\n")
+            pipe.send_text("/quit\n")
             assert await client == 0
+
+
+def test_slash_palette_uses_agent_plan_and_help_and_keeps_model_picker() -> None:
+    client = TerminalClient(Terminal())
+    client.session.commands = [
+        schema.AvailableCommand(name=name, description=name) for name in ("model", "plan", "help")
+    ]
+    completer = SlashCompleter(lambda: command_catalog(client).values())
+
+    names = {item.text for item in completer.get_completions(Document("/"), CompleteEvent())}
+    assert names == {"/model", "/pick-model", "/plan", "/help", "/config", "/quit"}
+    commands = command_catalog(client)
+    assert commands["/plan"].local is None
+    assert commands["/help"].local is None
+    assert commands["/pick-model"].local == "model"
+    assert not list(completer.get_completions(Document("/client:"), CompleteEvent()))
+
+    client.session.commands.append(schema.AvailableCommand(name="pick-model", description="Agent model picker"))
+    commands = command_catalog(client)
+    assert commands["/model"].local is None
+    assert commands["/pick-model"].local is None
+    assert all(command.local != "model" for command in commands.values())
 
 
 async def test_slash_palette_and_multiline_composer(

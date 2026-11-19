@@ -45,17 +45,19 @@ above without `--model`.
   command with an argument hint fills in its name so you can enter the arguments.
 - Enter sends the draft, Alt+Enter inserts a newline, and multiline paste stays in the draft until
   you send it.
-- `/client:model` opens a model selector when the agent advertises a model option.
-- `/client:config` opens all advertised session config options, including grouped choices and toggles.
-- `/client:plan` shows the latest plan. The status line shows plan progress, the active tool, and
-  elapsed time. Reads and searches appear in grouped summaries. Failures and edit diffs appear inline.
-- `/client:help` lists client controls and the agent's advertised slash commands.
-- `/client:quit` exits. While the agent is working, Enter queues a follow-up. Ctrl+C requests
+- `/model` opens the client model picker when the agent leaves that name available. With Isaac,
+  `/model` is the agent command and `/pick-model` opens the picker.
+- `/config` opens all advertised session config options, including grouped choices and toggles.
+- `/plan` shows the latest plan. `/help` shows available commands. The client supplies either
+  command when the agent does not advertise it.
+- `/quit` exits. While the agent is working, Enter queues a follow-up. Ctrl+C requests
   cancellation and clears the queue.
 
-Short names such as `/model` and `/quit` also work when the agent has not advertised those names.
 Use ↑/↓ and Enter in pickers, or type a choice number. Press Esc to close a picker. Model, setting,
 and session pickers filter as you type.
+
+The status line shows plan progress, the active tool, and elapsed time. Reads and searches appear
+in grouped summaries. Failures and edit diffs appear inline.
 
 Permission requests show the supplied options and edit diffs when available. Select an option explicitly
 in the terminal. Enter with no option selected, EOF and scripted input cancel the request.
@@ -66,7 +68,7 @@ ACP form elicitation.
 
 ## Resume
 
-Use `/client:resume` from the idle prompt to switch to another saved session in the current workspace.
+Use `/resume` from the idle prompt to switch to another saved session in the current workspace.
 To open the picker at startup, run the same agent command from the same project with `--resume`.
 
 ```bash

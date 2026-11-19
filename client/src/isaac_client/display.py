@@ -63,14 +63,15 @@ class SlashCompleter(Completer):
         if prefix is None:
             return
         for command in self.commands():
-            if command.name.casefold().startswith(prefix):
-                detail = f"[{command.hint}]  {command.description}" if command.hint else command.description
-                yield Completion(
-                    command.name + (" " if command.hint else ""),
-                    start_position=-len(document.text),
-                    display=command.name,
-                    display_meta=" ".join(visible(detail).split()),
-                )
+            if not command.name.casefold().startswith(prefix):
+                continue
+            detail = f"[{command.hint}]  {command.description}" if command.hint else command.description
+            yield Completion(
+                command.name + (" " if command.hint else ""),
+                start_position=-len(document.text),
+                display=command.name,
+                display_meta=" ".join(visible(detail).split()),
+            )
 
 
 _prompt_keys = KeyBindings()

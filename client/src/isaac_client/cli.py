@@ -153,7 +153,7 @@ async def run_client(
 
         accept_session(session)
         terminal.write(f"{client.agent} · {cwd}")
-        hint = "Type / for commands" if terminal.interactive else "/client:help"
+        hint = "Type / for commands" if terminal.interactive else "/help"
         terminal.write(f"Session {client.session.session_id} · {hint}", style="dim")
         await interactive_loop(connection, client, resume_session)
     return 0

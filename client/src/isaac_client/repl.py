@@ -12,12 +12,12 @@ from isaac_client.client import TerminalClient
 from isaac_client.display import CommandSource, InputInterrupted, SlashCommand, visible
 
 COMMANDS = {
-    "/client:model": "Choose the model offered by the agent",
-    "/client:config": "Change an advertised session setting",
-    "/client:plan": "Show the latest agent plan",
-    "/client:resume": "Resume another session in this workspace",
-    "/client:help": "List client and agent commands",
-    "/client:quit": "Exit",
+    "model": ("/pick-model", "Choose the model offered by the agent"),
+    "config": ("/settings", "Change an advertised session setting"),
+    "plan": (None, "Show the latest agent plan"),
+    "resume": ("/sessions", "Resume another session in this workspace"),
+    "help": (None, "List client and agent commands"),
+    "quit": ("/exit", "Exit"),
 }
 
 
@@ -27,12 +27,13 @@ def command_catalog(client: TerminalClient) -> dict[str, SlashCommand]:
         for item in client.session.commands
         if item.name and visible(item.name) == item.name and not any(char.isspace() for char in item.name)
     }
-    for name, description in COMMANDS.items():
-        if name == "/client:resume" and (client.history is None or not client.terminal.interactive):
+    for name, (alternate, description) in COMMANDS.items():
+        if name == "resume" and (client.history is None or not client.terminal.interactive):
             continue
-        alias = "/" + name.removeprefix("/client:")
-        commands.setdefault(alias, SlashCommand(alias, description, local=name))
-        commands[name] = SlashCommand(name, description, local=name)
+        shortcut = f"/{name}"
+        alias = alternate if shortcut in commands else shortcut
+        if alias is not None and alias not in commands:
+            commands[alias] = SlashCommand(alias, description, local=name)
     return commands
 
 
@@ -62,22 +63,22 @@ async def interactive_loop(
 
         entry = command_catalog(client).get(line.split(maxsplit=1)[0]) if "\n" not in line else None
         local = entry.local if entry else None
-        if local == "/client:quit":
+        if local == "quit":
             return
 
         session_id = client.session.session_id
         assert session_id is not None
         try:
-            if local in {"/client:config", "/client:model"}:
-                await client.select_config(connection, session_id, "model" if local == "/client:model" else None)
-            elif local == "/client:plan":
+            if local in {"config", "model"}:
+                await client.select_config(connection, session_id, "model" if local == "model" else None)
+            elif local == "plan":
                 terminal.plan(client.session.plan)
-            elif local == "/client:resume":
+            elif local == "resume":
                 if from_queue:
-                    terminal.write("Run /client:resume from the idle prompt.", style="yellow")
+                    terminal.write("Open the session picker from the idle prompt.", style="yellow")
                 else:
                     await resume_session()
-            elif local == "/client:help":
+            elif local == "help":
                 for item in commands():
                     hint = f" [{item.hint}]" if item.hint else ""
                     terminal.write(f"{item.name}{hint}  {item.description}")
