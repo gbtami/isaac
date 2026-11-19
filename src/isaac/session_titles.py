@@ -44,7 +44,7 @@ class SessionTitles(AbstractCapability[SessionSettings]):
         if self.title:
             await self.publish()
         else:
-            saved = await self.store.load(self.session.session_id)
+            saved = await self.store.read_snapshot(self.session.session_id)
             for update in saved.updates if saved else []:
                 if isinstance(update, schema.UserMessageChunk) and isinstance(update.content, schema.TextContentBlock):
                     self.first_prompt = prompt_text(update.content.text)

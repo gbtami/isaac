@@ -58,7 +58,7 @@ def build_acp_adapter(
         capabilities: list[AbstractCapability[SessionSettings]] = [
             Planning(store=plan, tools=["write_plan"]),
             ReportContextUsage(context_window=settings.context_window),
-            store.checkpoints(session.session_id),
+            store.checkpoints(session),
             ui,
             titles,
             *mcp_capabilities(session),

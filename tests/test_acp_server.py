@@ -3,6 +3,7 @@
 import asyncio
 import json
 import sys
+from collections.abc import Callable
 from pathlib import Path
 from typing import cast
 
@@ -17,6 +18,7 @@ class RecordingClient:
 
     def __init__(self) -> None:
         self.updates: list[tuple[str, object]] = []
+        self._update_received = asyncio.Event()
         self.approvals: list[schema.ToolCallUpdate] = []
         self.approval_kinds: list[set[str]] = []
         self.permission_started = asyncio.Event()
@@ -28,6 +30,12 @@ class RecordingClient:
 
     async def session_update(self, session_id: str, update: object, **_kwargs: object) -> None:
         self.updates.append((session_id, update))
+        self._update_received.set()
+
+    async def wait_for_update(self, session_id: str, matches: Callable[[object], bool], *, after: int = 0) -> None:
+        while not any(received == session_id and matches(update) for received, update in self.updates[after:]):
+            self._update_received.clear()
+            await self._update_received.wait()
 
     async def request_permission(
         self,
@@ -650,6 +658,15 @@ async def test_session_load_after_process_restart(tmp_path: Path) -> None:
         assert loaded.config_options[0].current_value == "fixture:secondary"
         assert not (tmp_path / "saved.txt").exists()
         assert resumed.approvals == []
+        # The SDK dispatches replay notifications independently of the load response.
+        await resumed.wait_for_update(
+            session.session_id,
+            lambda update: (
+                isinstance(update, schema.UserMessageChunk)
+                and isinstance(update.content, schema.TextContentBlock)
+                and '"tool": "write_plan"' in update.content.text
+            ),
+        )
         assert any(isinstance(update, schema.UserMessageChunk) for _, update in resumed.updates)
         assert any(isinstance(update, schema.AgentMessageChunk) for _, update in resumed.updates)
         assert any(isinstance(update, schema.ToolCallStart) for _, update in resumed.updates)
@@ -665,16 +682,23 @@ async def test_session_load_after_process_restart(tmp_path: Path) -> None:
         start = len(resumed.updates)
         response = await connection.prompt(session_id=session.session_id, prompt=[acp.text_block("/plan")])
         assert response.stop_reason == "end_turn"
-        assert any(
-            isinstance(update, schema.AgentMessageChunk)
-            and isinstance(update.content, schema.TextContentBlock)
-            and "Continue the task" in update.content.text
-            for _, update in resumed.updates[start:]
+        await resumed.wait_for_update(
+            session.session_id,
+            lambda update: (
+                isinstance(update, schema.AgentMessageChunk)
+                and isinstance(update.content, schema.TextContentBlock)
+                and "Continue the task" in update.content.text
+            ),
+            after=start,
         )
         start = len(resumed.updates)
         response = await connection.prompt(
             session_id=session.session_id,
             prompt=[acp.text_block(json.dumps({"tool": "history_length", "args": {}}))],
+        )
+        assert response.stop_reason == "end_turn"
+        await resumed.wait_for_update(
+            session.session_id, lambda update: isinstance(update, schema.AgentMessageChunk), after=start
         )
         assert response.stop_reason == "end_turn"
         length = "".join(
@@ -687,14 +711,75 @@ async def test_session_load_after_process_restart(tmp_path: Path) -> None:
         empty = await connection.load_session(session_id=untouched.session_id, cwd=str(tmp_path), mcp_servers=[])
         assert empty is not None and empty.config_options is not None
         assert empty.config_options[0].current_value == "fixture:primary"
-        # The SDK dispatches session notifications independently of the request response.
-        await asyncio.sleep(0)
+        await resumed.wait_for_update(untouched.session_id, lambda update: isinstance(update, schema.AgentPlanUpdate))
         plans = [
             update
             for received, update in resumed.updates
             if received == untouched.session_id and isinstance(update, schema.AgentPlanUpdate)
         ]
         assert plans[-1].entries == []
+
+
+async def test_stale_session_cannot_replace_a_newer_turn(tmp_path: Path) -> None:
+    fixture = Path(__file__).with_name("acp_fixture.py")
+    stale = RecordingClient()
+    stale.allow = False
+    stale.permission_gate = asyncio.Event()
+    write = json.dumps({"tool": "write_file", "args": {"path": "stale.txt", "content": "stale turn"}})
+    newer = "Keep the newer turn"
+    reopened = RecordingClient()
+
+    async with asyncio.timeout(30):
+        async with (
+            acp.spawn_agent_process(cast(Client, RecordingClient()), sys.executable, str(fixture)) as (first, _),
+            acp.spawn_agent_process(cast(Client, stale), sys.executable, str(fixture)) as (second, _),
+        ):
+            for connection in (first, second):
+                await connection.initialize(protocol_version=acp.PROTOCOL_VERSION)
+            session_id = (await first.new_session(cwd=str(tmp_path), mcp_servers=[])).session_id
+            await first.prompt(session_id=session_id, prompt=[acp.text_block("Initial shared turn")])
+            await second.load_session(session_id=session_id, cwd=str(tmp_path), mcp_servers=[])
+            async with asyncio.TaskGroup() as turns:
+                pending = turns.create_task(second.prompt(session_id=session_id, prompt=[acp.text_block(write)]))
+                await stale.permission_started.wait()
+                await first.prompt(session_id=session_id, prompt=[acp.text_block(newer)])
+                stale.permission_gate.set()
+            assert pending.result().stop_reason == "end_turn"
+            await stale.wait_for_update(
+                session_id,
+                lambda update: (
+                    isinstance(update, schema.AgentMessageChunk)
+                    and isinstance(update.content, schema.TextContentBlock)
+                    and "Reopen the session" in update.content.text
+                ),
+            )
+            with pytest.raises(acp.RequestError, match="Reopen the session"):
+                await second.prompt(session_id=session_id, prompt=[acp.text_block("Another stale turn")])
+
+        async with acp.spawn_agent_process(cast(Client, reopened), sys.executable, str(fixture)) as (connection, _):
+            await connection.initialize(protocol_version=acp.PROTOCOL_VERSION)
+            await connection.load_session(session_id=session_id, cwd=str(tmp_path), mcp_servers=[])
+            response = await connection.prompt(
+                session_id=session_id, prompt=[acp.text_block(json.dumps({"tool": "model_name", "args": {}}))]
+            )
+            assert response.stop_reason == "end_turn"
+            await reopened.wait_for_update(
+                session_id,
+                lambda update: (
+                    isinstance(update, schema.AgentMessageChunk)
+                    and isinstance(update.content, schema.TextContentBlock)
+                    and update.content.text == "fixture:primary"
+                ),
+            )
+            replay = [
+                update.content.text
+                for _, update in reopened.updates
+                if isinstance(update, (schema.UserMessageChunk, schema.AgentMessageChunk))
+                and isinstance(update.content, schema.TextContentBlock)
+            ]
+            assert newer in replay
+            assert write not in replay
+            assert not any("Recovered a checkpoint" in text for text in replay)
 
 
 @pytest.mark.parametrize("fail_title", [False, True])

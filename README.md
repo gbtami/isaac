@@ -222,6 +222,12 @@ Harness also saves checkpoints during a turn. If Isaac exits before the turn is 
 the session restores the latest available checkpoint into the model's context and shows a recovery notice.
 Ask Isaac to continue when ready. Check the workspace for partial changes before retrying writes
 or commands. Reopening a session does not rerun tools or restart shell jobs.
+
+When two Isaac processes open the same session, the first save advances its revision. A process
+with an older revision must reopen the session before continuing. If a turn was already running
+when another process saved, Isaac keeps the newer saved history and reports the skipped save.
+Review any tool changes from the skipped turn before retrying it.
+
 The upstream adapter does not implement `session/list` or the separate `session/resume` method;
 Toad's own history picker supplies discovery and uses `session/load` for continuation.
 

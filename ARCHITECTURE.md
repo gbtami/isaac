@@ -80,7 +80,9 @@ claim image/audio support across its selectable models. Passing `SqliteSessionSt
 ## Persistence
 
 The adapter decides when to save and what history, transcript, and selected model to include. Isaac
-serializes the upstream `StoredSession` value with Pydantic and atomically replaces its SQLite row.
+serializes the upstream `StoredSession` value with Pydantic and atomically updates its SQLite row
+if the revision still matches the one opened by the session. A stale save leaves the stored history
+intact and sends a message to the client. Subsequent turns on the stale session ask the user to reopen it.
 Each operation uses a short-lived connection on a worker thread. The database lives in the platform
 state directory, or `ISAAC_STATE_DIR`, with private file permissions. Corrupt snapshots raise on load;
 they are not silently replaced by empty sessions. The adapter reports save/load errors according to
@@ -90,9 +92,10 @@ Toad records session IDs when `loadSession` is advertised, and its history picke
 The server does not add its own discovery UI or implement unsupported `session/list` / `session/resume`
 methods. Completed conversation turns and plans persist; in-flight runs, shell jobs, and remembered
 permission decisions are not restarted. Harness `StepPersistence` saves run checkpoints in the same
-database. On load after an interruption, the session store can restore an uncommitted run's checkpoint
-as model history and append a recovery notice to the transcript. Core closes unresolved tool calls so
-the next prompt can continue using the recovered context without replaying tool calls.
+database with their starting revision. On load after an interruption, the session store can restore
+an uncommitted run's checkpoint for the current revision and append a recovery notice to the transcript.
+Core closes unresolved tool calls so the next prompt can continue using the recovered context without
+replaying tool calls.
 
 Session titles use a separate SQLite table so updating a conversation snapshot never replaces its name.
 A session-local capability captures the first coding prompt and names it after a successful coding run,

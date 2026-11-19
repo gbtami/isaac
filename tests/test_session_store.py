@@ -54,7 +54,9 @@ async def test_corrupt_snapshot_is_reported_without_overwriting_it(tmp_path: Pat
     database = tmp_path / "sessions.sqlite3"
     store = SqliteSessionStore(database)
     with closing(sqlite3.connect(database)) as connection:
-        connection.execute("INSERT INTO sessions (id, snapshot) VALUES (?, ?)", ("broken", b"invalid JSON"))
+        connection.execute(
+            "INSERT INTO sessions (id, snapshot, revision) VALUES (?, ?, 0)", ("broken", b"invalid JSON")
+        )
         connection.commit()
     with pytest.raises(ValidationError):
         await store.load("broken")
@@ -63,11 +65,16 @@ async def test_corrupt_snapshot_is_reported_without_overwriting_it(tmp_path: Pat
 
 
 async def test_checkpoint_survives_a_second_interruption_before_the_first_step(tmp_path: Path) -> None:
-    store = SqliteSessionStore(tmp_path / "sessions.sqlite3")
+    database = tmp_path / "sessions.sqlite3"
+    store = SqliteSessionStore(database)
     await store.save("session", StoredSession())
     for run_id in ("with-checkpoint", "without-checkpoint"):
         await store.steps.register_run(
-            RunRecord(run_id=run_id, conversation_id="session", metadata={"acp_session_id": "session"})
+            RunRecord(
+                run_id=run_id,
+                conversation_id="session",
+                metadata={"acp_session_id": "session", "isaac_session_revision": "0"},
+            )
         )
     await store.steps.save_snapshot(
         ContinuableSnapshot(
@@ -81,3 +88,5 @@ async def test_checkpoint_survives_a_second_interruption_before_the_first_step(t
     recovered = await store.load("session")
     assert recovered is not None and len(recovered.messages) == 2
     assert recovered.messages[-1].run_id == "with-checkpoint"
+    await store.save("session", recovered)
+    assert await SqliteSessionStore(database).load("session") == recovered
