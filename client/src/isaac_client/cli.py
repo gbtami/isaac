@@ -5,14 +5,16 @@ import asyncio
 import os
 import sqlite3
 import sys
+from contextlib import AsyncExitStack
 from importlib.metadata import version
 from pathlib import Path
 from typing import cast
 
 import acp
 from acp import schema
-from pydantic import TypeAdapter
+from prompt_toolkit.application import create_app_session
 from prompt_toolkit.patch_stdout import patch_stdout
+from pydantic import TypeAdapter
 
 from isaac_client.client import TerminalClient
 from isaac_client.display import Terminal
@@ -34,14 +36,20 @@ async def run_client(
 ) -> int:
     terminal = Terminal()
     client = TerminalClient(terminal)
-    # The SDK routes unadvertised client operations independently of the required callbacks.
-    async with acp.spawn_agent_process(
-        cast(acp.Client, client),
-        *command,
-        env=os.environ,
-        transport_kwargs={"stderr": None},
-        use_unstable_protocol=True,
-    ) as (connection, _process):
+    async with AsyncExitStack() as stack:
+        if terminal.interactive:
+            # Share this app session with the ACP tasks that open approval and question menus.
+            stack.enter_context(create_app_session())
+        # The SDK routes unadvertised client operations independently of the required callbacks.
+        connection, _process = await stack.enter_async_context(
+            acp.spawn_agent_process(
+                cast(acp.Client, client),
+                *command,
+                env=os.environ,
+                transport_kwargs={"stderr": None},
+                use_unstable_protocol=True,
+            )
+        )
         init = await connection.initialize(
             protocol_version=acp.PROTOCOL_VERSION,
             client_capabilities=schema.ClientCapabilities(
