@@ -93,7 +93,13 @@ async def interactive_loop(
                 if client.session.title is None and not line.lstrip().startswith("/"):
                     client.session.title = " ".join(line.split())[:80]
                     client.remember()
-                await send_turn(connection, session_id, client, line, queued, commands)
+                plan_proposed = await send_turn(connection, session_id, client, line, queued, commands)
+                if plan_proposed and terminal.interactive and not queued:
+                    choice = await terminal.choose(
+                        "Implement this plan?", ["Implement this plan", "Keep planning"], toolbar=client.toolbar
+                    )
+                    if choice == 0:
+                        queued.append("/implement")
         except acp.RequestError as exc:
             client.finish_message()
             details = exc.data.get("details") if isinstance(exc.data, dict) else None
@@ -109,7 +115,7 @@ async def send_turn(
     line: str,
     queued: deque[str],
     commands: CommandSource,
-) -> None:
+) -> bool:
     client.start_turn()
     editor = (
         asyncio.create_task(collect_followups(connection, session_id, client, queued, commands))
@@ -131,7 +137,9 @@ async def send_turn(
             editor.cancel()
             await asyncio.gather(editor, return_exceptions=True)
         client.end_turn()
+        cancelled = client.cancelling
         client.cancelling = False
+    return response.stop_reason == "end_turn" and client.plan_proposed and not cancelled
 
 
 async def collect_followups(

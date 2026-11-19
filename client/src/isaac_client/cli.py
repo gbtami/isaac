@@ -16,7 +16,7 @@ from acp import schema
 from prompt_toolkit.application import create_app_session
 from pydantic import TypeAdapter
 
-from isaac_client.client import SessionState, TerminalClient
+from isaac_client.client import PROPOSED_PLAN, SessionState, TerminalClient
 from isaac_client.display import Terminal
 from isaac_client.history import SessionEntry, SessionHistory
 from isaac_client.repl import interactive_loop
@@ -50,6 +50,7 @@ async def run_client(
                 env=os.environ,
                 transport_kwargs={"stderr": None},
                 use_unstable_protocol=True,
+                observers=[client.observe_proposal] if terminal.interactive else [],
             )
         )
         init = await connection.initialize(
@@ -59,6 +60,7 @@ async def run_client(
                 elicitation=schema.ElicitationCapabilities(form=schema.ElicitationFormCapabilities())
                 if terminal.interactive
                 else None,
+                field_meta={PROPOSED_PLAN: True} if terminal.interactive else None,
             ),
             client_info=schema.Implementation(
                 name="isaac-acp-client", title="Isaac Terminal Client", version=version("isaac-acp-client")
@@ -123,8 +125,8 @@ async def run_client(
         def accept_session(response: schema.NewSessionResponse | schema.LoadSessionResponse) -> None:
             if response.config_options is not None:
                 client.session.options = response.config_options
-            if response.modes is not None:
-                client.session.modes = response.modes
+            if response.modes is not None and client.session.current_mode_id is None:
+                client.session.current_mode_id = response.modes.current_mode_id
             client.session.loading = False
             client.remember()
             client.finish_output()

@@ -136,7 +136,8 @@ for the client's supported ACP features and an example with another agent.
   answer their questions, and cancel them. Repeat `--agent-dir` to load named delegates from folders
   in each session's workspace.
 - Repository instructions: Harness loads `AGENTS.md` / `CLAUDE.md` through Coder's `RepoContext`.
-- Planning: Harness's `write_plan` tool, with a separate persisted plan per ACP session and native plan sidebar updates.
+- Planning: read-only Plan mode for reviewing a proposal, plus Harness's `write_plan` tool for
+  tracking implementation progress in the ACP plan sidebar.
 - Skills: `.agents/skills` in the session workspace. Repeat `--skill-dir` to choose other libraries.
 - Context management: Coder clears older tool results. Automatic compaction uses the provider's
   inline support on Codex, OpenAI Responses, and supported Claude models on the Anthropic API.
@@ -173,7 +174,11 @@ ACP supports streaming, cancellation, concurrent sessions, tool presentation, an
 through the upstream adapter. A small session capability adds standard ACP plan updates and these commands:
 
 - `/help`: list the agent commands.
-- `/plan`: show the current session's plan and refresh the client's plan sidebar.
+- `/plan [goal]`: enter read-only Plan mode and optionally start investigating a goal. Continue the
+  discussion in the same session to refine the proposal. Plan mode survives session reload.
+- `/implement`: approve the latest proposal and start implementing it with the session's normal permissions.
+- `/cancel-plan`: return to coding mode without starting implementation.
+- `/checklist`: show the implementation checklist and refresh the client's plan sidebar.
 - `/title`: show the saved session title.
 - `/models`: list the configured model IDs and mark the current model.
 - `/model [id]`: show the current model or switch to one of the listed IDs for subsequent turns.
@@ -182,6 +187,10 @@ through the upstream adapter. A small session capability adds standard ACP plan 
 - `/compact`: use native compaction on supported OpenAI Responses and Anthropic endpoints. If native
   compaction is unavailable or fails, use Harness summarization and fall back to trimming.
 - `/compact <focus>`: use Harness summarization and tell it what to preserve.
+
+In Plan mode Isaac can read and search the workspace and ask clarification questions. Editing, shell,
+Code Mode, delegation, and MCP tools are unavailable until you leave Plan mode.
+The Isaac terminal client offers an implementation picker when a proposal is ready.
 
 Codex subscription and Gemini models use Harness for manual `/compact`. Anthropic conversations
 with a signed native `/compact` block also use Harness for automatic compaction while the block is

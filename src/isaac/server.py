@@ -5,7 +5,7 @@ from collections.abc import Callable
 import acp
 from acp import schema
 from pydantic_ai import Agent
-from pydantic_ai.capabilities import AbstractCapability
+from pydantic_ai.capabilities import AbstractCapability, CombinedCapability, DynamicCapability
 from pydantic_ai.models import Model
 from pydantic_ai.workspaces import LocalWorkspaceBackend
 from pydantic_ai_harness.code_mode import CodeMode
@@ -22,6 +22,7 @@ from isaac.auth import model_resolver
 from isaac.compaction import AutomaticCompaction
 from isaac.config import SessionSettings, Settings, session_database
 from isaac.mcp import mcp_capabilities
+from isaac.plan_mode import PlanMode, planning_turn
 from isaac.session_permissions import code_mode_approvals
 from isaac.session_questions import session_questions
 from isaac.session_store import SqliteSessionStore
@@ -39,7 +40,8 @@ def build_agent(settings: Settings, *, model: Model | str | None = None) -> Agen
     if settings.skill_dirs:
         capabilities.append(Skills(settings.skill_dirs, missing_directories="skip"))
     if settings.code_mode:
-        capabilities.append(CodeMode())
+        code_mode = CodeMode[SessionSettings]()
+        capabilities.append(DynamicCapability(lambda ctx: None if planning_turn(ctx) else code_mode))
     # The adapter supplies the selected model at run time. Startup and session setup need no API key.
     return Agent(model, name="isaac", deps_type=SessionSettings, capabilities=capabilities, defer_model_check=True)
 
@@ -55,23 +57,31 @@ def build_acp_adapter(
         plan = SqlitePlanStore(str(database), session=session.session_id)
         ui = SessionUI(session, plan, store, adapter)
         titles = SessionTitles(session, store)
+        plan_mode = PlanMode(session, store)
+        checkpoints = store.checkpoints(session)
+        deps = SessionSettings(permissions=settings.permissions, planning=store.is_planning(session.session_id))
         capabilities: list[AbstractCapability[SessionSettings]] = [
             Planning(store=plan, tools=["write_plan"]),
             ReportContextUsage(context_window=settings.context_window),
-            store.checkpoints(session),
+            checkpoints,
             ui,
             titles,
-            *mcp_capabilities(session),
+            plan_mode,
         ]
+        if mcp := mcp_capabilities(session):
+            tools = CombinedCapability(mcp)
+            capabilities.append(DynamicCapability(lambda ctx: None if planning_turn(ctx) else tools))
         if settings.code_mode:
             capabilities.append(code_mode_approvals(session))
         if (questions := session_questions(session)) is not None:
             capabilities.append(questions)
         await ui.advertise()
         await ui.publish_plan(force=True)
+        if deps.planning:
+            await plan_mode.publish(deps.planning)
         await titles.restore()
         return ACPSessionConfig(
-            deps=SessionSettings(permissions=settings.permissions),
+            deps=deps,
             workspace=LocalWorkspaceBackend(session.cwd),
             capabilities=capabilities,
         )

@@ -33,6 +33,7 @@ async def stream(
     messages: list[ModelMessage], _info: AgentInfo, *, model_id: str
 ) -> AsyncIterator[str | dict[int, DeltaToolCall]]:
     """Call the tool named by a JSON user prompt, then return its output."""
+    planning = "You are in read-only Plan mode." in (_info.instructions or "")
     if "fixture_named_agent_instructions" in (_info.instructions or ""):
         yield f"Named delegate used {model_id}"
         return
@@ -73,11 +74,31 @@ async def stream(
                     else:
                         yield "Checkpoint context missing."
                     return
-                if not isinstance(content, str) or not content.startswith('{"tool":'):
+                if content == "/plan fixture proposal":
+                    assert planning
+                    yield "## Proposed plan\n\nCreate task.txt containing the reviewed text."
+                    return
+                if content == "Go ahead and implement it.":
+                    assert planning
+                    yield "The proposal is ready. Use /implement to approve it."
+                    return
+                if content == "/implement":
+                    assert "approves implementation of the latest plan" in (_info.instructions or "")
+                    assert any(
+                        isinstance(part, TextPart) and "Create task.txt containing the reviewed text." in part.content
+                        for message in messages
+                        for part in message.parts
+                    )
+                    tool = "write_file"
+                    arguments: dict[str, object] = {"path": "task.txt", "content": "reviewed"}
+                elif isinstance(content, str) and content.startswith('{"tool":'):
+                    command = json.loads(content)
+                    tool, arguments = command["tool"], command["args"]
+                else:
                     continue
-                command = json.loads(content)
-                tool = command["tool"]
-                arguments = command["args"]
+                if tool == "fixture_tool_catalog":
+                    yield ", ".join(sorted(definition.name for definition in _info.function_tools))
+                    return
                 if tool == "history_length":
                     yield str(len(messages))
                     return
@@ -93,10 +114,11 @@ async def stream(
                     )
                     yield "compaction restored" if restored else "compaction missing"
                     return
-                if tool not in {definition.name for definition in _info.function_tools}:
+                tool_names = {definition.name for definition in _info.function_tools}
+                if tool not in tool_names and "run_code" in tool_names:
                     keywords = ", ".join(f"{key}={value!r}" for key, value in arguments.items())
                     call = f"{tool}({keywords})"
-                    if tool == "write_plan":
+                    if tool in {"write_plan", "fixture_hello"}:
                         call = f"await {call}"
                     arguments = {"code": f"print({call})"}
                     tool = "run_code"
@@ -140,7 +162,7 @@ class NativeCompactionModel(FunctionModel):
 async def main() -> None:
     settings = Settings(
         models=("fixture:primary", "fixture:secondary"),
-        permissions="read-only",
+        permissions="full" if "--full-permissions" in sys.argv else "read-only",
         skill_dirs=(),
         context_window=50_000 if "--known-context-window" in sys.argv else None,
         agent_dirs=(".agents/agents",) if "--named-delegates" in sys.argv else (),
@@ -169,4 +191,16 @@ async def main() -> None:
 
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    if "--mcp-fixture" in sys.argv:
+        from mcp.server import MCPServer
+
+        Path(sys.argv[-1]).touch()
+        server = MCPServer("fixture")
+
+        @server.tool()
+        def hello() -> str:
+            return "MCP is available."
+
+        server.run()
+    else:
+        asyncio.run(main())

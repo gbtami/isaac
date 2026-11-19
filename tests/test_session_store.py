@@ -6,7 +6,7 @@ from contextlib import closing
 from pathlib import Path
 
 import pytest
-from acp import schema
+from acp import RequestError, schema
 from pydantic import ValidationError
 from pydantic_ai.messages import BinaryImage, ModelRequest, ModelResponse, TextPart, UserPromptPart
 from pydantic_ai_harness.experimental.acp import StoredSession
@@ -68,6 +68,8 @@ async def test_checkpoint_survives_a_second_interruption_before_the_first_step(t
     database = tmp_path / "sessions.sqlite3"
     store = SqliteSessionStore(database)
     await store.save("session", StoredSession())
+    stale = SqliteSessionStore(database)
+    assert await stale.load("session") == StoredSession()
     for run_id in ("with-checkpoint", "without-checkpoint"):
         await store.steps.register_run(
             RunRecord(
@@ -85,8 +87,14 @@ async def test_checkpoint_survives_a_second_interruption_before_the_first_step(t
         )
     )
 
+    await store.set_planning("session", True)
+    with pytest.raises(RuntimeError, match="Another Isaac process updated this session"):
+        await stale.save("session", StoredSession())
+    with pytest.raises(RequestError, match="Another Isaac process updated this session"):
+        await stale.set_planning("session", True)
     recovered = await store.load("session")
     assert recovered is not None and len(recovered.messages) == 2
     assert recovered.messages[-1].run_id == "with-checkpoint"
     await store.save("session", recovered)
+    assert store.is_planning("session")
     assert await SqliteSessionStore(database).load("session") == recovered

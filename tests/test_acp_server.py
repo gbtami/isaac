@@ -18,6 +18,7 @@ class RecordingClient:
 
     def __init__(self) -> None:
         self.updates: list[tuple[str, object]] = []
+        self.notifications: list[tuple[str, dict[str, object]]] = []
         self._update_received = asyncio.Event()
         self.approvals: list[schema.ToolCallUpdate] = []
         self.approval_kinds: list[set[str]] = []
@@ -31,6 +32,9 @@ class RecordingClient:
     async def session_update(self, session_id: str, update: object, **_kwargs: object) -> None:
         self.updates.append((session_id, update))
         self._update_received.set()
+
+    async def ext_notification(self, method: str, params: dict[str, object]) -> None:
+        self.notifications.append((method, params))
 
     async def wait_for_update(self, session_id: str, matches: Callable[[object], bool], *, after: int = 0) -> None:
         while not any(received == session_id and matches(update) for received, update in self.updates[after:]):
@@ -78,6 +82,9 @@ async def test_cli_initialization_and_model_selection(tmp_path: Path) -> None:
         assert {command.name for command in commands[-1].available_commands} == {
             "help",
             "plan",
+            "checklist",
+            "implement",
+            "cancel-plan",
             "title",
             "compact",
             "model",
@@ -91,7 +98,108 @@ async def test_cli_initialization_and_model_selection(tmp_path: Path) -> None:
 
 
 @pytest.mark.parametrize("code_mode", [False, True])
-async def test_harness_questions_round_trip_over_acp(tmp_path: Path, code_mode: bool) -> None:
+async def test_plan_mode_restricts_tools_and_implements_the_reviewed_proposal(tmp_path: Path, code_mode: bool) -> None:
+    fixture = Path(__file__).with_name("acp_fixture.py")
+    args = [str(fixture), "--full-permissions"] + ([] if code_mode else ["--no-code-mode"])
+    started = tmp_path / "mcp-started"
+    mcp = schema.McpServerStdio(
+        name="fixture", command=sys.executable, args=[str(fixture), "--mcp-fixture", str(started)], env=[]
+    )
+    evidence = tmp_path / "evidence.txt"
+    evidence.write_text("Repository evidence.")
+
+    async def ask(connection: ClientSideConnection, client: RecordingClient, session_id: str, text: str) -> str:
+        start = len(client.updates)
+        try:
+            result = await connection.prompt(session_id=session_id, prompt=[acp.text_block(text)])
+        except acp.RequestError as exc:
+            raise AssertionError(f"{text}: {exc} {exc.data}") from exc
+        assert result.stop_reason == "end_turn"
+        await client.wait_for_update(
+            session_id, lambda update: isinstance(update, schema.AgentMessageChunk), after=start
+        )
+        return "".join(
+            update.content.text
+            for received, update in client.updates[start:]
+            if received == session_id
+            and isinstance(update, schema.AgentMessageChunk)
+            and isinstance(update.content, schema.TextContentBlock)
+        )
+
+    def tool(name: str, **arguments: object) -> str:
+        return json.dumps({"tool": name, "args": arguments})
+
+    original = RecordingClient()
+    async with (
+        asyncio.timeout(35),
+        acp.spawn_agent_process(cast(Client, original), sys.executable, *args) as (connection, _process),
+    ):
+        await connection.initialize(
+            protocol_version=acp.PROTOCOL_VERSION,
+            client_capabilities=schema.ClientCapabilities(field_meta={"isaac/plan-proposed": True})
+            if code_mode
+            else None,
+        )
+        session = await connection.new_session(cwd=str(tmp_path), mcp_servers=[mcp])
+        other = await connection.new_session(cwd=str(tmp_path), mcp_servers=[])
+        sid = session.session_id
+        assert "Create task.txt containing the reviewed text." in await ask(
+            connection, original, sid, "/plan fixture proposal"
+        )
+        assert "Plan mode is inactive" in await ask(connection, original, other.session_id, "/implement")
+        assert "Usage: /implement" in await ask(connection, original, sid, "/implement an unrelated task")
+        assert "Use /implement" in await ask(connection, original, sid, "Go ahead and implement it.")
+        await original.wait_for_update(
+            sid, lambda update: isinstance(update, schema.CurrentModeUpdate) and update.current_mode_id == "plan"
+        )
+        assert await ask(connection, original, sid, tool("fixture_tool_catalog")) == "grep, list_files, read_file"
+        assert "Repository evidence." in await ask(connection, original, sid, tool("read_file", path="evidence.txt"))
+        for command in (
+            tool("write_file", path="task.txt", content="unreviewed"),
+            tool("shell", command="touch task.txt"),
+            tool("run_code", code="write_file(path='task.txt', content='unreviewed')"),
+            tool("delegate_task", agent_name="self", task="Create task.txt"),
+            tool("fixture_hello"),
+        ):
+            assert "Unknown tool name:" in await ask(connection, original, sid, command)
+        assert not original.approvals
+        assert not started.exists() and not (tmp_path / "task.txt").exists()
+        assert original.notifications == ([("isaac/plan-proposed", {"sessionId": sid})] if code_mode else [])
+
+    resumed = RecordingClient()
+    async with (
+        asyncio.timeout(35),
+        acp.spawn_agent_process(cast(Client, resumed), sys.executable, *args) as (connection, _process),
+    ):
+        await connection.initialize(protocol_version=acp.PROTOCOL_VERSION)
+        await connection.load_session(cwd=str(tmp_path), session_id=sid, mcp_servers=[mcp])
+        await resumed.wait_for_update(
+            sid, lambda update: isinstance(update, schema.CurrentModeUpdate) and update.current_mode_id == "plan"
+        )
+        await resumed.wait_for_update(
+            sid,
+            lambda update: (
+                isinstance(update, schema.AgentMessageChunk)
+                and isinstance(update.content, schema.TextContentBlock)
+                and "Unknown tool name: 'fixture_hello'" in update.content.text
+            ),
+        )
+        assert await ask(connection, resumed, sid, tool("fixture_tool_catalog")) == "grep, list_files, read_file"
+        assert not started.exists()
+        await ask(connection, resumed, sid, "/implement")
+        assert (tmp_path / "task.txt").read_text() == "reviewed"
+        assert started.exists()
+        await resumed.wait_for_update(
+            sid, lambda update: isinstance(update, schema.CurrentModeUpdate) and update.current_mode_id == "code"
+        )
+        assert "MCP is available." in await ask(connection, resumed, sid, tool("fixture_hello"))
+        assert "Plan mode is on" in await ask(connection, resumed, sid, "/plan")
+        assert "Plan mode is off" in await ask(connection, resumed, sid, "/cancel-plan")
+        assert "Plan mode is inactive" in await ask(connection, resumed, sid, "/implement")
+
+
+@pytest.mark.parametrize(("code_mode", "planning"), [(False, False), (True, False), (True, True)])
+async def test_harness_questions_round_trip_over_acp(tmp_path: Path, code_mode: bool, planning: bool) -> None:
     class AnsweringClient(RecordingClient):
         async def create_elicitation(
             self, message: str, mode: schema.ElicitationMode, **_kwargs: object
@@ -123,7 +231,7 @@ async def test_harness_questions_round_trip_over_acp(tmp_path: Path, code_mode: 
     ]
     command = (
         {"tool": "run_code", "args": {"code": f"print(await ask_user_question(questions={questions!r}))"}}
-        if code_mode
+        if code_mode and not planning
         else {"tool": "ask_user_question", "args": {"questions": questions}}
     )
     args = [str(fixture)] + ([] if code_mode else ["--no-code-mode"])
@@ -141,6 +249,8 @@ async def test_harness_questions_round_trip_over_acp(tmp_path: Path, code_mode: 
             ),
         )
         session = await connection.new_session(cwd=str(tmp_path), mcp_servers=[])
+        if planning:
+            await connection.prompt(session_id=session.session_id, prompt=[acp.text_block("/plan")])
         result = await connection.prompt(session_id=session.session_id, prompt=[acp.text_block(json.dumps(command))])
         assert result.stop_reason == "end_turn"
         text = "".join(
@@ -466,8 +576,8 @@ async def test_plan_sidebar_and_commands(tmp_path: Path, code_mode: bool) -> Non
 
         assert "empty" in await prompt("/compact")
         assert "/compact" in await prompt("/help")
-        assert "No plan yet" in await prompt("/plan")
-        assert "Usage: /plan" in await prompt("/plan unexpected-argument")
+        assert "The checklist is empty" in await prompt("/checklist")
+        assert "Usage: /checklist" in await prompt("/checklist unexpected-argument")
         assert "ready" == await prompt("/unknown-command")
         assert "ready" == await prompt("/help\nPlease explain this text.")
         items = [
@@ -477,8 +587,8 @@ async def test_plan_sidebar_and_commands(tmp_path: Path, code_mode: bool) -> Non
         await prompt(json.dumps({"tool": "write_plan", "args": {"items": items}}))
         assert [entry.content for entry in plans()[-1].entries] == ["Inspect code", "Fix code"]
         assert [entry.status for entry in plans()[-1].entries] == ["in_progress", "pending"]
-        assert "Inspect code" in await prompt("/plan")
-        assert "No plan yet" in await prompt("/plan", session_id=other.session_id)
+        assert "Inspect code" in await prompt("/checklist")
+        assert "The checklist is empty" in await prompt("/checklist", session_id=other.session_id)
 
         await prompt(json.dumps({"tool": "write_plan", "args": {"items": list(reversed(items))}}))
         assert [entry.content for entry in plans()[-1].entries] == ["Fix code", "Inspect code"]
@@ -680,7 +790,7 @@ async def test_session_load_after_process_restart(tmp_path: Path) -> None:
         assert [(entry.content, entry.status) for entry in plans[-1].entries] == [("Continue the task", "in_progress")]
 
         start = len(resumed.updates)
-        response = await connection.prompt(session_id=session.session_id, prompt=[acp.text_block("/plan")])
+        response = await connection.prompt(session_id=session.session_id, prompt=[acp.text_block("/checklist")])
         assert response.stop_reason == "end_turn"
         await resumed.wait_for_update(
             session.session_id,
@@ -798,7 +908,7 @@ async def test_automatic_session_title_and_resume(tmp_path: Path, fail_title: bo
     ):
         await connection.initialize(protocol_version=acp.PROTOCOL_VERSION)
         session = await connection.new_session(cwd=str(tmp_path), mcp_servers=[])
-        for command in ("/help", "/plan", "/title"):
+        for command in ("/help", "/checklist", "/title"):
             response = await connection.prompt(session_id=session.session_id, prompt=[acp.text_block(command)])
             assert response.stop_reason == "end_turn"
         assert not any(isinstance(update, schema.SessionInfoUpdate) for _, update in client.updates)

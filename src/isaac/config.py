@@ -16,6 +16,7 @@ class SessionSettings:
     """Settings editable within one live ACP session, shared with its delegates."""
 
     permissions: PermissionMode
+    planning: bool = False
 
 
 @dataclass(frozen=True)

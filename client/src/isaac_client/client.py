@@ -8,6 +8,7 @@ from time import monotonic
 
 from acp import schema
 from acp.client.connection import ClientSideConnection
+from acp.connection import StreamDirection, StreamEvent
 
 from isaac_client.display import Terminal, visible
 from isaac_client.elicitation import answer_form
@@ -15,6 +16,7 @@ from isaac_client.history import SessionHistory
 
 ConfigOption = schema.SessionConfigOptionSelect | schema.SessionConfigOptionBoolean
 ToolContent = schema.ContentToolCallContent | schema.FileEditToolCallContent | schema.TerminalToolCallContent
+PROPOSED_PLAN = "isaac/plan-proposed"
 
 
 @dataclass
@@ -22,7 +24,7 @@ class SessionState:
     session_id: str | None = None
     title: str | None = None
     options: list[ConfigOption] = field(default_factory=list)
-    modes: schema.SessionModeState | None = None
+    current_mode_id: str | None = None
     commands: list[schema.AvailableCommand] = field(default_factory=list)
     usage: schema.UsageUpdate | None = None
     plan: list[schema.PlanEntry] = field(default_factory=list)
@@ -39,6 +41,7 @@ class TerminalClient:
         self._tools: dict[str, tuple[str, str | None]] = {}
         self._routine_tools: Counter[str] = Counter()
         self._turn_started: float | None = None
+        self.plan_proposed = False
         self._speaking: str | None = None
         self.cancelling = False
         self._permission_menus: set[asyncio.Task[int | None]] = set()
@@ -91,8 +94,8 @@ class TerminalClient:
                 str(option.current_value),
             )
             fields.append(f"{option.name} {value}")
-        if session.modes and not any(self.is_option(option, "mode") for option in session.options):
-            fields.append(f"Mode {session.modes.current_mode_id}")
+        if session.current_mode_id and not any(self.is_option(option, "mode") for option in session.options):
+            fields.append(f"Mode {session.current_mode_id}")
         return visible("  ·  ".join(fields)).replace("\n", " ")
 
     async def request_permission(
@@ -154,6 +157,20 @@ class TerminalClient:
         for menu in (*self._permission_menus, *self._question_menus):
             menu.cancel()
 
+    def observe_proposal(self, event: StreamEvent) -> None:
+        # The SDK dispatches notification callbacks separately from the prompt response.
+        # Observe the wire order so a proposal can only belong to the turn that sent it.
+        message = event.message
+        if (
+            event.direction is StreamDirection.INCOMING
+            and message.get("method") == f"_{PROPOSED_PLAN}"
+            and "id" not in message
+            and self._turn_started is not None
+            and isinstance(params := message.get("params"), dict)
+            and params.get("sessionId") == self.session.session_id
+        ):
+            self.plan_proposed = True
+
     async def session_update(self, session_id: str, update: object, **_: object) -> None:
         session = self.session
         if session_id != session.session_id:
@@ -169,8 +186,7 @@ class TerminalClient:
         elif isinstance(update, schema.ConfigOptionUpdate):
             session.options = update.config_options
         elif isinstance(update, schema.CurrentModeUpdate):
-            if session.modes:
-                session.modes.current_mode_id = update.current_mode_id
+            session.current_mode_id = update.current_mode_id
         elif isinstance(update, schema.AvailableCommandsUpdate):
             session.commands = update.available_commands
         elif isinstance(update, (schema.UserMessageChunk, schema.AgentMessageChunk, schema.AgentThoughtChunk)):
@@ -229,6 +245,7 @@ class TerminalClient:
     def start_turn(self) -> None:
         self.finish_output()
         self._tools.clear()
+        self.plan_proposed = False
         self._turn_started = monotonic()
 
     def end_turn(self) -> None:

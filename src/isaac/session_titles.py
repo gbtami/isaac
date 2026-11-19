@@ -16,6 +16,7 @@ from pydantic_ai.usage import UsageLimits
 from pydantic_ai_harness.experimental.acp import ACPSession
 
 from isaac.config import SessionSettings
+from isaac.plan_mode import parse_plan_command
 from isaac.session_store import SqliteSessionStore
 
 logger = logging.getLogger(__name__)
@@ -24,7 +25,10 @@ logger = logging.getLogger(__name__)
 def prompt_text(content: str | Sequence[UserContent] | None) -> str:
     parts = [content] if isinstance(content, str) else content or []
     text = " ".join(part for part in parts if isinstance(part, str)).strip()
-    return text[:8000] if text and not text.startswith("/") else ""
+    if text.startswith("/"):
+        command, arguments = parse_plan_command(content)
+        text = arguments if command == "/plan" else ""
+    return text[:8000]
 
 
 def short_title(text: str) -> str:

@@ -26,6 +26,7 @@ transcripts through `session/load`. Project and model behavior belong to the age
 - `isaac.compaction`: provider-aware automatic compaction with Harness fallback.
 - `isaac.server`: binds Harness capabilities and serves the agent with the public ACP adapter.
 - `isaac.mcp`: converts ACP MCP descriptors into public Pydantic AI MCP toolset capabilities.
+- `isaac.plan_mode`: restricts tools during planning and handles the transition to implementation.
 - `isaac.session_ui`: advertises slash commands and publishes Harness plan and context usage updates over ACP.
 - `isaac.session_permissions`: forwards Harness approvals from inside `run_code` to the ACP client.
 - `isaac.session_questions`: maps Harness `AskUser` to ACP form elicitation for clients that advertise it.
@@ -35,7 +36,7 @@ transcripts through `session/load`. Project and model behavior belong to the age
 Coding capabilities are bound at agent construction so Coder's self-delegation inherits them. The shared
 agent has no fixed workspace. Harness calls `configure_session` with each client's `cwd`, and the
 returned workspace backend is passed to every run in that session. There is no process-wide `chdir`.
-Coder's `TaskControl` gives each run a Harness task owner and lets the model manage background delegates.
+Coder's `TaskControl` gives each coding run a Harness task owner and lets the model manage background delegates.
 Harness cancels and drains tasks when the owning run ends. Optional `agent_folders` are read through the
 session workspace and produce instruction-only delegates. Self-delegation carries the coding tools and permissions.
 MCP tools are also created separately for each session. MCP commands start in that session's directory.
@@ -45,6 +46,15 @@ The main session owns this plan; delegate runs do not overwrite its sidebar.
 Plans are keyed by ACP session ID in the same database as conversation snapshots. The session factory
 restores the sidebar when a client reloads a session, even though presentation updates are sent outside
 the adapter's recorded transcript.
+
+`PlanMode` uses the same ACP session and conversation. It filters tools before each planning request
+and skips Code Mode and MCP toolsets for those turns. `/plan`, `/implement`, and `/cancel-plan` are
+advertised slash commands. The session factory restores the saved mode on load, and stale-session
+checks compare both the conversation revision and the mode. `/checklist` shows the Harness progress checklist.
+When a final response starts with the proposal heading, `PlanMode` sends a live proposal notification
+to clients that advertise support in ACP capability metadata. The terminal client offers the picker
+after a successful turn with no queued follow-up. Choosing implementation submits the existing
+`/implement` command in the same session.
 
 The upstream adapter owns protocol negotiation, sessions, history, cancellation, text/thinking/tool
 updates, permission requests, and the `model` session config option. Isaac does not subclass the adapter

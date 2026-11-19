@@ -44,7 +44,11 @@ class DemoAgent:
     async def cancel(self, session_id: str, **_: object) -> None:
         self.cancelled.set()
 
-    async def initialize(self, protocol_version: int, **_: object) -> schema.InitializeResponse:
+    async def initialize(
+        self, protocol_version: int, client_capabilities: schema.ClientCapabilities | None = None, **_: object
+    ) -> schema.InitializeResponse:
+        meta = client_capabilities.field_meta if client_capabilities else None
+        self.plan_picker = bool(meta and meta.get("isaac/plan-proposed") is True)
         return schema.InitializeResponse(
             protocol_version=protocol_version,
             agent_info=schema.Implementation(name="sdk-demo", title="SDK Demo", version="1.0"),
@@ -138,11 +142,25 @@ class DemoAgent:
         first = prompt[0]
         if isinstance(first, schema.TextContentBlock) and first.text in {"Wait for cancel", "Wait then end"}:
             await self.client.session_update(session_id, acp.update_agent_message(acp.text_block("Turn started")))
+            if "--plan-picker" in sys.argv and self.plan_picker:
+                await self.client.ext_notification("isaac/plan-proposed", {"sessionId": session_id})
             if first.text == "Wait for cancel":
                 await self.cancelled.wait()
                 return schema.PromptResponse(stop_reason="cancelled")
             await asyncio.sleep(0.15)
             await self.client.session_update(session_id, acp.update_agent_message(acp.text_block("Turn finished")))
+            return schema.PromptResponse(stop_reason="end_turn")
+        if isinstance(first, schema.TextContentBlock) and first.text == "Propose a plan":
+            await self.client.session_update(
+                session_id, acp.update_agent_message(acp.text_block("## Proposed plan\n\nUpdate the example."))
+            )
+            if self.plan_picker:
+                await self.client.ext_notification("isaac/plan-proposed", {"sessionId": session_id})
+            return schema.PromptResponse(stop_reason="end_turn")
+        if isinstance(first, schema.TextContentBlock) and first.text == "/implement":
+            await self.client.session_update(
+                session_id, acp.update_agent_message(acp.text_block("Implementation began."))
+            )
             return schema.PromptResponse(stop_reason="end_turn")
         if isinstance(first, schema.TextContentBlock) and first.text.startswith(("Echo ", "/model ")):
             await self.client.session_update(session_id, acp.update_agent_message(first))

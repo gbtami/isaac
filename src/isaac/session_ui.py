@@ -23,13 +23,14 @@ from pydantic_ai_harness.planning import PlanStore, TaskStatus, render_plan
 
 from isaac.compaction import AutomaticCompaction
 from isaac.config import PERMISSION_MODES, SessionSettings
+from isaac.plan_mode import PLAN_COMMANDS
 from isaac.session_store import SqliteSessionStore
 
 logger = logging.getLogger(__name__)
 
 COMMANDS = (
     schema.AvailableCommand(name="help", description="Show Isaac's agent commands."),
-    schema.AvailableCommand(name="plan", description="Show the current session's plan."),
+    schema.AvailableCommand(name="checklist", description="Show the implementation checklist."),
     schema.AvailableCommand(name="title", description="Show the saved session title."),
     schema.AvailableCommand(name="models", description="List the models configured for Isaac."),
     schema.AvailableCommand(
@@ -48,6 +49,7 @@ COMMANDS = (
         input=schema.AvailableCommandInput(root=schema.UnstructuredCommandInput(hint="optional focus for the summary")),
     ),
 )
+AVAILABLE_COMMANDS = (*PLAN_COMMANDS, *COMMANDS)
 
 
 @dataclass
@@ -72,7 +74,7 @@ class SessionUI(AbstractCapability[SessionSettings]):
         await self.session.client.session_update(
             session_id=self.session.session_id,
             update=schema.AvailableCommandsUpdate(
-                session_update="available_commands_update", available_commands=list(COMMANDS)
+                session_update="available_commands_update", available_commands=list(AVAILABLE_COMMANDS)
             ),
         )
 
@@ -131,11 +133,11 @@ class SessionUI(AbstractCapability[SessionSettings]):
         if arguments and command not in {"/compact", "/model", "/permissions"}:
             reply = f"Usage: {command}"
         elif command == "/help":
-            reply = "\n".join(f"/{item.name}: {item.description}" for item in COMMANDS)
-        elif command == "/plan":
+            reply = "\n".join(f"/{item.name}: {item.description}" for item in AVAILABLE_COMMANDS)
+        elif command == "/checklist":
             await self.publish_plan(force=True)
             items = await self.plan.get_items()
-            reply = render_plan(items) if items else "No plan yet."
+            reply = render_plan(items) if items else "The checklist is empty."
         elif command == "/title":
             reply = await self.store.get_title(self.session.session_id) or "No title yet. Send a coding request first."
         elif command in {"/model", "/models"}:

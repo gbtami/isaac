@@ -48,15 +48,18 @@ above without `--model`.
 - `/model` opens the client model picker when the agent leaves that name available. With Isaac,
   `/model` is the agent command and `/pick-model` opens the picker.
 - `/config` opens all advertised session config options, including grouped choices and toggles.
-- `/plan` shows the latest plan. `/help` shows available commands. The client supplies either
-  command when the agent does not advertise it.
+- With Isaac, `/plan [goal]` enters read-only Plan mode. When a proposal is ready, choose
+  **Implement this plan** or **Keep planning**. You can also run `/implement` to start coding,
+  `/cancel-plan` to leave Plan mode, or `/checklist` to see implementation progress.
+- `/help` shows available commands. When an agent has no `/plan` command, the client provides one
+  to show the latest plan sent over ACP.
 - `/quit` exits. Ctrl+D also exits from an empty idle prompt. While the agent is working, Enter
   queues a follow-up and Ctrl+C requests cancellation and clears the queue.
 
 Use ↑/↓ and Enter in pickers, or type a choice number. Press Esc to close a picker. Model, setting,
 and session pickers filter as you type.
 
-The status line shows plan progress, the active tool, and elapsed time. Reads and searches appear
+The status line shows the session mode, plan progress, the active tool, and elapsed time. Reads and searches appear
 in grouped summaries. Failures and edit diffs appear inline.
 
 Permission requests show the supplied options and edit diffs when available. Select an option explicitly

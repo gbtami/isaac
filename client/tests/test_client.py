@@ -66,6 +66,26 @@ async def wait_for_output(transcript: io.StringIO, text: str) -> None:
         await asyncio.sleep(0.01)
 
 
+@pytest.mark.parametrize("choice", [0, 1, None])
+async def test_proposal_picker_only_implements_when_selected(
+    command: list[str],
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    choice: int | None,
+) -> None:
+    terminal = ScriptedTerminal(["Propose a plan", "Echo next"], [] if choice is None else [choice])
+    monkeypatch.setattr(cli, "Terminal", lambda: terminal)
+    async with asyncio.timeout(8):
+        assert await cli.run_client(command, tmp_path, []) == 0
+    assert terminal.menus == {"Implement this plan?": ["Implement this plan", "Keep planning"]}
+    output = capsys.readouterr().out
+    assert "Update the example." in output
+    assert ("Implementation began." in output) == (choice == 0)
+    if choice == 0:
+        assert output.index("Update the example.") < output.index("Implementation began.") < output.index("Echo next")
+
+
 async def test_config_approval_and_named_resume(
     command: list[str], tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
@@ -213,6 +233,23 @@ async def test_picker_accepts_plain_terminal_input(monkeypatch: pytest.MonkeyPat
             await wait_for_output(transcript, "2. Second session")
             pipe.send_text("2\r")
             assert await chooser == 1
+
+
+async def test_session_mode_updates_without_advertised_choices() -> None:
+    client = TerminalClient(Terminal())
+
+    async def create() -> schema.NewSessionResponse:
+        await client.session_update(
+            "planning", schema.CurrentModeUpdate(session_update="current_mode_update", current_mode_id="plan")
+        )
+        return schema.NewSessionResponse(session_id="planning")
+
+    await client.create_session(create)
+    assert "Mode plan" in client.toolbar()
+    await client.session_update(
+        "planning", schema.CurrentModeUpdate(session_update="current_mode_update", current_mode_id="code")
+    )
+    assert "Mode code" in client.toolbar()
 
 
 async def test_resume_from_composer(command: list[str], tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -426,7 +463,8 @@ async def test_can_queue_or_cancel_a_busy_turn(
     terminal = BusyTerminal(prompts, [])
     monkeypatch.setattr(cli, "Terminal", lambda: terminal)
     async with asyncio.timeout(15):
-        assert await cli.run_client(command, tmp_path, []) == 0
+        assert await cli.run_client([*command, "--plan-picker"], tmp_path, []) == 0
+    assert "Implement this plan?" not in terminal.menus
     output = capsys.readouterr().out
     if cancel:
         assert "Stopped: cancelled" in output
