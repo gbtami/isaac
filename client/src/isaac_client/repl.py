@@ -15,6 +15,7 @@ COMMANDS = {
     "model": ("/pick-model", "Choose the model offered by the agent"),
     "config": ("/settings", "Change an advertised session setting"),
     "plan": (None, "Show the latest agent plan"),
+    "new": ("/new-session", "Start a fresh session in this workspace"),
     "resume": ("/sessions", "Resume another session in this workspace"),
     "help": (None, "List client and agent commands"),
     "quit": ("/exit", "Exit (Ctrl+D at an empty idle prompt)"),
@@ -38,7 +39,11 @@ def command_catalog(client: TerminalClient) -> dict[str, SlashCommand]:
 
 
 async def interactive_loop(
-    connection: ClientSideConnection, client: TerminalClient, resume_session: Callable[[], Awaitable[None]]
+    connection: ClientSideConnection,
+    client: TerminalClient,
+    *,
+    new_session: Callable[[], Awaitable[None]],
+    resume_session: Callable[[], Awaitable[None]],
 ) -> None:
     terminal = client.terminal
     queued: deque[str] = deque()
@@ -73,9 +78,11 @@ async def interactive_loop(
                 await client.select_config(connection, session_id, "model" if local == "model" else None)
             elif local == "plan":
                 terminal.plan(client.session.plan)
-            elif local == "resume":
+            elif local in {"new", "resume"}:
                 if from_queue:
-                    terminal.write("Open the session picker from the idle prompt.", style="yellow")
+                    terminal.write("Switch sessions from the idle prompt.", style="yellow")
+                elif local == "new":
+                    await new_session()
                 else:
                     await resume_session()
             elif local == "help":

@@ -66,9 +66,11 @@ When an agent asks a structured question, enter the requested answers and review
 You can edit the answers or decline the form. Isaac offers these questions to clients that advertise
 ACP form elicitation.
 
-## Resume
+## Start and resume sessions
 
-Use `/resume` from the idle prompt to switch to another saved session in the current workspace.
+Use `/new` from the idle prompt to start a fresh session in the same workspace, or `/resume` to
+switch to a saved session. When the agent supports `session/close`, the client closes the previous
+live session after a successful switch and closes the active session on exit.
 To open the picker at startup, run the same agent command from the same project with `--resume`.
 
 ```bash

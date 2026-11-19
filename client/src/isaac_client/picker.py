@@ -78,7 +78,9 @@ async def pick(label: str, choices: list[str], *, search: bool, toolbar: Callabl
         width = max(1, size.columns - 1)
         return "\n".join(row if cell_len(row) <= width else set_cell_size(row, width - 1) + "…" for row in rows)
 
-    prompt = PromptSession[int | None](display, key_bindings=keys, erase_when_done=True, bottom_toolbar=toolbar or "")
+    prompt = PromptSession[int | str | None](
+        display, key_bindings=keys, erase_when_done=True, bottom_toolbar=toolbar or ""
+    )
 
     def reset_selection(buffer: Buffer) -> None:
         nonlocal selected
@@ -86,6 +88,13 @@ async def pick(label: str, choices: list[str], *, search: bool, toolbar: Callabl
 
     prompt.default_buffer.on_text_changed += reset_selection
     try:
-        return await prompt.prompt_async()
+        choice = await prompt.prompt_async()
     except (EOFError, KeyboardInterrupt):
         return None
+    if isinstance(choice, str):
+        # Prompt Toolkit's dumb-terminal prompt can return the typed text directly.
+        query = choice.strip()
+        matches = results(query)
+        position = selection(query, matches)
+        return matches[position][0] if position is not None else None
+    return choice

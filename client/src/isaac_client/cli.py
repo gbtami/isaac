@@ -6,6 +6,7 @@ import os
 import sqlite3
 import sys
 from contextlib import AsyncExitStack
+from functools import partial
 from importlib.metadata import version
 from pathlib import Path
 from typing import cast
@@ -68,6 +69,7 @@ async def run_client(
         if init.agent_info:
             client.agent = init.agent_info.title or init.agent_info.name
         capabilities = init.agent_capabilities or schema.AgentCapabilities()
+        session_capabilities = capabilities.session_capabilities
         if capabilities.load_session:
             client.history = SessionHistory(command, cwd)
         if (resume or continue_latest or session_id is not None) and client.history is None:
@@ -75,7 +77,7 @@ async def run_client(
 
         async def saved_sessions() -> list[SessionEntry]:
             assert client.history is not None
-            if capabilities.session_capabilities and capabilities.session_capabilities.list is not None:
+            if session_capabilities and session_capabilities.list is not None:
                 try:
                     return await client.history.discover(connection)
                 except acp.RequestError as exc:
@@ -101,7 +103,13 @@ async def run_client(
         elif session_id is not None and client.history is not None:
             title = next((entry.title for entry in client.history.recent() if entry.session_id == session_id), None)
 
-        async def load_session(target: str, target_title: str | None) -> schema.LoadSessionResponse:
+        async def open_session(
+            target: str | None, target_title: str | None
+        ) -> schema.NewSessionResponse | schema.LoadSessionResponse:
+            if target is None:
+                return await client.create_session(
+                    partial(connection.new_session, cwd=str(cwd), mcp_servers=mcp_servers)
+                )
             client.finish_output()
             previous = client.session
             client.session = SessionState(session_id=target, title=target_title, loading=True)
@@ -113,8 +121,6 @@ async def run_client(
                 raise
 
         def accept_session(response: schema.NewSessionResponse | schema.LoadSessionResponse) -> None:
-            if isinstance(response, schema.NewSessionResponse):
-                client.session.session_id = response.session_id
             if response.config_options is not None:
                 client.session.options = response.config_options
             if response.modes is not None:
@@ -123,10 +129,21 @@ async def run_client(
             client.remember()
             client.finish_output()
 
-        async def open_session() -> schema.NewSessionResponse | schema.LoadSessionResponse:
-            if session_id is None:
-                return await connection.new_session(cwd=str(cwd), mcp_servers=mcp_servers)
-            return await load_session(session_id, title)
+        async def close_session(target: str | None) -> None:
+            if target is None or session_capabilities is None or session_capabilities.close is None:
+                return
+            try:
+                async with asyncio.timeout(2):
+                    await connection.close_session(session_id=target)
+            except (acp.RequestError, OSError) as exc:
+                terminal.write(f"Could not close session {target}: {str(exc) or type(exc).__name__}", style="yellow")
+
+        async def switch_session(target: str | None = None, target_title: str | None = None) -> None:
+            previous = client.session.session_id
+            accept_session(await open_session(target, target_title))
+            terminal.write(f"Session {client.session.session_id}", style="dim")
+            if previous != client.session.session_id:
+                await close_session(previous)
 
         async def resume_session() -> None:
             entries = [entry for entry in await saved_sessions() if entry.session_id != client.session.session_id]
@@ -136,11 +153,10 @@ async def run_client(
             choice = await terminal.choose("Resume session", [entry.label() for entry in entries], search=True)
             if choice is not None:
                 entry = entries[choice]
-                accept_session(await load_session(entry.session_id, entry.title))
-                terminal.write(f"Session {entry.session_id}", style="dim")
+                await switch_session(entry.session_id, entry.title)
 
         try:
-            session = await open_session()
+            session = await open_session(session_id, title)
         except acp.RequestError as exc:
             methods = [method for method in init.auth_methods or [] if isinstance(method, schema.AuthMethodAgent)]
             if exc.code != -32000 or not methods:
@@ -149,13 +165,16 @@ async def run_client(
             if choice is None:
                 raise
             await connection.authenticate(method_id=methods[choice].id)
-            session = await open_session()
+            session = await open_session(session_id, title)
 
         accept_session(session)
         terminal.write(f"{client.agent} · {cwd}")
         hint = "/ commands · Ctrl+D quit" if terminal.interactive else "/help"
         terminal.write(f"Session {client.session.session_id} · {hint}", style="dim")
-        await interactive_loop(connection, client, resume_session)
+        try:
+            await interactive_loop(connection, client, new_session=switch_session, resume_session=resume_session)
+        finally:
+            await close_session(client.session.session_id)
     return 0
 
 

@@ -2,6 +2,7 @@
 
 import asyncio
 import sys
+from pathlib import Path
 from typing import cast
 
 import acp
@@ -38,6 +39,7 @@ class DemoAgent:
     def on_connect(self, conn: acp.Client) -> None:
         self.client = conn
         self.cancelled = asyncio.Event()
+        self.new_sessions = 0
 
     async def cancel(self, session_id: str, **_: object) -> None:
         self.cancelled.set()
@@ -48,19 +50,28 @@ class DemoAgent:
             agent_info=schema.Implementation(name="sdk-demo", title="SDK Demo", version="1.0"),
             agent_capabilities=schema.AgentCapabilities(
                 load_session=True,
-                session_capabilities=schema.SessionCapabilities(list=schema.SessionListCapabilities())
-                if "--list-sessions" in sys.argv
-                else None,
+                session_capabilities=schema.SessionCapabilities(
+                    list=schema.SessionListCapabilities() if "--list-sessions" in sys.argv else None,
+                    close=schema.SessionCloseCapabilities() if "--advertise-close" in sys.argv else None,
+                ),
             ),
         )
 
     async def new_session(self, cwd: str, **_: object) -> schema.NewSessionResponse:
+        self.new_sessions += 1
+        session_id = "demo" if self.new_sessions == 1 else f"demo-{self.new_sessions}"
+        if self.new_sessions == 2 and "--fail-second-new" in sys.argv:
+            await self.client.session_update(session_id, acp.update_agent_message(acp.text_block("Unopened session.")))
+            raise acp.RequestError.internal_error({"details": "Could not start the new session."})
         await self.client.session_update(
-            session_id="demo",
+            session_id=session_id,
             update=schema.AvailableCommandsUpdate(
                 session_update="available_commands_update",
                 available_commands=[
-                    schema.AvailableCommand(name="demo", description="Run the demo"),
+                    schema.AvailableCommand(
+                        name="demo" if self.new_sessions == 1 else "demo-new",
+                        description="Run the demo" if self.new_sessions == 1 else "Run the new session demo",
+                    ),
                     schema.AvailableCommand(
                         name="model",
                         description="Select an agent model",
@@ -69,7 +80,14 @@ class DemoAgent:
                 ],
             ),
         )
-        return schema.NewSessionResponse(session_id="demo", config_options=options(self.model, self.verbose))
+        return schema.NewSessionResponse(session_id=session_id, config_options=options(self.model, self.verbose))
+
+    async def close_session(self, session_id: str, **_: object) -> schema.CloseSessionResponse:
+        if "--close-log" in sys.argv:
+            log = Path(sys.argv[sys.argv.index("--close-log") + 1])
+            with log.open("a", encoding="utf-8") as file:
+                file.write(f"{session_id}\n")
+        return schema.CloseSessionResponse()
 
     async def load_session(self, cwd: str, session_id: str, **_: object) -> schema.LoadSessionResponse:
         if session_id not in {"demo", "remote-new", "remote-old"}:

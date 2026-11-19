@@ -131,7 +131,7 @@ def test_slash_palette_uses_agent_plan_and_help_and_keeps_model_picker() -> None
     completer = SlashCompleter(lambda: command_catalog(client).values())
 
     names = {item.text for item in completer.get_completions(Document("/"), CompleteEvent())}
-    assert names == {"/model", "/pick-model", "/plan", "/help", "/config", "/quit"}
+    assert names == {"/model", "/pick-model", "/plan", "/new", "/help", "/config", "/quit"}
     commands = command_catalog(client)
     assert commands["/plan"].local is None
     assert commands["/help"].local is None
@@ -198,6 +198,23 @@ async def test_picker_keeps_multiline_draft_and_cursor() -> None:
             assert await editor == "First line\nseconXd"
 
 
+async def test_picker_accepts_plain_terminal_input(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("TERM", "dumb")
+    transcript = io.StringIO()
+    output = Vt100_Output(transcript, lambda: Size(rows=24, columns=100), enable_cpr=False)
+    terminal = Terminal()
+    terminal.interactive = True
+
+    with create_pipe_input() as pipe, create_app_session(input=pipe, output=output):
+        async with asyncio.timeout(8), asyncio.TaskGroup() as tasks:
+            chooser = tasks.create_task(
+                terminal.choose("Resume session", ["First session", "Second session"], search=True)
+            )
+            await wait_for_output(transcript, "2. Second session")
+            pipe.send_text("2\r")
+            assert await chooser == 1
+
+
 async def test_resume_from_composer(command: list[str], tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     transcript = io.StringIO()
     output = Vt100_Output(transcript, lambda: Size(rows=24, columns=100), enable_cpr=False)
@@ -227,6 +244,52 @@ async def test_resume_from_composer(command: list[str], tmp_path: Path, monkeypa
             await wait_for_output(transcript, "Current session is remote-old.\n")
             pipe.send_text("/quit\r")
             assert await client == 0
+
+
+@pytest.mark.parametrize("close_supported", [False, True])
+async def test_new_sessions_and_close_on_switch(
+    command: list[str],
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    close_supported: bool,
+) -> None:
+    log = tmp_path / "closed-sessions.txt"
+    agent_command = [*command, "--fail-second-new", "--close-log", str(log)]
+    if close_supported:
+        agent_command.append("--advertise-close")
+    terminal = ScriptedTerminal(
+        [
+            "Demo prompt",
+            "/new",
+            "Report session",
+            "/new",
+            "/help",
+            "/plan",
+            "Report session",
+            "/resume",
+            "Report session",
+        ],
+        [1, 0],
+    )
+    monkeypatch.setattr(cli, "Terminal", lambda: terminal)
+    async with asyncio.timeout(15):
+        assert await cli.run_client(agent_command, tmp_path, []) == 0
+
+    output = capsys.readouterr().out
+    assert "Could not start the new session." in output
+    assert "Unopened session." not in output
+    assert output.count("Current session is demo.") == 2
+    assert "Session demo-3\n" in output and "Current session is demo-3." in output
+    assert "/demo-new  Run the new session demo" in output
+    assert "/demo  Run the demo" not in output
+    assert "No plan items." in output
+    assert "Session history replayed over ACP." in output
+    if close_supported:
+        assert log.read_text().splitlines() == ["demo", "demo-3", "demo"]
+    else:
+        assert not log.exists()
+    assert {entry.session_id for entry in SessionHistory(agent_command, tmp_path).recent()} == {"demo", "demo-3"}
 
 
 async def test_back_to_back_menus_take_priority_over_the_editor(monkeypatch: pytest.MonkeyPatch) -> None:

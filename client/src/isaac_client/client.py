@@ -2,6 +2,7 @@
 
 import asyncio
 from collections import Counter
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from time import monotonic
 
@@ -33,6 +34,7 @@ class TerminalClient:
         self.terminal = terminal
         self.history: SessionHistory | None = None
         self.session = SessionState()
+        self._new_session_updates: dict[str, list[object]] | None = None
         self.agent = "ACP agent"
         self._tools: dict[str, tuple[str, str | None]] = {}
         self._routine_tools: Counter[str] = Counter()
@@ -45,6 +47,22 @@ class TerminalClient:
     def remember(self) -> None:
         if self.history is not None and self.session.session_id is not None and not self.session.loading:
             self.history.remember(self.session.session_id, self.session.title)
+
+    async def create_session(
+        self, create: Callable[[], Awaitable[schema.NewSessionResponse]]
+    ) -> schema.NewSessionResponse:
+        # The agent can announce commands and other state before returning the new session ID.
+        updates: dict[str, list[object]] = {}
+        self._new_session_updates = updates
+        try:
+            response = await create()
+        finally:
+            self._new_session_updates = None
+        self.finish_output()
+        self.session = SessionState(session_id=response.session_id, loading=True)
+        for update in updates.get(response.session_id, []):
+            await self.session_update(response.session_id, update)
+        return response
 
     def toolbar(self) -> str:
         fields = []
@@ -138,7 +156,9 @@ class TerminalClient:
 
     async def session_update(self, session_id: str, update: object, **_: object) -> None:
         session = self.session
-        if session.session_id is not None and session_id != session.session_id:
+        if session_id != session.session_id:
+            if self._new_session_updates is not None:
+                self._new_session_updates.setdefault(session_id, []).append(update)
             return
         if isinstance(update, schema.SessionInfoUpdate):
             if update.title:
