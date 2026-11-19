@@ -28,12 +28,18 @@ Configure model credentials through the chosen agent. Isaac supports its own `is
 
 - `/client:model` opens a model selector when the agent advertises a model option.
 - `/client:config` opens all advertised session config options, including grouped choices and toggles.
-- `/client:plan` shows the latest plan. Plan updates, tool activity and diffs also appear during a turn.
+- `/client:plan` shows the latest plan. The status line shows plan progress, the active tool, and
+  elapsed time. Reads and searches appear in grouped summaries. Failures and edit diffs appear inline.
 - `/client:help` lists client controls and the agent's advertised slash commands.
-- `/client:quit` exits. Ctrl+C during a turn sends ACP cancellation before exiting.
+- `/client:quit` exits. At the follow-up prompt, Enter queues another turn and Ctrl+C stops the
+  current turn, clears the queue, and returns to the prompt when the agent acknowledges cancellation.
 
 Permission requests show the supplied options and edit diffs when available. Select an option explicitly
 in the terminal. Enter, EOF and scripted input cancel the request.
+
+When an agent asks a structured question, enter the requested answers and review them before sending.
+You can edit the answers or decline the form. Isaac offers these questions to clients that advertise
+ACP form elicitation.
 
 ## Resume
 
@@ -43,17 +49,21 @@ Run the same agent command from the same project with `--resume` to open the nam
 isaac-client --resume --project-dir ~/playground isaac
 ```
 
-Use `--session ID` to open a known ACP session ID directly. Resume requires an agent that advertises
+Type part of a title to filter the picker, then choose a result by number. Use `--continue` to
+open the latest session for this agent and project, or `--session ID` to open a known session ID.
+Resume requires an agent that advertises
 `session/load`. The client stores session IDs and titles in its own SQLite database under the platform
 state directory. Set `ISAAC_CLIENT_STATE_DIR` to use another directory. The picker prefers titles sent by
-the agent and starts with a short title from the first prompt. The agent provides the transcript on load.
+the agent and starts with a short title from the first prompt. When the agent advertises
+`session/list`, the client also discovers sessions saved by that agent. The agent provides the
+transcript on load.
 With Isaac, this includes any checkpoint recovery notice.
 
 ## ACP support
 
 The client uses ACP v1 over stdio with SDK `0.11.x`. It supports text prompts and streamed text and
 thinking, tool updates and edit diffs, item plans, permission requests, cancellation, session loading,
-session titles, context usage, advertised slash commands, session config options, and agent-directed
+session titles, context usage, advertised slash commands, session config options, form elicitation, and agent-directed
 authentication. Use `--mcp-config PATH` to provide a JSON array of ACP MCP server descriptors for session
 setup. Workspace tools run on the agent side with Isaac.
 

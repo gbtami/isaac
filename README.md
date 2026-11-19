@@ -138,6 +138,7 @@ for the client's supported ACP features and an example with another agent.
   the conversation is already near the limit. `--context-window TOKENS` overrides window resolution.
   Toad's status line shows estimated context usage before model requests when the window size is known.
 - Permissions: Harness `Permissions`, with approval decisions handled by the ACP client.
+- Structured questions: Harness `AskUser` sends ACP forms when the client advertises form elicitation.
 - MCP: ACP-provided stdio, HTTP, and SSE servers, with server-prefixed tool names.
 - Code Mode: Harness exposes eligible tools through Monty's `run_code` by default. Pass
   `--no-code-mode` to use direct tool calls.

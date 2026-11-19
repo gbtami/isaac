@@ -82,6 +82,67 @@ async def test_cli_initialization_and_model_selection(tmp_path: Path) -> None:
         assert selected.config_options[0].current_value == models[1]
 
 
+@pytest.mark.parametrize("code_mode", [False, True])
+async def test_harness_questions_round_trip_over_acp(tmp_path: Path, code_mode: bool) -> None:
+    class AnsweringClient(RecordingClient):
+        async def create_elicitation(
+            self, message: str, mode: schema.ElicitationMode, **_kwargs: object
+        ) -> schema.CreateElicitationResponse:
+            assert isinstance(mode, schema.ElicitationFormSessionMode)
+            assert mode.requested_schema.properties is not None
+            options = mode.requested_schema.properties["choice_0"]
+            assert isinstance(options, schema.ElicitationMultiSelectPropertySchema)
+            assert isinstance(options.items, schema.TitledMultiSelectItems)
+            assert [option.const for option in options.items.any_of] == ["Unit tests", "Type checks"]
+            return schema.AcceptElicitationResponse(
+                action="accept", content={"choice_0": ["Unit tests", "Type checks"], "other_1": "Python 3.13"}
+            )
+
+    fixture = Path(__file__).with_name("acp_fixture.py")
+    client = AnsweringClient()
+    questions = [
+        {
+            "header": "Checks",
+            "question": "Which checks should run?",
+            "options": [{"label": "Unit tests"}, {"label": "Type checks"}],
+            "multi_select": True,
+        },
+        {
+            "header": "Version",
+            "question": "Which Python version should we target?",
+            "options": [{"label": "Python 3.11"}, {"label": "Python 3.12"}],
+        },
+    ]
+    command = (
+        {"tool": "run_code", "args": {"code": f"print(await ask_user_question(questions={questions!r}))"}}
+        if code_mode
+        else {"tool": "ask_user_question", "args": {"questions": questions}}
+    )
+    args = [str(fixture)] + ([] if code_mode else ["--no-code-mode"])
+    async with (
+        asyncio.timeout(30),
+        acp.spawn_agent_process(cast(Client, client), sys.executable, *args, use_unstable_protocol=True) as (
+            connection,
+            _process,
+        ),
+    ):
+        await connection.initialize(
+            protocol_version=acp.PROTOCOL_VERSION,
+            client_capabilities=schema.ClientCapabilities(
+                elicitation=schema.ElicitationCapabilities(form=schema.ElicitationFormCapabilities())
+            ),
+        )
+        session = await connection.new_session(cwd=str(tmp_path), mcp_servers=[])
+        result = await connection.prompt(session_id=session.session_id, prompt=[acp.text_block(json.dumps(command))])
+        assert result.stop_reason == "end_turn"
+        text = "".join(
+            update.content.text
+            for _, update in client.updates
+            if isinstance(update, schema.AgentMessageChunk) and isinstance(update.content, schema.TextContentBlock)
+        )
+        assert "Unit tests" in text and "Type checks" in text and "Python 3.13" in text
+
+
 async def test_context_usage_is_reported_over_acp(tmp_path: Path) -> None:
     client = RecordingClient()
     fixture = Path(__file__).with_name("acp_fixture.py")

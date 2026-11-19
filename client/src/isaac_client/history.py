@@ -10,6 +10,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 
+from acp.client.connection import ClientSideConnection
 from platformdirs import user_state_path
 
 
@@ -17,6 +18,13 @@ from platformdirs import user_state_path
 class SessionEntry:
     session_id: str
     title: str | None
+    updated_at: datetime | None
+
+    def label(self) -> str:
+        label = f"{self.title or 'Untitled session'}  [{self.session_id}]"
+        if self.updated_at:
+            label += f"  {self.updated_at.astimezone():%Y-%m-%d %H:%M}"
+        return label
 
 
 class SessionHistory:
@@ -38,10 +46,42 @@ class SessionHistory:
     def recent(self) -> list[SessionEntry]:
         with closing(sqlite3.connect(self.database)) as db:
             rows = db.execute(
-                "SELECT session_id, title FROM sessions WHERE agent = ? AND cwd = ? ORDER BY updated_at DESC",
+                "SELECT session_id, title, updated_at FROM sessions WHERE agent = ? AND cwd = ? ORDER BY updated_at DESC",
                 (self.agent, self.cwd),
             )
-            return [SessionEntry(session_id, title) for session_id, title in rows]
+            return [
+                SessionEntry(session_id, title, datetime.fromisoformat(updated)) for session_id, title, updated in rows
+            ]
+
+    async def discover(self, connection: ClientSideConnection) -> list[SessionEntry]:
+        entries = {entry.session_id: entry for entry in self.recent()}
+        cursor = None
+        seen: set[str] = set()
+        while True:
+            response = await connection.list_sessions(cwd=self.cwd, cursor=cursor)
+            for item in response.sessions:
+                if Path(item.cwd) != Path(self.cwd):
+                    continue
+                local = entries.get(item.session_id)
+                updated = local.updated_at if local else None
+                if item.updated_at:
+                    try:
+                        reported = datetime.fromisoformat(item.updated_at)
+                    except ValueError:
+                        pass
+                    else:
+                        reported = reported.astimezone(UTC)
+                        updated = max(updated, reported) if updated else reported
+                entries[item.session_id] = SessionEntry(
+                    item.session_id, item.title or (local.title if local else None), updated
+                )
+            cursor = response.next_cursor
+            if cursor is None or cursor in seen:
+                break
+            seen.add(cursor)
+        return sorted(
+            entries.values(), key=lambda entry: entry.updated_at or datetime.min.replace(tzinfo=UTC), reverse=True
+        )
 
     def remember(self, session_id: str, title: str | None = None) -> None:
         with closing(sqlite3.connect(self.database)) as db, db:

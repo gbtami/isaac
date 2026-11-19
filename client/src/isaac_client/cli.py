@@ -28,6 +28,7 @@ async def run_client(
     mcp_servers: list[McpServer],
     *,
     resume: bool = False,
+    continue_latest: bool = False,
     session_id: str | None = None,
 ) -> int:
     terminal = Terminal()
@@ -43,7 +44,10 @@ async def run_client(
         init = await connection.initialize(
             protocol_version=acp.PROTOCOL_VERSION,
             client_capabilities=schema.ClientCapabilities(
-                session=schema.ClientSessionCapabilities(config_options=schema.SessionConfigOptionsCapabilities())
+                session=schema.ClientSessionCapabilities(config_options=schema.SessionConfigOptionsCapabilities()),
+                elicitation=schema.ElicitationCapabilities(form=schema.ElicitationFormCapabilities())
+                if terminal.interactive
+                else None,
             ),
             client_info=schema.Implementation(
                 name="isaac-acp-client", title="Isaac Terminal Client", version=version("isaac-acp-client")
@@ -53,19 +57,27 @@ async def run_client(
             raise RuntimeError(f"The agent requested ACP protocol version {init.protocol_version}.")
         if init.agent_info:
             client.agent = init.agent_info.title or init.agent_info.name
-        if init.agent_capabilities and init.agent_capabilities.load_session:
+        capabilities = init.agent_capabilities or schema.AgentCapabilities()
+        if capabilities.load_session:
             client.history = SessionHistory(command, cwd)
-        if (resume or session_id is not None) and client.history is None:
+        if (resume or continue_latest or session_id is not None) and client.history is None:
             raise RuntimeError("This agent does not advertise session/load.")
-        if resume:
+        if resume or continue_latest:
             assert client.history is not None
             entries = client.history.recent()
+            if capabilities.session_capabilities and capabilities.session_capabilities.list is not None:
+                try:
+                    entries = await client.history.discover(connection)
+                except acp.RequestError as exc:
+                    terminal.write(f"Could not list agent sessions: {exc}", style="yellow")
             if not entries:
                 raise RuntimeError("No sessions saved for this agent command and workspace.")
-            if not terminal.interactive:
+            if resume and not terminal.interactive:
                 raise RuntimeError("The resume picker needs a terminal. Use --session ID for scripted input.")
-            choice = await terminal.choose(
-                "Resume session", [f"{entry.title or 'Untitled session'}  [{entry.session_id}]" for entry in entries]
+            choice = (
+                await terminal.choose("Resume session", [entry.label() for entry in entries], search=True)
+                if resume
+                else 0
             )
             if choice is None:
                 return 0
@@ -102,7 +114,7 @@ async def run_client(
             client.options = session.config_options
         client.modes = session.modes
         client.remember()
-        client.finish_message()
+        client.finish_output()
         terminal.write(f"{client.agent} · {cwd}")
         terminal.write(f"Session {session_id} · /client:help", style="dim")
         await interactive_loop(connection, session_id, client)
@@ -115,6 +127,7 @@ def main() -> int:
     parser.add_argument("--mcp-config", type=Path, help="JSON file with an array of ACP MCP server definitions")
     session = parser.add_mutually_exclusive_group()
     session.add_argument("--resume", action="store_true", help="Choose a saved session for this agent and workspace")
+    session.add_argument("--continue", dest="continue_latest", action="store_true", help="Open the most recent session")
     session.add_argument("--session", help="Open an ACP session by ID")
     parser.add_argument("agent", help="Executable or command to launch")
     parser.add_argument("agent_args", nargs=argparse.REMAINDER, help="Arguments passed to the agent")
@@ -125,7 +138,14 @@ def main() -> int:
     try:
         mcp_servers = MCP_SERVERS.validate_json(args.mcp_config.read_bytes()) if args.mcp_config else []
         return asyncio.run(
-            run_client([args.agent, *args.agent_args], cwd, mcp_servers, resume=args.resume, session_id=args.session)
+            run_client(
+                [args.agent, *args.agent_args],
+                cwd,
+                mcp_servers,
+                resume=args.resume,
+                continue_latest=args.continue_latest,
+                session_id=args.session,
+            )
         )
     except KeyboardInterrupt:
         return 130

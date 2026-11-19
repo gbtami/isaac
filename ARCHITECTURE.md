@@ -28,6 +28,7 @@ transcripts through `session/load`. Project and model behavior belong to the age
 - `isaac.mcp`: converts ACP MCP descriptors into public Pydantic AI MCP toolset capabilities.
 - `isaac.session_ui`: advertises slash commands and publishes Harness plan and context usage updates over ACP.
 - `isaac.session_permissions`: forwards Harness approvals from inside `run_code` to the ACP client.
+- `isaac.session_questions`: maps Harness `AskUser` to ACP form elicitation for clients that advertise it.
 - `isaac.session_store`: implements Harness's public `SessionStore` protocol using SQLite snapshots.
 - `isaac.session_titles`: generates a stable first-prompt title with a bounded, tool-free model request.
 

@@ -23,6 +23,7 @@ from isaac.compaction import AutomaticCompaction
 from isaac.config import SessionSettings, Settings, session_database
 from isaac.mcp import mcp_capabilities
 from isaac.session_permissions import code_mode_approvals
+from isaac.session_questions import session_questions
 from isaac.session_store import SqliteSessionStore
 from isaac.session_titles import SessionTitles
 from isaac.session_ui import SessionUI
@@ -64,6 +65,8 @@ def build_acp_adapter(
         ]
         if settings.code_mode:
             capabilities.append(code_mode_approvals(session))
+        if (questions := session_questions(session)) is not None:
+            capabilities.append(questions)
         await ui.advertise()
         await ui.publish_plan(force=True)
         await titles.restore()
