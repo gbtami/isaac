@@ -58,7 +58,8 @@ async def interactive_loop(connection: ClientSideConnection, session_id: str, cl
                 await send_turn(connection, session_id, client, line, queued)
         except acp.RequestError as exc:
             client.finish_message()
-            terminal.write(str(exc), style="red")
+            details = exc.data.get("details") if isinstance(exc.data, dict) else None
+            terminal.write(f"{exc}: {details}" if isinstance(details, str) and details else str(exc), style="red")
         finally:
             client.finish_message()
 

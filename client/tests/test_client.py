@@ -157,6 +157,17 @@ async def test_groups_reads_and_keeps_failures_visible(
     assert "Test failed with details" in output
 
 
+async def test_shows_prompt_error_details_and_accepts_another_turn(
+    command: list[str], tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    monkeypatch.setattr(cli, "Terminal", lambda: ScriptedTerminal(["Fail the turn", "Echo recovered"], []))
+    async with asyncio.timeout(15):
+        assert await cli.run_client(command, tmp_path, []) == 0
+    output = capsys.readouterr().out
+    assert "Internal error: Set the provider credentials and try again." in output
+    assert "Echo recovered" in output
+
+
 async def test_reviews_and_edits_structured_answers(
     command: list[str], tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:

@@ -122,6 +122,8 @@ class DemoAgent:
         if isinstance(first, schema.TextContentBlock) and first.text.startswith("Echo "):
             await self.client.session_update(session_id, acp.update_agent_message(first))
             return schema.PromptResponse(stop_reason="end_turn")
+        if isinstance(first, schema.TextContentBlock) and first.text == "Fail the turn":
+            raise acp.RequestError.internal_error({"details": "Set the provider credentials and try again."})
         if isinstance(first, schema.TextContentBlock) and first.text == "Ask a form question":
             answer = await self.client.create_elicitation(
                 "Which runtime should the example use?",

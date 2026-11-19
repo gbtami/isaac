@@ -74,7 +74,7 @@ Then set a model in the shared environment, or pass it to the server:
 ISAAC_MODEL=openai-codex:gpt-5.6-luna
 ```
 
-Start Isaac from Toad as usual. No Toad changes or client-specific authentication UI are needed.
+Start Isaac from Toad or Isaac Terminal Client with the same saved login.
 Choose a model available to your ChatGPT/Codex account. If a prompt returns `model_not_found`,
 check the model picker in Codex and use one of the listed model IDs with the `openai-codex:` prefix.
 Run `isaac login` again to replace the saved login, then restart existing Isaac processes.

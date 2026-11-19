@@ -17,12 +17,27 @@ isaac-client --project-dir ~/playground opencode acp --cwd ~/playground
 Run both components from the checkout with their separate dependencies.
 
 ```bash
-uv run --project client isaac-client --project-dir ~/playground uv run --project . isaac
+uv run --project client isaac-client --project-dir ~/playground \
+  uv run --project . --no-active isaac
 ```
 
 Client options go before the agent command. The remaining arguments go to the agent.
 The agent process starts in the caller's directory, and ACP supplies the project directory for the session.
-Configure model credentials through the chosen agent. Isaac supports its own `isaac login` command.
+Configure model credentials through the chosen agent.
+
+### Use a ChatGPT/Codex subscription with Isaac
+
+Isaac Terminal Client and Toad can use the same browser login saved by Isaac. If you need to sign in
+from this checkout, run `uv run isaac login` before starting the client. Select the `openai-codex:`
+provider for the subscription. The `openai:` provider uses an API key.
+
+```bash
+uv run --project client isaac-client --project-dir ~/playground \
+  uv run --project . --no-active isaac --model openai-codex:gpt-5.6-luna
+```
+
+If your shared Isaac configuration already sets `ISAAC_MODEL` to a Codex model, use the command
+above without `--model`.
 
 ## Terminal controls
 
