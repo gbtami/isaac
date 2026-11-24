@@ -36,6 +36,16 @@ def visible(text: str) -> str:
     )
 
 
+def edit_diff(content: schema.FileEditToolCallContent) -> str:
+    lines = difflib.unified_diff(
+        (content.old_text or "").splitlines(keepends=True),
+        content.new_text.splitlines(keepends=True),
+        fromfile=content.path,
+        tofile=content.path,
+    )
+    return "".join(line if line.endswith("\n") else f"{line}\n\\ No newline at end of file\n" for line in lines)
+
+
 @dataclass(frozen=True)
 class SlashCommand:
     name: str
@@ -131,6 +141,10 @@ class Terminal:
             self._print(self._line)
             self._line = Text()
         self._line.append(tail, style)
+        self.refresh_prompt()
+
+    def refresh_prompt(self) -> None:
+        # A queued print redraws after writing above the prompt.
         app = get_app_or_none()
         if app is not None and self._output_task is None:
             app.invalidate()
@@ -202,6 +216,7 @@ class Terminal:
                 return toolbar()[:width]
             return ""
 
+        # ACP updates invalidate the composer. A refresh timer can clear a native selection.
         return await prompt.prompt_async(
             message,
             completer=completer,
@@ -214,7 +229,6 @@ class Terminal:
             bottom_toolbar=toolbar or "",
             rprompt=status_fallback,
             default=default,
-            refresh_interval=0.25 if toolbar else 0,
         )
 
     async def edit(self, label: str, *, commands: CommandSource | None, toolbar: Callable[[], str]) -> str:
@@ -300,13 +314,5 @@ class Terminal:
         self._print(table)
 
     def diff(self, content: schema.FileEditToolCallContent) -> None:
-        diff = "".join(
-            difflib.unified_diff(
-                (content.old_text or "").splitlines(keepends=True),
-                content.new_text.splitlines(keepends=True),
-                fromfile=content.path,
-                tofile=content.path,
-            )
-        )
-        if diff:
+        if diff := edit_diff(content):
             self._print(Syntax(visible(diff), "diff", theme="ansi_dark"))

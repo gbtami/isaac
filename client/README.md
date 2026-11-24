@@ -47,6 +47,9 @@ above without `--model`.
   you send it.
 - `/model` opens the client model picker when the agent leaves that name available. With Isaac,
   `/model` is the agent command and `/pick-model` opens the picker.
+- `/export PATH` saves a UTF-8 transcript with prompts, replies, thinking, and the tool details
+  sent over ACP, including diffs. Relative paths resolve in the workspace. Choose a new file.
+  For resumed sessions, the transcript includes the history supplied by the agent on load.
 - `/config` opens all advertised session config options, including grouped choices and toggles.
 - With Isaac, `/plan [goal]` enters read-only Plan mode. When a proposal is ready, choose
   **Implement this plan** or **Keep planning**. You can also run `/implement` to start coding,
@@ -59,7 +62,7 @@ above without `--model`.
 Use ↑/↓ and Enter in pickers, or type a choice number. Press Esc to close a picker. Model, setting,
 and session pickers filter as you type.
 
-The status line shows the session mode, plan progress, the active tool, and elapsed time. Reads and searches appear
+The status line shows the session mode, plan progress, context usage, and the active tool. Reads and searches appear
 in grouped summaries. Failures and edit diffs appear inline.
 
 Permission requests show the supplied options and edit diffs when available. Select an option explicitly
@@ -89,6 +92,10 @@ the agent and starts with a short title from the first prompt. When the agent ad
 `session/list`, the client also discovers sessions saved by that agent. The agent provides the
 transcript on load.
 With Isaac, this includes any checkpoint recovery notice.
+
+For agents that support session loading, the client remembers the model selected with the picker or
+confirmed by the agent's `/model ID` command. A fresh session uses that preference when the same
+agent command still offers it. A resumed session uses the model restored by the agent.
 
 ## ACP support
 

@@ -64,6 +64,8 @@ class DemoAgent:
     async def new_session(self, cwd: str, **_: object) -> schema.NewSessionResponse:
         self.new_sessions += 1
         session_id = "demo" if self.new_sessions == 1 else f"demo-{self.new_sessions}"
+        if "--model-preference" in sys.argv:
+            self.model = "one"
         if self.new_sessions == 2 and "--fail-second-new" in sys.argv:
             await self.client.session_update(session_id, acp.update_agent_message(acp.text_block("Unopened session.")))
             raise acp.RequestError.internal_error({"details": "Could not start the new session."})
@@ -96,6 +98,8 @@ class DemoAgent:
     async def load_session(self, cwd: str, session_id: str, **_: object) -> schema.LoadSessionResponse:
         if session_id not in {"demo", "remote-new", "remote-old"}:
             raise acp.RequestError.invalid_params({"sessionId": session_id})
+        if "--replay-user" in sys.argv:
+            await self.client.session_update(session_id, acp.update_user_message(acp.text_block("Saved question")))
         await self.client.session_update(
             session_id, acp.update_agent_message(acp.text_block("Session history replayed over ACP."))
         )
@@ -162,7 +166,19 @@ class DemoAgent:
                 session_id, acp.update_agent_message(acp.text_block("Implementation began."))
             )
             return schema.PromptResponse(stop_reason="end_turn")
-        if isinstance(first, schema.TextContentBlock) and first.text.startswith(("Echo ", "/model ")):
+        if isinstance(first, schema.TextContentBlock) and first.text.startswith("/model "):
+            value = first.text.removeprefix("/model ")
+            if "--model-preference" in sys.argv and value in {"one", "two"}:
+                self.model = value
+                await self.client.session_update(
+                    session_id,
+                    schema.ConfigOptionUpdate(
+                        session_update="config_option_update", config_options=options(self.model, self.verbose)
+                    ),
+                )
+            await self.client.session_update(session_id, acp.update_agent_message(first))
+            return schema.PromptResponse(stop_reason="end_turn")
+        if isinstance(first, schema.TextContentBlock) and first.text.startswith("Echo "):
             await self.client.session_update(session_id, acp.update_agent_message(first))
             return schema.PromptResponse(stop_reason="end_turn")
         if isinstance(first, schema.TextContentBlock) and first.text == "Report session":
@@ -193,12 +209,20 @@ class DemoAgent:
             await self.client.session_update(session_id, acp.update_agent_message(acp.text_block(f"Answer: {reply}")))
             return schema.PromptResponse(stop_reason="end_turn")
         if isinstance(first, schema.TextContentBlock) and first.text == "Show tool activity":
+            await self.client.session_update(session_id, acp.update_agent_thought(acp.text_block("Check \x1b[")))
+            await self.client.session_update(
+                session_id, acp.update_agent_thought(acp.text_block("32mthe files\x1b[0m."))
+            )
             for number in range(2):
                 tool_id = f"read-{number}"
                 await self.client.session_update(
                     session_id,
                     schema.ToolCallStart(
-                        session_update="tool_call", tool_call_id=tool_id, title="Read file", kind="read"
+                        session_update="tool_call",
+                        tool_call_id=tool_id,
+                        title="Read file",
+                        kind="read",
+                        raw_input={"path": "demo.txt"},
                     ),
                 )
                 await self.client.session_update(
@@ -208,6 +232,7 @@ class DemoAgent:
                         tool_call_id=tool_id,
                         status="completed",
                         content=[acp.tool_content(acp.text_block("Routine output"))],
+                        raw_output={"text": "Text returned to the model"},
                     ),
                 )
             await self.client.session_update(

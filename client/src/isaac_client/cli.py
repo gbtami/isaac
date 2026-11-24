@@ -122,11 +122,15 @@ async def run_client(
                 client.finish_output()
                 raise
 
-        def accept_session(response: schema.NewSessionResponse | schema.LoadSessionResponse) -> None:
+        async def accept_session(
+            response: schema.NewSessionResponse | schema.LoadSessionResponse, *, fresh: bool
+        ) -> None:
             if response.config_options is not None:
                 client.session.options = response.config_options
             if response.modes is not None and client.session.current_mode_id is None:
                 client.session.current_mode_id = response.modes.current_mode_id
+            if fresh:
+                await client.apply_preferred_model(connection)
             client.session.loading = False
             client.remember()
             client.finish_output()
@@ -142,7 +146,7 @@ async def run_client(
 
         async def switch_session(target: str | None = None, target_title: str | None = None) -> None:
             previous = client.session.session_id
-            accept_session(await open_session(target, target_title))
+            await accept_session(await open_session(target, target_title), fresh=target is None)
             terminal.write(f"Session {client.session.session_id}", style="dim")
             if previous != client.session.session_id:
                 await close_session(previous)
@@ -169,12 +173,12 @@ async def run_client(
             await connection.authenticate(method_id=methods[choice].id)
             session = await open_session(session_id, title)
 
-        accept_session(session)
+        await accept_session(session, fresh=session_id is None)
         terminal.write(f"{client.agent} · {cwd}")
         hint = "/ commands · Ctrl+D quit" if terminal.interactive else "/help"
         terminal.write(f"Session {client.session.session_id} · {hint}", style="dim")
         try:
-            await interactive_loop(connection, client, new_session=switch_session, resume_session=resume_session)
+            await interactive_loop(connection, client, cwd, new_session=switch_session, resume_session=resume_session)
         finally:
             await close_session(client.session.session_id)
     return 0

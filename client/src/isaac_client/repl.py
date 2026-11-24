@@ -4,6 +4,7 @@ import asyncio
 from collections import deque
 from collections.abc import Awaitable, Callable
 from contextlib import suppress
+from pathlib import Path
 
 import acp
 from acp.client.connection import ClientSideConnection
@@ -17,6 +18,7 @@ COMMANDS = {
     "plan": (None, "Show the latest agent plan"),
     "new": ("/new-session", "Start a fresh session in this workspace"),
     "resume": ("/sessions", "Resume another session in this workspace"),
+    "export": ("/export-transcript", "Save this session as a plain-text transcript"),
     "help": (None, "List client and agent commands"),
     "quit": ("/exit", "Exit (Ctrl+D at an empty idle prompt)"),
 }
@@ -34,13 +36,14 @@ def command_catalog(client: TerminalClient) -> dict[str, SlashCommand]:
         shortcut = f"/{name}"
         alias = alternate if shortcut in commands else shortcut
         if alias is not None and alias not in commands:
-            commands[alias] = SlashCommand(alias, description, local=name)
+            commands[alias] = SlashCommand(alias, description, hint="path" if name == "export" else "", local=name)
     return commands
 
 
 async def interactive_loop(
     connection: ClientSideConnection,
     client: TerminalClient,
+    cwd: Path,
     *,
     new_session: Callable[[], Awaitable[None]],
     resume_session: Callable[[], Awaitable[None]],
@@ -66,7 +69,8 @@ async def interactive_loop(
         if not line.strip():
             continue
 
-        entry = command_catalog(client).get(line.split(maxsplit=1)[0]) if "\n" not in line else None
+        shortcut, *arguments = line.split(maxsplit=1)
+        entry = command_catalog(client).get(shortcut) if "\n" not in line else None
         local = entry.local if entry else None
         if local == "quit":
             return
@@ -78,6 +82,17 @@ async def interactive_loop(
                 await client.select_config(connection, session_id, "model" if local == "model" else None)
             elif local == "plan":
                 terminal.plan(client.session.plan)
+            elif local == "export":
+                if not arguments:
+                    terminal.write(f"Usage: {shortcut} PATH", style="yellow")
+                    continue
+                try:
+                    path = cwd / Path(arguments[0].strip()).expanduser()
+                    client.session.transcript.export(path)
+                except (OSError, RuntimeError, ValueError) as exc:
+                    terminal.write(f"Could not export transcript: {exc}", style="red")
+                else:
+                    terminal.write(f"Transcript saved to {path}", style="dim")
             elif local in {"new", "resume"}:
                 if from_queue:
                     terminal.write("Switch sessions from the idle prompt.", style="yellow")
@@ -116,7 +131,7 @@ async def send_turn(
     queued: deque[str],
     commands: CommandSource,
 ) -> bool:
-    client.start_turn()
+    client.start_turn(line)
     editor = (
         asyncio.create_task(collect_followups(connection, session_id, client, queued, commands))
         if client.terminal.interactive
@@ -124,7 +139,9 @@ async def send_turn(
     )
     try:
         response = await connection.prompt(session_id=session_id, prompt=[acp.text_block(line)])
-        if response.stop_reason != "end_turn":
+        if response.stop_reason == "end_turn":
+            client.confirm_requested_model()
+        else:
             client.finish_message()
             client.terminal.write(f"Stopped: {response.stop_reason}", style="yellow")
     except asyncio.CancelledError:

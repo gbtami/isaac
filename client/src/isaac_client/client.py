@@ -4,15 +4,15 @@ import asyncio
 from collections import Counter
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
-from time import monotonic
 
-from acp import schema
+from acp import RequestError, schema
 from acp.client.connection import ClientSideConnection
 from acp.connection import StreamDirection, StreamEvent
 
 from isaac_client.display import Terminal, visible
 from isaac_client.elicitation import answer_form
 from isaac_client.history import SessionHistory
+from isaac_client.transcript import Transcript
 
 ConfigOption = schema.SessionConfigOptionSelect | schema.SessionConfigOptionBoolean
 ToolContent = schema.ContentToolCallContent | schema.FileEditToolCallContent | schema.TerminalToolCallContent
@@ -29,6 +29,8 @@ class SessionState:
     usage: schema.UsageUpdate | None = None
     plan: list[schema.PlanEntry] = field(default_factory=list)
     loading: bool = False
+    transcript: Transcript = field(default_factory=Transcript)
+    requested_model: str | None = None
 
 
 class TerminalClient:
@@ -40,7 +42,7 @@ class TerminalClient:
         self.agent = "ACP agent"
         self._tools: dict[str, tuple[str, str | None]] = {}
         self._routine_tools: Counter[str] = Counter()
-        self._turn_started: float | None = None
+        self._turn_active = False
         self.plan_proposed = False
         self._speaking: str | None = None
         self.cancelling = False
@@ -69,7 +71,7 @@ class TerminalClient:
 
     def toolbar(self) -> str:
         fields = []
-        if self._turn_started is not None:
+        if self._turn_active:
             if self._permission_menus:
                 status = "Waiting for approval"
             elif self._question_menus:
@@ -80,7 +82,7 @@ class TerminalClient:
                 status = next(reversed(self._tools.values()))[0]
             else:
                 status = "Working"
-            fields.append(f"{status} ({int(monotonic() - self._turn_started)}s)")
+            fields.append(status)
         session = self.session
         if session.plan:
             completed = sum(item.status == "completed" for item in session.plan)
@@ -109,6 +111,7 @@ class TerminalClient:
             self.finish_output()
             stored = self._tools.get(tool_call.tool_call_id)
             title = tool_call.title or (stored[0] if stored else tool_call.tool_call_id)
+            self.session.transcript.tool(f"Approve {title}", tool_call)
             self.terminal.write(f"Approve tool call: {title}", style="bold yellow")
             self._show_content(tool_call.content or [])
             menu = asyncio.create_task(
@@ -165,7 +168,7 @@ class TerminalClient:
             event.direction is StreamDirection.INCOMING
             and message.get("method") == f"_{PROPOSED_PLAN}"
             and "id" not in message
-            and self._turn_started is not None
+            and self._turn_active
             and isinstance(params := message.get("params"), dict)
             and params.get("sessionId") == self.session.session_id
         ):
@@ -181,12 +184,17 @@ class TerminalClient:
             if update.title:
                 session.title = " ".join(visible(update.title).split())[:160] or session.title
                 self.remember()
+                self.terminal.refresh_prompt()
         elif isinstance(update, schema.UsageUpdate):
             session.usage = update
+            self.terminal.refresh_prompt()
         elif isinstance(update, schema.ConfigOptionUpdate):
             session.options = update.config_options
+            self.confirm_requested_model()
+            self.terminal.refresh_prompt()
         elif isinstance(update, schema.CurrentModeUpdate):
             session.current_mode_id = update.current_mode_id
+            self.terminal.refresh_prompt()
         elif isinstance(update, schema.AvailableCommandsUpdate):
             session.commands = update.available_commands
         elif isinstance(update, (schema.UserMessageChunk, schema.AgentMessageChunk, schema.AgentThoughtChunk)):
@@ -199,6 +207,8 @@ class TerminalClient:
                 if isinstance(update, schema.AgentThoughtChunk)
                 else self.agent
             )
+            if not isinstance(update, schema.UserMessageChunk) or not self._turn_active:
+                session.transcript.message(speaker, update.content.text)
             if self._speaking != speaker:
                 self.finish_output()
                 self.terminal.write(f"{speaker}: ", end="", style="bold")
@@ -207,19 +217,24 @@ class TerminalClient:
                 update.content.text, end="", style="dim" if isinstance(update, schema.AgentThoughtChunk) else None
             )
         elif isinstance(update, schema.ToolCallStart):
+            session.transcript.tool(update.title, update)
             self._tools[update.tool_call_id] = (update.title, update.kind)
             if update.content and update.kind not in {"read", "search"}:
                 self.finish_output()
                 self.terminal.write(f"Tool: {update.title}", style="cyan")
                 self._show_content(update.content)
+            self.terminal.refresh_prompt()
         elif isinstance(update, schema.ToolCallProgress):
             self._update_tool(update)
+            self.terminal.refresh_prompt()
         elif isinstance(update, schema.AgentPlanUpdate):
             session.plan = update.entries
+            self.terminal.refresh_prompt()
 
     def _update_tool(self, update: schema.ToolCallProgress) -> None:
         title, kind = self._tools.get(update.tool_call_id, (update.tool_call_id, None))
         title, kind = update.title or title, update.kind or kind
+        self.session.transcript.tool(title, update)
         content = update.content or []
         if update.status in {"completed", "failed"}:
             self._tools.pop(update.tool_call_id, None)
@@ -242,16 +257,24 @@ class TerminalClient:
             self.finish_output()
             self._show_content(content)
 
-    def start_turn(self) -> None:
+    def start_turn(self, prompt: str) -> None:
         self.finish_output()
+        self.session.transcript.break_message()
+        command, *arguments = prompt.split()
+        self.session.requested_model = (
+            arguments[0] if command == "/model" and len(arguments) == 1 and "\n" not in prompt else None
+        )
+        self.session.transcript.message("You", prompt)
+        self.session.transcript.break_message()
         self._tools.clear()
         self.plan_proposed = False
-        self._turn_started = monotonic()
+        self._turn_active = True
 
     def end_turn(self) -> None:
         self.finish_output()
+        self.session.transcript.break_message()
         self._tools.clear()
-        self._turn_started = None
+        self._turn_active = False
 
     def finish_output(self) -> None:
         self.finish_message()
@@ -288,6 +311,36 @@ class TerminalClient:
             for choice in (item.options if isinstance(item, schema.SessionConfigSelectGroup) else [item])
         ]
 
+    def confirm_requested_model(self) -> None:
+        model = self.session.requested_model
+        if (
+            self.history is not None
+            and model is not None
+            and any(
+                self.is_option(option, "model") and option.current_value == model for option in self.session.options
+            )
+        ):
+            self.history.prefer_model(model)
+            self.session.requested_model = None
+
+    async def apply_preferred_model(self, connection: ClientSideConnection) -> None:
+        preferred = self.history.preferred_model() if self.history is not None else None
+        session_id = self.session.session_id
+        if preferred is None or session_id is None:
+            return
+        for option in self.session.options:
+            if self.is_option(option, "model") and any(item.value == preferred for item in self.choices(option)):
+                if option.current_value != preferred:
+                    try:
+                        response = await connection.set_config_option(
+                            session_id=session_id, config_id=option.id, value=preferred
+                        )
+                    except RequestError as exc:
+                        self.terminal.write(f"Could not select preferred model {preferred}: {exc}", style="yellow")
+                    else:
+                        self.session.options = response.config_options
+                return
+
     async def select_config(
         self, connection: ClientSideConnection, session_id: str, category: str | None = None
     ) -> None:
@@ -319,4 +372,7 @@ class TerminalClient:
                 session_id=session_id, config_id=option.id, value=values[selected]
             )
             self.session.options = response.config_options
+            if self.is_option(option, "model") and isinstance(value := values[selected], str):
+                self.session.requested_model = value
+                self.confirm_requested_model()
             self.terminal.write(f"{option.name}: {labels[selected]}")

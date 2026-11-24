@@ -143,6 +143,97 @@ async def test_preserves_streamed_lines_across_interactive_turns(
             assert await client == 0
 
 
+async def test_composer_redraws_on_acp_updates_without_periodic_output() -> None:
+    transcript = io.StringIO()
+    output = Vt100_Output(transcript, lambda: Size(rows=24, columns=100), enable_cpr=False)
+    terminal = Terminal()
+    terminal.interactive = True
+    client = TerminalClient(terminal)
+    client.session.session_id = "demo"
+    client.start_turn("Wait")
+
+    with create_pipe_input() as pipe, create_app_session(input=pipe, output=output):
+        async with asyncio.timeout(5), asyncio.TaskGroup() as tasks:
+            editor = tasks.create_task(terminal.edit("❯ ", commands=None, toolbar=client.toolbar))
+            await wait_for_output(transcript, "Working")
+            baseline = transcript.getvalue()
+            await asyncio.sleep(0.35)
+            assert transcript.getvalue() == baseline
+            await client.session_update("demo", schema.UsageUpdate(session_update="usage_update", used=25, size=1000))
+            await wait_for_output(transcript, "Context 25/1,000")
+            pipe.send_text("queued\r")
+            assert await editor == "queued"
+
+
+async def test_export_includes_complete_acp_content_and_stays_with_the_session(
+    command: list[str], tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    terminal = ScriptedTerminal(
+        [
+            "Show tool activity",
+            "Demo prompt",
+            "Echo first\n  second",
+            "/export first session.txt",
+            "/export first session.txt",
+            "/new",
+            "Echo another session",
+            "/export second.txt",
+            "/resume",
+            "/export replay.txt",
+        ],
+        [0, 0],
+    )
+    monkeypatch.setattr(cli, "Terminal", lambda: terminal)
+    async with asyncio.timeout(10):
+        assert await cli.run_client([*command, "--replay-user"], tmp_path, []) == 0
+
+    first = (tmp_path / "first session.txt").read_text()
+    assert "You: Show tool activity" in first
+    assert "You: Echo first\n  second" in first
+    assert "SDK Demo: Echo first\n  second" in first
+    assert "Thinking: Check the files." in first
+    assert "\x1b" not in first and "[32m" not in first
+    assert "Tool read-0: Read file" in first
+    assert '"path": "demo.txt"' in first
+    assert "Routine output" in first and "Text returned to the model" in first
+    assert "Run tests (failed)" in first and "Test failed with details" in first
+    assert "--- demo.txt\n+++ demo.txt" in first
+    assert "\n-before\n" in first and "\n+after\n" in first
+    assert "Could not export transcript" in capsys.readouterr().out
+    second = (tmp_path / "second.txt").read_text()
+    assert "You: Echo another session" in second
+    assert "Read file" not in second
+    replay = (tmp_path / "replay.txt").read_text()
+    assert "You: Saved question" in replay
+    assert "SDK Demo: Session history replayed over ACP." in replay
+    assert "Echo another session" not in replay
+
+
+async def test_model_preference_for_fresh_sessions_survives_restart_and_resume(
+    command: list[str], tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    command = [*command, "--model-preference"]
+    history = SessionHistory(command, tmp_path)
+    terminal = ScriptedTerminal(["/pick-model", "/new", "Echo new"], [1])
+    monkeypatch.setattr(cli, "Terminal", lambda: terminal)
+    async with asyncio.timeout(10):
+        assert await cli.run_client(command, tmp_path, []) == 0
+        assert history.preferred_model() == "two"
+        assert any("Available models Model Two" in bar for bar in terminal.toolbars)
+
+        terminal = ScriptedTerminal(["/new", "/model one", "/new", "Echo next"], [])
+        assert await cli.run_client(command, tmp_path, [], session_id="remote-old") == 0
+        assert "Available models Model One" in terminal.toolbars[0]  # From the saved session.
+        assert "Available models Model Two" in terminal.toolbars[1]  # The preferred model survived the load.
+        assert "Available models Model One" in terminal.toolbars[-1]
+        assert history.preferred_model() == "one"
+
+        history.prefer_model("unavailable")
+        terminal = ScriptedTerminal(["Echo fallback"], [])
+        assert await cli.run_client(command, tmp_path, []) == 0
+        assert "Available models Model One" in terminal.toolbars[0]
+
+
 def test_slash_palette_uses_agent_plan_and_help_and_keeps_model_picker() -> None:
     client = TerminalClient(Terminal())
     client.session.commands = [
@@ -151,7 +242,7 @@ def test_slash_palette_uses_agent_plan_and_help_and_keeps_model_picker() -> None
     completer = SlashCompleter(lambda: command_catalog(client).values())
 
     names = {item.text for item in completer.get_completions(Document("/"), CompleteEvent())}
-    assert names == {"/model", "/pick-model", "/plan", "/new", "/help", "/config", "/quit"}
+    assert names == {"/model", "/pick-model", "/plan", "/new", "/export ", "/help", "/config", "/quit"}
     commands = command_catalog(client)
     assert commands["/plan"].local is None
     assert commands["/help"].local is None

@@ -1,4 +1,4 @@
-"""Client-local names and IDs for sessions that can be reopened over ACP."""
+"""Local session history and model preference for an ACP agent command."""
 
 import hashlib
 import json
@@ -41,6 +41,20 @@ class SessionHistory:
                 "CREATE TABLE IF NOT EXISTS sessions ("
                 "agent TEXT, cwd TEXT, session_id TEXT, title TEXT, updated_at TEXT, "
                 "PRIMARY KEY (agent, cwd, session_id))"
+            )
+            db.execute("CREATE TABLE IF NOT EXISTS model_preferences (agent TEXT PRIMARY KEY, model TEXT NOT NULL)")
+
+    def preferred_model(self) -> str | None:
+        with closing(sqlite3.connect(self.database)) as db:
+            row = db.execute("SELECT model FROM model_preferences WHERE agent = ?", (self.agent,)).fetchone()
+            return str(row[0]) if row is not None else None
+
+    def prefer_model(self, model: str) -> None:
+        with closing(sqlite3.connect(self.database)) as db, db:
+            db.execute(
+                "INSERT INTO model_preferences (agent, model) VALUES (?, ?) "
+                "ON CONFLICT (agent) DO UPDATE SET model = excluded.model",
+                (self.agent, model),
             )
 
     def recent(self) -> list[SessionEntry]:
