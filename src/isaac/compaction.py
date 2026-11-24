@@ -1,20 +1,23 @@
 """Prefer Core's inline compaction on supported endpoints and keep Harness as a fallback."""
 
+from __future__ import annotations
+
 import logging
 from dataclasses import replace
-from typing import TypeVar
+from typing import Never, TypeVar
 from urllib.parse import urlsplit
 
 from pydantic_ai import RunContext
-from pydantic_ai.capabilities import AbstractCapability, WrapModelRequestHandler
-from pydantic_ai.exceptions import ModelHTTPError
-from pydantic_ai.messages import CompactionPart, ModelResponse
+from pydantic_ai.capabilities import AbstractCapability, AgentNode, WrapModelRequestHandler
+from pydantic_ai.exceptions import ModelHTTPError, OutputTokenLimitExceeded, UsageLimitExceeded
+from pydantic_ai.messages import CompactionPart, ModelMessage, ModelRequest, ModelResponse, UserPromptPart
 from pydantic_ai.models import ModelRequestContext
 from pydantic_ai.models.anthropic import AnthropicCompaction, AnthropicModel
 from pydantic_ai.models.openai import OpenAICompaction, OpenAIResponsesModel
 from pydantic_ai.settings import ModelSettings, merge_model_settings
 from pydantic_ai_harness.compaction import (
     DEFAULT_CONTEXT_WINDOW,
+    ClearToolResults,
     SlidingWindowCompaction,
     SummarizingCompaction,
     TieredCompaction,
@@ -27,14 +30,34 @@ _TARGET_FRACTION = 0.85
 DepsT = TypeVar("DepsT")
 
 
+class _KeepCurrentPrompt(SlidingWindowCompaction[DepsT]):
+    """Retain the current task when the sliding window drops its original request."""
+
+    async def compact(self, messages: list[ModelMessage], ctx: RunContext[DepsT]) -> list[ModelMessage]:
+        kept = await super().compact(messages, ctx)
+        for index in range(len(messages) - 1, -1, -1):
+            message = messages[index]
+            if isinstance(message, ModelRequest) and (
+                prompts := [p for p in message.parts if isinstance(p, UserPromptPart)]
+            ):
+                if message in kept:
+                    break
+                # Keep the latest task ahead of any surviving tool calls/results.
+                tail = {id(item) for item in messages[index + 1 :]}
+                insert_at = next((i for i, item in enumerate(kept) if id(item) in tail), len(kept))
+                return [*kept[:insert_at], replace(message, parts=list(prompts)), *kept[insert_at:]]
+        return kept
+
+
 class AutomaticCompaction(AbstractCapability[DepsT]):
     def __init__(self, context_window: int | None = None) -> None:
         self.context_window = context_window
-        self.harness = TieredCompaction[DepsT](
-            tiers=[SummarizingCompaction(), SlidingWindowCompaction(keep_messages=20)],
-            target_fraction=_TARGET_FRACTION,
-            context_window=context_window,
-        )
+
+    async def on_node_run_error(self, ctx: RunContext[DepsT], *, node: AgentNode[DepsT], error: Exception) -> Never:
+        if isinstance(error, OutputTokenLimitExceeded):
+            # Harness commits completed work and sends ACP max_tokens for this usage limit.
+            raise UsageLimitExceeded("output_tokens_limit reached before the model finished its response") from error
+        raise error
 
     async def wrap_model_request(
         self,
@@ -45,7 +68,8 @@ class AutomaticCompaction(AbstractCapability[DepsT]):
     ) -> ModelResponse:
         model = request_context.model
         window = self.context_window or resolve_context_window(model) or DEFAULT_CONTEXT_WINDOW
-        native = _native_settings(ctx, request_context, int(window * _TARGET_FRACTION))
+        target = max(1, int(window * _TARGET_FRACTION))
+        native = _native_settings(ctx, request_context, target)
         # Give inline compaction room to run first. Use Harness for sudden jumps near the hard limit.
         if (
             native
@@ -65,7 +89,17 @@ class AutomaticCompaction(AbstractCapability[DepsT]):
                 if error.status_code not in (400, 422) or "context_management" not in str(error.body).lower():
                     raise
                 logger.debug("Inline compaction request rejected by %s. Using Harness.", model.model_id)
-        return await handler(await self.harness.before_model_request(ctx, request_context))
+        # A handful of long tool results or reasoning messages can fill a small context.
+        harness = TieredCompaction[DepsT](
+            tiers=[
+                ClearToolResults(keep_pairs=2),
+                SummarizingCompaction(keep_tokens=max(1, window // 4), keep_messages=1, keep_user_messages=True),
+                _KeepCurrentPrompt(keep_tokens=max(1, window // 8)),
+                _KeepCurrentPrompt(keep_messages=1),
+            ],
+            target_tokens=target,
+        )
+        return await handler(await harness.before_model_request(ctx, request_context))
 
 
 def _native_settings(ctx: RunContext[DepsT], request: ModelRequestContext, threshold: int) -> ModelSettings | None:

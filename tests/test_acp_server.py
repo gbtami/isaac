@@ -60,6 +60,40 @@ class RecordingClient:
         )
 
 
+async def test_exhausted_output_budget_commits_tool_work_and_returns_a_normal_stop(tmp_path: Path) -> None:
+    client = RecordingClient()
+    fixture = Path(__file__).with_name("acp_fixture.py")
+    async with (
+        asyncio.timeout(30),
+        acp.spawn_agent_process(
+            cast(Client, client),
+            sys.executable,
+            str(fixture),
+            "--exhaust-output",
+            "--full-permissions",
+            "--no-code-mode",
+        ) as (connection, process),
+    ):
+        await connection.initialize(protocol_version=acp.PROTOCOL_VERSION)
+        new = await connection.new_session(cwd=str(tmp_path), mcp_servers=[])
+        prompt = json.dumps(
+            {"tool": "write_file", "args": {"path": "record.txt", "content": "Completed successfully."}}
+        )
+        response = await connection.prompt(session_id=new.session_id, prompt=[acp.text_block(prompt)])
+        assert response.stop_reason == "max_tokens"
+        assert (tmp_path / "record.txt").read_text() == "Completed successfully."
+
+        client.updates.clear()
+        await connection.load_session(cwd=str(tmp_path), session_id=new.session_id, mcp_servers=[])
+        await client.wait_for_update(
+            new.session_id, lambda update: isinstance(update, schema.ToolCallProgress) and update.status == "completed"
+        )
+        resumed = await connection.prompt(session_id=new.session_id, prompt=[acp.text_block("/model")])
+        assert resumed.stop_reason == "end_turn"
+    assert process.stderr is not None
+    assert b"Unhandled error" not in await process.stderr.read()
+
+
 async def test_cli_initialization_and_model_selection(tmp_path: Path) -> None:
     """The installed entrypoint starts without provider credentials or a prompt."""
     client = RecordingClient()

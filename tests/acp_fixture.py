@@ -10,7 +10,7 @@ from pathlib import Path
 from uuid import uuid4
 
 import acp
-from pydantic_ai.exceptions import ModelHTTPError
+from pydantic_ai.exceptions import ModelHTTPError, OutputTokenLimitExceeded
 from pydantic_ai.messages import (
     CompactionPart,
     ModelMessage,
@@ -40,6 +40,10 @@ async def stream(
     if isinstance(messages[-1], ModelRequest):
         for part in reversed(messages[-1].parts):
             if isinstance(part, ToolReturnPart):
+                if part.tool_name == "write_file" and "--exhaust-output" in sys.argv:
+                    raise OutputTokenLimitExceeded(
+                        "The model exhausted its output budget replying after the tool call."
+                    )
                 if part.tool_name in {"read_file", "run_code"} and "checkpoint evidence" in str(part.content):
                     tool = "run_code" if part.tool_name == "run_code" else "checkpoint_probe"
                     args = {"code": "await checkpoint_probe()"} if tool == "run_code" else {}

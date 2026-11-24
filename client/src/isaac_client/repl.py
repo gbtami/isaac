@@ -89,6 +89,10 @@ async def interactive_loop(
                 try:
                     path = cwd / Path(arguments[0].strip()).expanduser()
                     client.session.transcript.export(path)
+                except FileExistsError:
+                    terminal.write(
+                        f"Could not export transcript. {path} already exists. Choose another path.", style="yellow"
+                    )
                 except (OSError, RuntimeError, ValueError) as exc:
                     terminal.write(f"Could not export transcript: {exc}", style="red")
                 else:
@@ -143,7 +147,10 @@ async def send_turn(
             client.confirm_requested_model()
         else:
             client.finish_message()
-            client.terminal.write(f"Stopped: {response.stop_reason}", style="yellow")
+            if response.stop_reason == "max_tokens":
+                client.terminal.write("Stopped at the model's token limit.", style="yellow")
+            else:
+                client.terminal.write(f"Stopped: {response.stop_reason}", style="yellow")
     except asyncio.CancelledError:
         client.cancel_interactions()
         with suppress(acp.RequestError, OSError, TimeoutError):

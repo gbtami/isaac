@@ -188,6 +188,11 @@ class DemoAgent:
             return schema.PromptResponse(stop_reason="end_turn")
         if isinstance(first, schema.TextContentBlock) and first.text == "Fail the turn":
             raise acp.RequestError.internal_error({"details": "Set the provider credentials and try again."})
+        if isinstance(first, schema.TextContentBlock) and first.text == "Warn and stop":
+            await self.client.session_update(session_id, acp.update_agent_message(acp.text_block("Partial answer.")))
+            print("Warning from the agent", file=sys.stderr, flush=True)
+            await self.cancelled.wait()
+            return schema.PromptResponse(stop_reason="max_tokens")
         if isinstance(first, schema.TextContentBlock) and first.text == "Ask a form question":
             answer = await self.client.create_elicitation(
                 "Which runtime should the example use?",

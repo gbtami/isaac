@@ -1,6 +1,7 @@
 """Rich output and prompt-toolkit menus for the terminal client."""
 
 import asyncio
+import codecs
 import difflib
 import sys
 from collections.abc import AsyncIterator, Callable, Iterable
@@ -176,6 +177,25 @@ class Terminal:
     async def flush(self) -> None:
         if self._output_task is not None:
             await asyncio.shield(self._output_task)
+
+    async def relay_diagnostics(self, stream: asyncio.StreamReader) -> None:
+        """Print subprocess stderr above the prompt, including a final partial line."""
+        chunk_size = 8192
+        decoder = codecs.getincrementaldecoder("utf-8")(errors="replace")
+        pending = ""
+        while True:
+            data = await stream.read(chunk_size)
+            pending += decoder.decode(data, final=not data)
+            if not data or ("\n" not in pending and len(pending) >= chunk_size):
+                complete, pending = pending, ""
+            else:
+                complete, _, pending = pending.rpartition("\n")
+            if complete:
+                await self.flush()
+                async with in_terminal():
+                    print(visible(complete), file=sys.stderr, flush=True)
+            if not data:
+                return
 
     async def read(
         self,

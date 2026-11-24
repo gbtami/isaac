@@ -5,7 +5,7 @@ import asyncio
 import os
 import sqlite3
 import sys
-from contextlib import AsyncExitStack
+from contextlib import AsyncExitStack, suppress
 from functools import partial
 from importlib.metadata import version
 from pathlib import Path
@@ -42,17 +42,29 @@ async def run_client(
             stack.enter_context(create_app_session())
             stack.push_async_callback(terminal.flush)
             stack.callback(client.finish_output)
+        # Keep draining stderr until the subprocess has shut down.
+        relay_stderr = terminal.interactive and sys.stderr.isatty()
+        diagnostics: asyncio.Task[None] | None = None
+
+        async def finish_diagnostics() -> None:
+            if diagnostics is not None:
+                with suppress(TimeoutError):
+                    await asyncio.wait_for(diagnostics, timeout=2)
+
+        stack.push_async_callback(finish_diagnostics)
         # The SDK routes unadvertised client operations independently of the required callbacks.
-        connection, _process = await stack.enter_async_context(
+        connection, process = await stack.enter_async_context(
             acp.spawn_agent_process(
                 cast(acp.Client, client),
                 *command,
                 env=os.environ,
-                transport_kwargs={"stderr": None},
+                transport_kwargs={"stderr": asyncio.subprocess.PIPE if relay_stderr else None},
                 use_unstable_protocol=True,
                 observers=[client.observe_proposal] if terminal.interactive else [],
             )
         )
+        if process.stderr is not None:
+            diagnostics = asyncio.create_task(terminal.relay_diagnostics(process.stderr))
         init = await connection.initialize(
             protocol_version=acp.PROTOCOL_VERSION,
             client_capabilities=schema.ClientCapabilities(

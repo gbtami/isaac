@@ -179,6 +179,38 @@ async def test_busy_composer_signals_activity_without_periodic_output() -> None:
             assert await idle == "idle"
 
 
+async def test_agent_stderr_prints_above_busy_prompt(
+    command: list[str], tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    class TerminalCapture(io.StringIO):
+        def isatty(self) -> bool:
+            return True
+
+    transcript = TerminalCapture()
+    output = Vt100_Output(transcript, lambda: Size(rows=24, columns=100), enable_cpr=False)
+    terminal = Terminal()
+    terminal.interactive = True
+    terminal.console = Console(file=transcript, color_system=None)
+    monkeypatch.setattr(sys, "stderr", transcript)
+    monkeypatch.setattr(cli, "Terminal", lambda: terminal)
+
+    with create_pipe_input() as pipe, create_app_session(input=pipe, output=output):
+        async with asyncio.timeout(10), asyncio.TaskGroup() as tasks:
+            running = tasks.create_task(cli.run_client(command, tmp_path, []))
+            await wait_for_output(transcript, "❯")
+            pipe.send_text("Warn and stop\r")
+            await wait_for_output(transcript, "Working…")
+            await wait_for_output(transcript, "Warning from the agent\n")
+            before, _, after = transcript.getvalue().partition("Warning from the agent\n")
+            assert "\x1b[J" in before.rsplit("Working…", 1)[-1]
+            assert "Working…" in after
+            pipe.send_text("\x03")
+            await wait_for_output(transcript, "Stopped at the model's token limit.")
+            assert "SDK Demo: Partial answer.\n" in transcript.getvalue()
+            pipe.send_text("/quit\r")
+            assert await running == 0
+
+
 async def test_export_includes_complete_acp_content_and_stays_with_the_session(
     command: list[str], tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
@@ -213,7 +245,7 @@ async def test_export_includes_complete_acp_content_and_stays_with_the_session(
     assert "Run tests (failed)" in first and "Test failed with details" in first
     assert "--- demo.txt\n+++ demo.txt" in first
     assert "\n-before\n" in first and "\n+after\n" in first
-    assert "Could not export transcript" in capsys.readouterr().out
+    assert f"{tmp_path / 'first session.txt'} already exists. Choose another path." in capsys.readouterr().out
     second = (tmp_path / "second.txt").read_text()
     assert "You: Echo another session" in second
     assert "Read file" not in second
