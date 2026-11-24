@@ -171,7 +171,7 @@ async def collect_followups(
 
     while True:
         try:
-            line = await client.terminal.edit("❯ ", commands=commands, toolbar=toolbar)
+            line = await client.terminal.edit("❯ ", commands=commands, toolbar=toolbar, busy=True)
         except EOFError:
             return
         except InputInterrupted:

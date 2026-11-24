@@ -73,16 +73,13 @@ class TerminalClient:
         fields = []
         if self._turn_active:
             if self._permission_menus:
-                status = "Waiting for approval"
+                fields.append("Waiting for approval")
             elif self._question_menus:
-                status = "Waiting for answers"
+                fields.append("Waiting for answers")
             elif self.cancelling:
-                status = "Cancelling"
+                fields.append("Cancelling")
             elif self._tools:
-                status = next(reversed(self._tools.values()))[0]
-            else:
-                status = "Working"
-            fields.append(status)
+                fields.append(next(reversed(self._tools.values()))[0])
         session = self.session
         if session.plan:
             completed = sum(item.status == "completed" for item in session.plan)

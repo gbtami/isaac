@@ -47,8 +47,9 @@ class ScriptedTerminal(Terminal):
         toolbar: Callable[[], str] | None = None,
         default: str | Document = "",
         multiline: bool = False,
+        busy: bool = False,
     ) -> str:
-        if toolbar and "Enter queues" in toolbar():
+        if busy:
             return await asyncio.Future[str]()
         if toolbar:
             self.toolbars.append(toolbar())
@@ -132,7 +133,9 @@ async def test_preserves_streamed_lines_across_interactive_turns(
         async with asyncio.timeout(15), asyncio.TaskGroup() as tasks:
             client = tasks.create_task(cli.run_client(command, tmp_path, []))
             await wait_for_output(transcript, "❯")
+            assert "Working…" not in transcript.getvalue()
             pipe.send_text("Wait then end\n")
+            await wait_for_output(transcript, "Working…")
             await wait_for_output(transcript, "SDK Demo: Turn started")
             prefix = "\x1b[1mSDK Demo: \x1b[0m"
             await wait_for_output(transcript, f"{prefix}Turn startedTurn finished\n")
@@ -143,7 +146,7 @@ async def test_preserves_streamed_lines_across_interactive_turns(
             assert await client == 0
 
 
-async def test_composer_redraws_on_acp_updates_without_periodic_output() -> None:
+async def test_busy_composer_signals_activity_without_periodic_output() -> None:
     transcript = io.StringIO()
     output = Vt100_Output(transcript, lambda: Size(rows=24, columns=100), enable_cpr=False)
     terminal = Terminal()
@@ -154,15 +157,26 @@ async def test_composer_redraws_on_acp_updates_without_periodic_output() -> None
 
     with create_pipe_input() as pipe, create_app_session(input=pipe, output=output):
         async with asyncio.timeout(5), asyncio.TaskGroup() as tasks:
-            editor = tasks.create_task(terminal.edit("❯ ", commands=None, toolbar=client.toolbar))
-            await wait_for_output(transcript, "Working")
+            editor = tasks.create_task(terminal.edit("❯ ", commands=None, toolbar=client.toolbar, busy=True))
+            await wait_for_output(transcript, "\x1b[5 q")
             baseline = transcript.getvalue()
+            assert "Working…" in baseline
             await asyncio.sleep(0.35)
             assert transcript.getvalue() == baseline
             await client.session_update("demo", schema.UsageUpdate(session_update="usage_update", used=25, size=1000))
             await wait_for_output(transcript, "Context 25/1,000")
             pipe.send_text("queued\r")
             assert await editor == "queued"
+            assert "\x1b[0 q" in transcript.getvalue()[len(baseline) :]
+
+            transcript.seek(0)
+            transcript.truncate()
+            idle = tasks.create_task(terminal.edit("❯ ", commands=None, toolbar=client.toolbar))
+            await wait_for_output(transcript, "❯")
+            assert "Working…" not in transcript.getvalue()
+            assert "\x1b[5 q" not in transcript.getvalue()
+            pipe.send_text("idle\r")
+            assert await idle == "idle"
 
 
 async def test_export_includes_complete_acp_content_and_stays_with_the_session(
@@ -540,15 +554,18 @@ async def test_can_queue_or_cancel_a_busy_turn(
             toolbar: Callable[[], str] | None = None,
             default: str | Document = "",
             multiline: bool = False,
+            busy: bool = False,
         ) -> str:
             nonlocal seen_input
-            if toolbar and "Enter queues" in toolbar() and not seen_input:
+            if busy and not seen_input:
                 await started.wait()
                 seen_input = True
                 if cancel:
                     raise KeyboardInterrupt
                 return "Echo queued follow-up"
-            return await super().read(label, commands=commands, toolbar=toolbar, default=default, multiline=multiline)
+            return await super().read(
+                label, commands=commands, toolbar=toolbar, default=default, multiline=multiline, busy=busy
+            )
 
     prompts = ["Wait for cancel", "Echo after cancellation"] if cancel else ["Wait then end"]
     terminal = BusyTerminal(prompts, [])

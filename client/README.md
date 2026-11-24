@@ -56,8 +56,9 @@ above without `--model`.
   `/cancel-plan` to leave Plan mode, or `/checklist` to see implementation progress.
 - `/help` shows available commands. When an agent has no `/plan` command, the client provides one
   to show the latest plan sent over ACP.
-- `/quit` exits. Ctrl+D also exits from an empty idle prompt. While the agent is working, Enter
-  queues a follow-up and Ctrl+C requests cancellation and clears the queue.
+- `/quit` exits. Ctrl+D also exits from an empty idle prompt. During an agent turn, the prompt shows
+  **Working…** and terminals that support cursor styling show a blinking cursor. Enter queues a
+  follow-up and Ctrl+C requests cancellation and clears the queue.
 
 Use ↑/↓ and Enter in pickers, or type a choice number. Press Esc to close a picker. Model, setting,
 and session pickers filter as you type.

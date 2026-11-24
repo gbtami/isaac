@@ -11,9 +11,11 @@ from acp import schema
 from prompt_toolkit import PromptSession
 from prompt_toolkit.application import get_app, get_app_or_none, in_terminal
 from prompt_toolkit.completion import CompleteEvent, Completer, Completion, DummyCompleter
+from prompt_toolkit.cursor_shapes import CursorShape, SimpleCursorShapeConfig
 from prompt_toolkit.document import Document
 from prompt_toolkit.enums import DEFAULT_BUFFER
 from prompt_toolkit.filters import Condition, has_completions, has_focus, is_multiline
+from prompt_toolkit.formatted_text import FormattedText
 from prompt_toolkit.key_binding import KeyBindings, KeyPressEvent
 from rich.console import Console, RenderableType
 from rich.syntax import Syntax
@@ -183,6 +185,7 @@ class Terminal:
         toolbar: Callable[[], str] | None = None,
         default: str | Document = "",
         multiline: bool = False,
+        busy: bool = False,
     ) -> str:
         if not self.interactive:
             line: str = await asyncio.to_thread(sys.stdin.readline)
@@ -198,21 +201,26 @@ class Terminal:
         else:
             prompt = PromptSession()
         completer = SlashCompleter(commands) if commands else DummyCompleter()
+        indicator = "Working… " if busy else ""
 
-        def message() -> str:
+        def message() -> FormattedText:
             app = get_app()
+            parts = FormattedText()
             if self._line and not app.is_done:
                 preview = self._line.plain.expandtabs(self.console.tab_size)
                 limit = 2 * app.output.get_size().columns
                 if len(preview) > limit:
                     preview = "…" + preview[1 - limit :]
-                return f"{preview}\n{label}"
-            return label
+                parts.append(("", f"{preview}\n"))
+            if indicator and not app.is_done:
+                parts.append(("ansicyan bold", indicator))
+            parts.append(("", label))
+            return parts
 
         def status_fallback() -> str:
             app = get_app()
             if toolbar and not app.renderer.height_is_known:
-                width = max(0, app.output.get_size().columns - len(label) - 4)
+                width = max(0, app.output.get_size().columns - len(indicator) - len(label) - 4)
                 return toolbar()[:width]
             return ""
 
@@ -228,16 +236,21 @@ class Terminal:
             multiline=multiline,
             bottom_toolbar=toolbar or "",
             rprompt=status_fallback,
+            cursor=SimpleCursorShapeConfig(CursorShape.BLINKING_BEAM) if busy else SimpleCursorShapeConfig(),
             default=default,
         )
 
-    async def edit(self, label: str, *, commands: CommandSource | None, toolbar: Callable[[], str]) -> str:
+    async def edit(
+        self, label: str, *, commands: CommandSource | None, toolbar: Callable[[], str], busy: bool = False
+    ) -> str:
         if not self.interactive:
             return await self.read(label, commands=commands, toolbar=toolbar)
 
         async def read_draft() -> str:
             try:
-                return await self.read(label, commands=commands, toolbar=toolbar, default=self._draft, multiline=True)
+                return await self.read(
+                    label, commands=commands, toolbar=toolbar, default=self._draft, multiline=True, busy=busy
+                )
             except KeyboardInterrupt as exc:
                 raise InputInterrupted from exc
 
