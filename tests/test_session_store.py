@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 from acp import RequestError, schema
-from pydantic import ValidationError
+from pydantic import TypeAdapter, ValidationError
 from pydantic_ai.messages import BinaryImage, ModelRequest, ModelResponse, TextPart, UserPromptPart
 from pydantic_ai_harness.experimental.acp import StoredSession
 from pydantic_ai_harness.step_persistence import ContinuableSnapshot, RunRecord
@@ -48,6 +48,37 @@ async def test_typed_snapshot_survives_reopening_and_update(tmp_path: Path) -> N
     assert await store.load("second") == StoredSession(model="anthropic:example")
     if os.name == "posix":
         assert database.stat().st_mode & 0o777 == 0o600
+
+
+async def test_migrate_legacy_sessions_without_revision(tmp_path: Path) -> None:
+    database = tmp_path / "sessions.sqlite3"
+    snapshot = StoredSession(model="openai:legacy")
+    payload = TypeAdapter(StoredSession).dump_json(snapshot)
+    with closing(sqlite3.connect(database)) as connection, connection:
+        connection.execute("CREATE TABLE sessions (id TEXT PRIMARY KEY, snapshot BLOB NOT NULL)")
+        connection.execute("INSERT INTO sessions VALUES (?, ?)", ("legacy", payload))
+        connection.execute("CREATE TABLE session_titles (id TEXT PRIMARY KEY, title TEXT NOT NULL)")
+        connection.execute("INSERT INTO session_titles VALUES (?, ?)", ("legacy", "Saved title"))
+
+    store = SqliteSessionStore(database)
+    assert await store.read_snapshot("unknown") is None
+    assert await store.load("legacy") == snapshot
+    assert await store.get_title("legacy") == "Saved title"
+    with closing(sqlite3.connect(database)) as connection:
+        assert connection.execute("SELECT snapshot, revision FROM sessions").fetchone() == (payload, 0)
+
+    stale = SqliteSessionStore(database)
+    assert await stale.load("legacy") == snapshot
+    updated = StoredSession(model="openai:updated")
+    await store.save("legacy", updated)
+    with pytest.raises(RuntimeError, match="Another Isaac process updated this session"):
+        await stale.save("legacy", snapshot)
+
+    reopened = SqliteSessionStore(database)
+    assert await reopened.load("legacy") == updated
+    assert await reopened.get_title("legacy") == "Saved title"
+    with closing(sqlite3.connect(database)) as connection:
+        assert connection.execute("SELECT revision FROM sessions").fetchone() == (1,)
 
 
 async def test_corrupt_snapshot_is_reported_without_overwriting_it(tmp_path: Path) -> None:

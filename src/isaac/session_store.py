@@ -58,14 +58,17 @@ class SqliteSessionStore:
         database.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
         database.touch(mode=0o600, exist_ok=True)
         database.chmod(0o600)
-        with closing(sqlite3.connect(database)) as connection:
+        with closing(sqlite3.connect(database)) as connection, connection:
+            connection.execute("BEGIN IMMEDIATE")
             connection.execute(
                 "CREATE TABLE IF NOT EXISTS sessions ("
                 "id TEXT PRIMARY KEY, snapshot BLOB NOT NULL, revision INTEGER NOT NULL)"
             )
+            columns = {row[1] for row in connection.execute("PRAGMA table_info(sessions)")}
+            if "revision" not in columns:
+                connection.execute("ALTER TABLE sessions ADD COLUMN revision INTEGER NOT NULL DEFAULT 0")
             connection.execute("CREATE TABLE IF NOT EXISTS session_titles (id TEXT PRIMARY KEY, title TEXT NOT NULL)")
             connection.execute("CREATE TABLE IF NOT EXISTS planning_sessions (id TEXT PRIMARY KEY)")
-            connection.commit()
         self.steps = SqliteStepStore(database=database, max_snapshots_per_run=2)
 
     def _open_for_save(self, session_id: str) -> _OpenedSession:
